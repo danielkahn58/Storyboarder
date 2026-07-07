@@ -2803,17 +2803,26 @@ function compCharDetailHTML() {
   const det = (shot?.characterDetails || {})[char.id] || {};
   const expr = det.expression || '';
 
+  // Large preview: show AI variant if exists, else the selected angle image
+  const previewImg = getCompCharImage(char, _selectedCompAngle, expr);
+
   const angleThumbs = ALL_ANGLES.map(a => {
-    const img = getCompCharImage(char, a, '');
+    // Show the actual angle-specific image; do NOT fall back to front so users see what's generated
+    const img = a === 'Front' ? (char.images?.[0] || null) : (char.angles?.[a]?.image || null);
     const sel = _selectedCompAngle === a;
-    return `<div class="comp-angle-thumb${sel ? ' selected' : ''}" onclick="selectComposeAngle('${esc(a)}')" title="${esc(a)}">
+    return `<div class="comp-angle-thumb${sel ? ' selected' : ''}${img ? '' : ' comp-angle-thumb-missing'}" onclick="selectComposeAngle('${esc(a)}')" title="${esc(a)}">
       ${img ? `<img src="${esc(img)}" alt="${esc(a)}">` : `<div class="comp-angle-thumb-empty">·</div>`}
       <div class="comp-angle-label">${esc(a.replace('3/4 ','¾ '))}</div>
     </div>`;
   }).join('');
 
   return `<div class="comp-char-detail" id="comp-char-detail">
-    <div class="comp-char-detail-name">${esc(char.name || 'Unnamed')}</div>
+    <div class="comp-char-preview-large">
+      ${previewImg
+        ? `<img src="${esc(previewImg)}" alt="${esc(char.name)}" id="comp-detail-preview-img">`
+        : `<div class="comp-char-preview-large-empty" id="comp-detail-preview-img">No image generated</div>`}
+      <div class="comp-char-preview-label-overlay">${esc(char.name || 'Unnamed')} · ${esc(_selectedCompAngle)}</div>
+    </div>
     <div class="comp-char-angle-grid">${angleThumbs}</div>
     <textarea id="comp-alter-prompt" class="compose-tool-textarea" placeholder="Alter image… (e.g. smiling, looking left)">${esc(expr)}</textarea>
     <div class="comp-char-actions">
