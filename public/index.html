@@ -306,16 +306,31 @@
   .btn-save-compose:hover:not(:disabled) { background: #1c3526; }
   .btn-remove-layer { background: transparent; color: #555; border: 1px solid #222; font-size: 11px; padding: 5px 10px; }
   .btn-remove-layer:hover { color: #f87171; border-color: #4a1a1a; }
-  .comp-char-card { border: 1px solid #1e1e1e; border-radius: 6px; margin-bottom: 8px; overflow: hidden; background: #111; }
-  .comp-char-card.on-stage { border-color: #4ade80; }
-  .comp-char-header { display: flex; align-items: center; gap: 6px; padding: 7px 8px 5px; }
-  .comp-char-name { font-size: 11px; color: #bbb; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .comp-char-controls { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 6px; }
-  .comp-char-controls select, .comp-char-controls input[type="text"] { width: 100%; font-size: 10px; background: #161616; color: #aaa; border: 1px solid #222; border-radius: 3px; padding: 3px 5px; }
-  .comp-char-preview { width: 100%; height: 100px; background: #0a0a0a; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; cursor: grab; user-select: none; }
-  .comp-char-preview img { max-height: 100%; max-width: 100%; object-fit: contain; pointer-events: none; }
-  .comp-char-preview .placeholder { color: #2a2a2a; font-size: 20px; }
-  .comp-char-preview-label { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.55); color: #888; font-size: 9px; text-align: center; padding: 2px 0; pointer-events: none; }
+  /* Compose character grid */
+  .comp-char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .comp-char-tile { border: 1px solid #1e1e1e; border-radius: 6px; overflow: hidden; background: #111; cursor: pointer; transition: border-color 0.15s; }
+  .comp-char-tile:hover { border-color: #555; }
+  .comp-char-tile.selected { border-color: #818cf8; background: #13131f; }
+  .comp-char-tile.on-stage { border-color: #4ade80; }
+  .comp-char-tile.selected.on-stage { border-color: #818cf8; }
+  .comp-char-tile-img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; background: #0a0a0a; }
+  .comp-char-tile-img-empty { width: 100%; aspect-ratio: 3/4; background: #0a0a0a; display: flex; align-items: center; justify-content: center; color: #2a2a2a; font-size: 20px; }
+  .comp-char-tile-name { font-size: 10px; color: #888; text-align: center; padding: 3px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Expanded detail panel (shown below grid when char selected) */
+  .comp-char-detail { background: #0e0e0e; border: 1px solid #252525; border-radius: 6px; padding: 9px 10px; margin-top: 2px; }
+  .comp-char-detail-name { font-size: 12px; font-weight: 600; color: #ccc; margin-bottom: 7px; }
+  .comp-char-angle-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .comp-angle-thumb { width: 44px; border: 1px solid #252525; border-radius: 4px; overflow: hidden; cursor: pointer; transition: border-color 0.12s; background: #111; flex-shrink: 0; }
+  .comp-angle-thumb:hover { border-color: #555; }
+  .comp-angle-thumb.selected { border-color: #818cf8; }
+  .comp-angle-thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+  .comp-angle-thumb-empty { width: 100%; aspect-ratio: 1; background: #0a0a0a; display: flex; align-items: center; justify-content: center; color: #2a2a2a; font-size: 10px; }
+  .comp-angle-label { font-size: 8px; color: #555; text-align: center; padding: 2px; line-height: 1.1; }
+  .comp-char-actions { display: flex; gap: 5px; margin-top: 7px; }
+  .comp-char-actions .btn-comp-add { flex: 1; }
+  .comp-char-actions .btn-comp-gen { flex-shrink: 0; }
+  .compose-char-detail-wrap { flex-shrink: 0; border-bottom: 1px solid #1e1e1e; overflow-y: auto; max-height: 55%; }
+  .comp-char-detail { background: #0e0e0e; padding: 10px 12px; }
   .comp-saved-exprs { width: 100%; font-size: 10px; background: #0e0e1e; color: #818cf8; border: 1px solid #2e2e50; border-radius: 3px; padding: 3px 5px; }
   .comp-char-footer { display: flex; gap: 4px; padding: 5px 8px 7px; }
   .comp-char-footer button { flex: 1; font-size: 10px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
@@ -598,6 +613,8 @@
           <div class="compose-section-title">Characters</div>
           <div id="compose-char-cards"></div>
         </div>
+        <!-- Character detail panel: shown when a tile is selected -->
+        <div id="compose-char-detail-wrap" class="compose-char-detail-wrap"></div>
 
         <!-- Tab bar -->
         <div class="compose-tab-bar">

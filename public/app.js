@@ -2766,88 +2766,93 @@ function compCharExistingExprs(char, angle) {
   return Object.keys(cache);
 }
 
+let _selectedCompCharId = null;
+let _selectedCompAngle = 'Front';
+
 function renderComposeCharCards() {
   if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
   const container = document.getElementById('compose-char-cards');
+  const detailWrap = document.getElementById('compose-char-detail-wrap');
   if (!container) return;
-  const charHTML = characters.length
-    ? `<div class="compose-thumb-group-label">Characters</div>` + characters.map(c => compCharCardHTML(c, shot)).join('')
-    : '';
-  const shotImgs = shot?.images || [];
-  const shotImgHTML = shotImgs.length
-    ? `<div class="compose-thumb-group-label" style="margin-top:10px">AI Generated Images</div>` +
-      shotImgs.map((url, idx) => compShotImgCardHTML(url, idx)).join('')
-    : '';
-  container.innerHTML = charHTML + shotImgHTML;
+  if (!characters.length) { container.innerHTML = '<p style="font-size:11px;color:#444;font-style:italic">No characters yet.</p>'; if (detailWrap) detailWrap.innerHTML = ''; return; }
+  container.innerHTML = compCharGridHTML();
+  if (detailWrap) detailWrap.innerHTML = compCharDetailHTML();
 }
 
-function compCharCardHTML(char, shot) {
-  const det = (shot?.characterDetails || {})[char.id] || {};
-  const angle = det.facingDir || 'Front';
-  const expr = det.expression || '';
-  const onStage = _compose?.layers.some(l => l.charId === char.id);
-  const imgUrl = getCompCharImage(char, angle, expr);
-  const existingExprs = compCharExistingExprs(char, angle);
-  const angleOpts = ALL_ANGLES.map(a => `<option${a === angle ? ' selected' : ''}>${esc(a)}</option>`).join('');
+function compCharGridHTML() {
+  const tiles = characters.map(c => {
+    const frontImg = getCompCharImage(c, 'Front', '');
+    const onStage = _compose?.layers.some(l => l.charId === c.id);
+    const selected = _selectedCompCharId === c.id;
+    return `<div class="comp-char-tile${selected ? ' selected' : ''}${onStage ? ' on-stage' : ''}"
+        id="comp-tile-${esc(c.id)}" onclick="selectComposeChar('${esc(c.id)}')">
+      ${frontImg
+        ? `<img class="comp-char-tile-img" src="${esc(frontImg)}" alt="${esc(c.name)}">`
+        : `<div class="comp-char-tile-img-empty">·</div>`}
+      <div class="comp-char-tile-name">${esc(c.name || 'Unnamed')}</div>
+    </div>`;
+  }).join('');
+  return `<div class="comp-char-grid">${tiles}</div>`;
+}
 
-  return `<div class="comp-char-card${onStage ? ' on-stage' : ''}" id="comp-card-${esc(char.id)}">
-    <div class="comp-char-header">
-      <span class="comp-char-name">${esc(char.name || 'Unnamed')}</span>
-    </div>
-    <div class="comp-char-controls">
-      <select onchange="onCompAngleChange('${esc(char.id)}',this.value)">${angleOpts}</select>
-      <input type="text" placeholder="New expression…"
-        value="${esc(expr)}" onchange="onCompExprChange('${esc(char.id)}',this.value)"
-        onblur="onCompExprChange('${esc(char.id)}',this.value)">
-      ${existingExprs.length ? `<select class="comp-saved-exprs" onchange="onCompSavedExprSelect('${esc(char.id)}',this.value)">
-        <option value="">— Saved versions —</option>
-        ${existingExprs.map(e => `<option value="${esc(e)}"${e === (expr||'').toLowerCase() ? ' selected' : ''}>${esc(e)}</option>`).join('')}
-      </select>` : ''}
-    </div>
-    <div class="comp-char-preview" id="comp-preview-${esc(char.id)}"
-      draggable="true"
-      ondragstart="onCompCharDragStart(event,'${esc(char.id)}')"
-      ondragend="onCompCharDragEnd(event)">
-      ${imgUrl
-        ? `<img src="${esc(imgUrl)}" alt="${esc(char.name)}">`
-        : `<span class="placeholder">·</span>`}
-      <span class="comp-char-preview-label">Drag to canvas</span>
-    </div>
-    <div class="comp-char-footer">
+function compCharDetailHTML() {
+  if (!_selectedCompCharId) return '';
+  const char = characters.find(c => c.id === _selectedCompCharId);
+  if (!char) return '';
+  const shot = shots.find(s => s.id === _compose?.shotId);
+  const det = (shot?.characterDetails || {})[char.id] || {};
+  const expr = det.expression || '';
+
+  const angleThumbs = ALL_ANGLES.map(a => {
+    const img = getCompCharImage(char, a, '');
+    const sel = _selectedCompAngle === a;
+    return `<div class="comp-angle-thumb${sel ? ' selected' : ''}" onclick="selectComposeAngle('${esc(a)}')" title="${esc(a)}">
+      ${img ? `<img src="${esc(img)}" alt="${esc(a)}">` : `<div class="comp-angle-thumb-empty">·</div>`}
+      <div class="comp-angle-label">${esc(a.replace('3/4 ','¾ '))}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="comp-char-detail" id="comp-char-detail">
+    <div class="comp-char-detail-name">${esc(char.name || 'Unnamed')}</div>
+    <div class="comp-char-angle-grid">${angleThumbs}</div>
+    <textarea id="comp-alter-prompt" class="compose-tool-textarea" placeholder="Alter image… (e.g. smiling, looking left)">${esc(expr)}</textarea>
+    <div class="comp-char-actions">
       <button class="btn-comp-add" onclick="compAddCharToStage('${esc(char.id)}')">+ Add to canvas</button>
       <button class="btn-comp-gen" onclick="compGenerateExpr('${esc(char.id)}')">Generate</button>
     </div>
   </div>`;
 }
 
-function compShotImgCardHTML(url, idx) {
-  return `<div class="comp-char-card" id="comp-shot-img-${idx}">
-    <div class="comp-char-header">
-      <span class="comp-char-name">Generated Image ${idx + 1}</span>
-    </div>
-    <div class="comp-char-preview"
-      draggable="true"
-      ondragstart="onCompShotImgDragStart(event,${idx})"
-      ondragend="onCompCharDragEnd(event)">
-      <img src="${esc(proxyUrl(url))}" alt="Generated Image ${idx + 1}" crossorigin="anonymous">
-      <span class="comp-char-preview-label">Drag to canvas</span>
-    </div>
-    <div class="comp-char-footer">
-      <button class="btn-comp-add" onclick="compAddShotImgToStage(${idx})">+ Add to canvas</button>
-    </div>
-  </div>`;
+function selectComposeChar(charId) {
+  if (_selectedCompCharId === charId) {
+    _selectedCompCharId = null;
+  } else {
+    _selectedCompCharId = charId;
+    // Sync angle from shot's characterDetails if available
+    const shot = shots.find(s => s.id === _compose?.shotId);
+    const det = (shot?.characterDetails || {})[charId] || {};
+    _selectedCompAngle = det.facingDir || 'Front';
+  }
+  renderComposeCharCards();
+}
+
+function selectComposeAngle(angle) {
+  _selectedCompAngle = angle;
+  if (_selectedCompCharId && _compose) {
+    const shot = shots.find(s => s.id === _compose.shotId);
+    if (shot) {
+      if (!shot.characterDetails) shot.characterDetails = {};
+      if (!shot.characterDetails[_selectedCompCharId]) shot.characterDetails[_selectedCompCharId] = {};
+      shot.characterDetails[_selectedCompCharId].facingDir = angle;
+    }
+  }
+  const detailWrap = document.getElementById('compose-char-detail-wrap');
+  if (detailWrap) detailWrap.innerHTML = compCharDetailHTML();
 }
 
 function refreshCompCharCard(charId) {
-  const el = document.getElementById(`comp-card-${charId}`);
-  if (!el || !_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-  const temp = document.createElement('div');
-  temp.innerHTML = compCharCardHTML(char, shot);
-  el.replaceWith(temp.firstElementChild);
+  // Re-render whole grid (tiles update on-stage state)
+  renderComposeCharCards();
 }
 
 function onCompSavedExprSelect(charId, expr) {
@@ -2902,14 +2907,17 @@ async function compGenerateExpr(charId) {
   if (!shot.characterDetails) shot.characterDetails = {};
   if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
   const det = shot.characterDetails[charId];
-  const angle = det.facingDir || 'Front';
-  const expr = (det.expression || '').trim();
+  const angle = _selectedCompAngle || det.facingDir || 'Front';
+  const alterEl = document.getElementById('comp-alter-prompt');
+  const expr = (alterEl ? alterEl.value : det.expression || '').trim();
+  det.expression = expr;
+  det.facingDir = angle;
 
   const refImg = getCharAngleImage(char, angle);
   if (!refImg) { showToast('Generate character images first.', true); return; }
 
-  const previewEl = document.getElementById(`comp-preview-${charId}`);
-  if (previewEl) previewEl.innerHTML = '<span class="spinner" style="border-top-color:#818cf8"></span>';
+  const genBtn = document.querySelector(`#comp-char-detail .btn-comp-gen`);
+  if (genBtn) { genBtn.disabled = true; genBtn.textContent = '…'; }
 
   const prompt = expr
     ? `Keep everything identical. Change only the facial expression to: ${expr}.`
@@ -2948,8 +2956,9 @@ async function compAddCharToStage(charId) {
   if (!shot.characterDetails) shot.characterDetails = {};
   if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
   const det = shot.characterDetails[charId];
-  const angle = det.facingDir || 'Front';
-  const expr = (det.expression || '').trim();
+  const angle = _selectedCompAngle || det.facingDir || 'Front';
+  const alterEl = document.getElementById('comp-alter-prompt');
+  const expr = (alterEl ? alterEl.value : det.expression || '').trim();
   const imgUrl = getCompCharImage(char, angle, expr);
   if (!imgUrl) { showToast('No image for this character. Generate one first.', true); return; }
 
