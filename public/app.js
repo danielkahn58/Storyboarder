@@ -2545,18 +2545,17 @@ function onLocBgViewChange(locId, viewKey) {
   saveComposeLayers();
 }
 
-function toggleShotBgPicker() {
+function buildOtherShotBgPicker(picker) {
   if (!_compose) return;
-  const picker = document.getElementById('compose-shot-bg-picker');
-  if (!picker) return;
-  const isOpen = picker.style.display !== 'none';
-  if (isOpen) { picker.style.display = 'none'; return; }
   const shotId = _compose.shotId;
   const otherShots = shots.filter(s => s.id !== shotId && s.finalImage);
-  if (!otherShots.length) { showToast('No other shots have a final image yet.', true); return; }
+  if (!otherShots.length) {
+    picker.innerHTML = `<p style="font-size:11px;color:#444;font-style:italic">No other shots have a final image yet.</p>`;
+    return;
+  }
   picker.innerHTML = otherShots.map(s => {
     const key = `other-shot-${s.id}`;
-    return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectOtherShotAsBg('${esc(s.id)}')" style="margin-bottom:4px">
+    return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectOtherShotAsBg('${esc(s.id)}')">
       <img src="${esc(proxyUrl(s.finalImage))}" crossorigin="anonymous">
       <span class="compose-thumb-name">${esc(s.lyric || s.description || `Shot`)}</span>
       <span class="compose-thumb-add">↺</span>
@@ -2565,6 +2564,11 @@ function toggleShotBgPicker() {
   picker.style.display = 'flex';
   picker.style.flexDirection = 'column';
   picker.style.gap = '4px';
+}
+
+function toggleShotBgPicker() {
+  const picker = document.getElementById('compose-shot-bg-picker');
+  if (picker) buildOtherShotBgPicker(picker);
 }
 
 function selectOtherShotAsBg(shotId) {
@@ -2577,7 +2581,6 @@ function selectOtherShotAsBg(shotId) {
   markComposeBgSelected(key);
   loadComposeBackground(s.finalImage);
   saveComposeLayers();
-  document.getElementById('compose-shot-bg-picker').style.display = 'none';
 }
 
 async function applyBgOnlyPrompt() {
@@ -2701,20 +2704,23 @@ function openCompose(shotId) {
 
   // Shot's own AI images as background options
   const shotImgs = shot.images || [];
-  const shotBgSection = document.getElementById('compose-shot-bg-section');
   const shotBgThumbs = document.getElementById('compose-shot-bg-thumbs');
-  if (shotImgs.length && shotBgSection && shotBgThumbs) {
-    shotBgSection.style.display = '';
-    shotBgThumbs.innerHTML = shotImgs.map((url, i) => {
-      const key = `shot-img-${i}`;
-      return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
-        <img src="${esc(proxyUrl(url))}" crossorigin="anonymous">
-        <span class="compose-thumb-name">Shot Image ${i + 1}</span>
-        <span class="compose-thumb-add">↺</span>
-      </div>`;
-    }).join('');
-  } else if (shotBgSection) {
-    shotBgSection.style.display = 'none';
+  const shotBgEmpty = document.getElementById('compose-shot-bg-empty');
+  if (shotBgThumbs) {
+    if (shotImgs.length) {
+      shotBgThumbs.innerHTML = shotImgs.map((url, i) => {
+        const key = `shot-img-${i}`;
+        return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
+          <img src="${esc(proxyUrl(url))}" crossorigin="anonymous">
+          <span class="compose-thumb-name">Shot Image ${i + 1}</span>
+          <span class="compose-thumb-add">↺</span>
+        </div>`;
+      }).join('');
+      if (shotBgEmpty) shotBgEmpty.style.display = 'none';
+    } else {
+      shotBgThumbs.innerHTML = '';
+      if (shotBgEmpty) shotBgEmpty.style.display = '';
+    }
   }
 
   // Populate save-as-location-view select
@@ -3393,13 +3399,42 @@ function buildLitLayer(layer) {
   return off;
 }
 
+function switchComposeTab(tab) {
+  document.querySelectorAll('.compose-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+  document.querySelectorAll('.compose-tab-panel').forEach(p => p.style.display = 'none');
+  const panel = document.getElementById(`compose-tabpanel-${tab}`);
+  if (panel) panel.style.display = '';
+}
+
+function setComposeBgMode(mode) {
+  document.querySelectorAll('.compose-bg-mode-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+  ['location','shot','color','other'].forEach(m => {
+    const p = document.getElementById(`compose-bgpanel-${m}`);
+    if (p) p.style.display = m === mode ? '' : 'none';
+  });
+  // populate other-shot panel on demand
+  if (mode === 'other') {
+    const picker = document.getElementById('compose-shot-bg-picker');
+    if (picker && !picker.dataset.built) {
+      buildOtherShotBgPicker(picker);
+      picker.dataset.built = '1';
+    }
+  }
+}
+
 function updateComposeLayerPanel() {
-  const panel = document.getElementById('compose-layer-panel');
+  const noSel = document.getElementById('compose-layer-no-selection');
+  const inner = document.getElementById('compose-layer-controls-inner');
+  const layerTab = document.getElementById('compose-tab-layer');
   if (!_compose || _compose.selectedIdx < 0 || _compose.selectedIdx >= _compose.layers.length) {
-    panel.classList.remove('visible');
+    if (noSel) noSel.style.display = '';
+    if (inner) inner.style.display = 'none';
+    if (layerTab) layerTab.style.color = '';
     return;
   }
-  panel.classList.add('visible');
+  if (noSel) noSel.style.display = 'none';
+  if (inner) inner.style.display = '';
+  if (layerTab) { layerTab.style.color = '#4ade80'; switchComposeTab('layer'); }
   const layer = _compose.layers[_compose.selectedIdx];
   const scaleVal = Math.round(layer.scale * 100);
   document.getElementById('compose-scale-slider').value = scaleVal;

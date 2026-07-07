@@ -255,6 +255,35 @@
   .compose-loc-bg-row { display: flex; flex-direction: column; gap: 2px; }
   .compose-loc-bg-row.selected > .compose-thumb { border-color: #818cf8; background: #1a1a2e; }
   .compose-empty { font-size: 11px; color: #383838; font-style: italic; }
+  /* Sidebar tab system */
+  .compose-pinned-section { padding: 12px 14px 10px; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; }
+  .compose-tab-bar { display: flex; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; background: #0f0f0f; }
+  .compose-tab { flex: 1; background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-size: 11px; font-weight: 500; padding: 8px 4px; cursor: pointer; letter-spacing: 0.2px; transition: color 0.12s; white-space: nowrap; }
+  .compose-tab:hover { color: #bbb; }
+  .compose-tab.active { color: #e8e8e8; border-bottom-color: #5865f2; }
+  .compose-tab-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  /* Background mode picker */
+  .compose-bg-mode-bar { display: flex; gap: 0; padding: 8px 10px 0; flex-shrink: 0; }
+  .compose-bg-mode-btn { flex: 1; background: none; border: 1px solid #252525; color: #555; font-size: 10px; padding: 5px 2px; cursor: pointer; transition: color 0.12s, background 0.12s; white-space: nowrap; }
+  .compose-bg-mode-btn:first-child { border-radius: 4px 0 0 4px; }
+  .compose-bg-mode-btn:last-child { border-radius: 0 4px 4px 0; }
+  .compose-bg-mode-btn + .compose-bg-mode-btn { border-left: none; }
+  .compose-bg-mode-btn:hover { color: #bbb; background: #1a1a1a; }
+  .compose-bg-mode-btn.active { color: #e8e8e8; background: #1a1a2e; border-color: #2e2e50; }
+  .compose-bg-panel { padding: 8px 10px; }
+  /* Background tools (collapsible) */
+  .compose-bg-tools { border-top: 1px solid #1a1a1a; padding: 6px 10px 8px; margin-top: auto; }
+  .compose-bg-tool-row { margin-bottom: 4px; }
+  .compose-bg-tool-toggle { background: none; border: none; color: #444; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; cursor: pointer; padding: 4px 0; width: 100%; text-align: left; }
+  .compose-bg-tool-toggle:hover { color: #888; }
+  .compose-bg-tool-toggle.open { color: #aaa; }
+  /* Shared tool element styles */
+  .compose-tool-textarea { width: 100%; min-height: 44px; background: #0e0e0e; border: 1px solid #222; border-radius: 4px; color: #aaa; font-size: 11px; padding: 5px 7px; resize: vertical; font-family: inherit; box-sizing: border-box; }
+  .compose-tool-input { width: 100%; background: #161616; border: 1px solid #252525; border-radius: 5px; color: #e8e8e8; font-size: 11px; padding: 5px 7px; box-sizing: border-box; }
+  .compose-tool-select { flex: 1; background: #161616; border: 1px solid #252525; border-radius: 5px; color: #888; font-size: 11px; padding: 5px 6px; }
+  .compose-tool-label { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+  .compose-tool-btn-purple { width: 100%; padding: 5px 8px; font-size: 11px; background: #1a1a2e; color: #818cf8; border: 1px solid #2e2e50; border-radius: 4px; cursor: pointer; }
+  .compose-tool-btn-green { padding: 5px 8px; font-size: 11px; background: #162a1e; color: #4ade80; border: 1px solid #254a31; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   .compose-layer-controls { display: none; }
   .compose-layer-controls.visible { display: block; }
   .compose-slider-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -564,26 +593,44 @@
         <canvas id="compose-canvas"></canvas>
       </div>
       <div class="compose-sidebar">
-        <div class="compose-section" style="flex:none;padding-bottom:0">
+        <!-- Characters: always pinned above tabs -->
+        <div class="compose-pinned-section">
           <div class="compose-section-title">Characters</div>
           <div id="compose-char-cards"></div>
         </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Background</div>
 
-          <!-- Locations (with per-location view dropdown) -->
-          <div class="compose-thumb-group-label">Locations</div>
-          <div id="compose-loc-thumbs"></div>
+        <!-- Tab bar -->
+        <div class="compose-tab-bar">
+          <button class="compose-tab active" data-tab="bg" onclick="switchComposeTab('bg')">Background</button>
+          <button class="compose-tab" data-tab="adjust" onclick="switchComposeTab('adjust')">Adjust</button>
+          <button class="compose-tab" data-tab="layer" id="compose-tab-layer" onclick="switchComposeTab('layer')">Layer</button>
+        </div>
 
-          <!-- This shot's AI-generated images -->
-          <div id="compose-shot-bg-section" style="display:none">
-            <div class="compose-thumb-group-label" style="margin-top:7px">Shot Images</div>
-            <div class="compose-thumbs" id="compose-shot-bg-thumbs"></div>
+        <!-- ── Background tab ── -->
+        <div class="compose-tab-panel" id="compose-tabpanel-bg">
+          <!-- Mode picker -->
+          <div class="compose-bg-mode-bar">
+            <button class="compose-bg-mode-btn active" data-mode="location" onclick="setComposeBgMode('location')">Location</button>
+            <button class="compose-bg-mode-btn" data-mode="shot" onclick="setComposeBgMode('shot')">Shot</button>
+            <button class="compose-bg-mode-btn" data-mode="color" onclick="setComposeBgMode('color')">Color</button>
+            <button class="compose-bg-mode-btn" data-mode="other" onclick="setComposeBgMode('other')">Other Shot</button>
           </div>
 
-          <!-- Solid Color -->
-          <div style="margin-top:7px">
-            <div class="compose-thumb-group-label">Solid Color</div>
+          <!-- Location panel -->
+          <div class="compose-bg-panel" id="compose-bgpanel-location">
+            <div id="compose-loc-thumbs"></div>
+          </div>
+
+          <!-- Shot images panel -->
+          <div class="compose-bg-panel" id="compose-bgpanel-shot" style="display:none">
+            <div id="compose-shot-bg-section">
+              <div class="compose-thumbs" id="compose-shot-bg-thumbs"></div>
+              <p class="compose-empty" id="compose-shot-bg-empty" style="display:none">No AI images for this shot yet.</p>
+            </div>
+          </div>
+
+          <!-- Color panel -->
+          <div class="compose-bg-panel" id="compose-bgpanel-color" style="display:none">
             <div class="compose-color-thumb" onclick="document.getElementById('compose-bg-color-picker').click()" title="Use solid color as background">
               <div class="compose-color-swatch" id="compose-color-swatch" style="background:#000000"></div>
               <span class="compose-thumb-name">Pick color…</span>
@@ -591,139 +638,152 @@
             <input type="color" id="compose-bg-color-picker" style="display:none" value="#000000" onmousedown="captureUndoState()" oninput="setComposeSolidColor(this.value)">
           </div>
 
-          <!-- Other shot's final image -->
-          <div style="margin-top:7px">
-            <div class="compose-thumb-group-label">Other Shot</div>
-            <button onclick="toggleShotBgPicker()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">Select from other shots…</button>
-            <div id="compose-shot-bg-picker" style="display:none;margin-top:5px;max-height:140px;overflow-y:auto"></div>
+          <!-- Other shot panel -->
+          <div class="compose-bg-panel" id="compose-bgpanel-other" style="display:none">
+            <div id="compose-shot-bg-picker" style="max-height:200px;overflow-y:auto"></div>
           </div>
 
-          <!-- Alter Background prompt -->
-          <div style="margin-top:10px">
-            <div class="compose-thumb-group-label">Alter Background</div>
-            <textarea id="compose-bg-prompt-input" placeholder="Describe changes to background only…" style="width:100%;min-height:44px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-bottom:4px"></textarea>
-            <button id="btn-apply-bg-prompt" onclick="applyBgOnlyPrompt()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">✦ Apply to background</button>
-          </div>
-
-          <!-- Save current bg as a location view -->
-          <div style="margin-top:8px">
-            <div class="compose-thumb-group-label">Save as Location View</div>
-            <input type="text" id="compose-save-bg-name" placeholder="View name…" style="width:100%;background:#161616;border:1px solid #252525;border-radius:5px;color:#e8e8e8;font-size:11px;padding:5px 7px;margin-bottom:4px;box-sizing:border-box">
-            <div style="display:flex;gap:4px">
-              <select id="compose-save-bg-loc-select" style="flex:1;background:#161616;border:1px solid #252525;border-radius:5px;color:#888;font-size:11px;padding:5px 6px">
-                <option value="">Select location…</option>
-              </select>
-              <button onclick="saveBgAsLocAltView()" style="padding:5px 8px;font-size:11px;background:#162a1e;color:#4ade80;border:1px solid #254a31;border-radius:4px;cursor:pointer;white-space:nowrap">Save</button>
+          <!-- Tools: Alter Background + Save as Location View -->
+          <div class="compose-bg-tools">
+            <div class="compose-bg-tool-row">
+              <button class="compose-bg-tool-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.classList.toggle('open')">Alter Background ▸</button>
+              <div style="display:none;margin-top:6px">
+                <textarea id="compose-bg-prompt-input" placeholder="Describe changes to background only…" class="compose-tool-textarea"></textarea>
+                <button id="btn-apply-bg-prompt" onclick="applyBgOnlyPrompt()" class="compose-tool-btn-purple">✦ Apply to background</button>
+              </div>
+            </div>
+            <div class="compose-bg-tool-row">
+              <button class="compose-bg-tool-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.classList.toggle('open')">Save as Location View ▸</button>
+              <div style="display:none;margin-top:6px">
+                <input type="text" id="compose-save-bg-name" placeholder="View name…" class="compose-tool-input">
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <select id="compose-save-bg-loc-select" class="compose-tool-select">
+                    <option value="">Select location…</option>
+                  </select>
+                  <button onclick="saveBgAsLocAltView()" class="compose-tool-btn-green">Save</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Subject Separation</div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Depth</span>
-            <input type="range" id="compose-separation-slider" min="0" max="100" value="0" oninput="setComposeBgSeparation(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-separation-val">0%</span>
+
+        <!-- ── Adjust tab ── -->
+        <div class="compose-tab-panel" id="compose-tabpanel-adjust" style="display:none">
+          <div class="compose-section">
+            <div class="compose-section-title">Subject Separation</div>
+            <div class="compose-slider-row">
+              <span class="compose-slider-label">Depth</span>
+              <input type="range" id="compose-separation-slider" min="0" max="100" value="0" oninput="setComposeBgSeparation(this.value)" onmousedown="captureUndoState()">
+              <span class="compose-slider-val" id="compose-separation-val">0%</span>
+            </div>
+            <button id="btn-detect-subjects" onclick="detectBgSubjects()" style="width:100%;margin-top:2px;padding:5px 8px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;font-size:10px;cursor:pointer">✦ Detect Human Subjects</button>
+            <p id="detect-subjects-status" style="font-size:9px;color:#444;margin:4px 0 0;line-height:1.4">Darkens & desaturates background to separate subjects.</p>
           </div>
-          <button id="btn-detect-subjects" onclick="detectBgSubjects()" style="width:100%;margin-top:5px;padding:5px 8px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;font-size:10px;cursor:pointer">✦ Detect Human Subjects</button>
-          <p id="detect-subjects-status" style="font-size:9px;color:#444;margin:4px 0 0;line-height:1.4">Darkens & desaturates the background to visually separate subjects from the scene. Click "Detect" to apply only to background, protecting human subjects.</p>
-        </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Global Adjustments</div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Contrast</span>
-            <input type="range" id="compose-contrast-slider" min="50" max="200" value="100" oninput="setComposeGlobalContrast(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-contrast-val">100%</span>
+          <div class="compose-section">
+            <div class="compose-section-title">Global Adjustments</div>
+            <div class="compose-slider-row">
+              <span class="compose-slider-label">Contrast</span>
+              <input type="range" id="compose-contrast-slider" min="50" max="200" value="100" oninput="setComposeGlobalContrast(this.value)" onmousedown="captureUndoState()">
+              <span class="compose-slider-val" id="compose-contrast-val">100%</span>
+            </div>
+            <div class="compose-slider-row">
+              <span class="compose-slider-label">Saturation</span>
+              <input type="range" id="compose-saturation-slider" min="0" max="200" value="100" oninput="setComposeGlobalSaturation(this.value)" onmousedown="captureUndoState()">
+              <span class="compose-slider-val" id="compose-saturation-val">100%</span>
+            </div>
           </div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Saturation</span>
-            <input type="range" id="compose-saturation-slider" min="0" max="200" value="100" oninput="setComposeGlobalSaturation(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-saturation-val">100%</span>
+          <div class="compose-section">
+            <div class="compose-section-title">Scene Lighting</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <label class="compose-tool-label">Color / Temperature</label>
+              <select id="compose-global-lighting" onchange="setComposeGlobalLighting(this.value)" class="compose-tool-select" style="width:100%">
+                <option value="none">None</option>
+                <option value="warm">Warm Daylight</option>
+                <option value="golden">Golden Hour</option>
+                <option value="cool">Cool Tone</option>
+                <option value="night">Night / Dark</option>
+                <option value="overcast">Overcast</option>
+                <option value="dramatic">Dramatic (Vignette)</option>
+              </select>
+              <label class="compose-tool-label">Lighting Direction</label>
+              <select id="compose-lighting-dir" onchange="setComposeGlobalLightingDir(this.value)" class="compose-tool-select" style="width:100%">
+                <option value="none">None</option>
+                <option value="front">Front</option>
+                <option value="three-quarter-left">3/4 Left</option>
+                <option value="left">Left Side</option>
+                <option value="three-quarter-right">3/4 Right</option>
+                <option value="right">Right Side</option>
+                <option value="backlight">Backlight / Rim</option>
+                <option value="top">Top Down</option>
+                <option value="under">Underlight</option>
+              </select>
+              <button id="btn-ai-relight" onclick="applyAIRelight()" style="display:none;width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a2030;color:#7ab3f0;border:1px solid #2a3f5a;border-radius:4px;cursor:pointer">✦ Apply AI Lighting</button>
+            </div>
           </div>
-        </div>
-        <div class="compose-section compose-layer-controls" id="compose-layer-panel">
-          <div class="compose-section-title">Selected Layer</div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Size</span>
-            <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-scale-val">30%</span>
+          <div class="compose-section">
+            <div class="compose-section-title">Run Prompt on Image</div>
+            <textarea id="compose-prompt-input" placeholder="Describe what to change…" class="compose-tool-textarea" style="min-height:50px;margin-bottom:5px"></textarea>
+            <button id="btn-apply-compose-prompt" onclick="applyComposePrompt()" class="compose-tool-btn-purple">✦ Apply Prompt</button>
           </div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Opacity</span>
-            <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-opacity-val">100%</span>
-          </div>
-          <div class="compose-slider-row" style="flex-direction:column;align-items:stretch;gap:6px">
-            <span class="compose-slider-label">Lighting</span>
-            <select id="compose-lighting-select" onchange="setComposeLayerLighting(this.value)" style="font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;width:100%">
-              <option value="none">None</option>
-              <option value="front">Front (soft)</option>
-              <option value="left">Side — Left</option>
-              <option value="right">Side — Right</option>
-              <option value="top">Top down</option>
-              <option value="bottom">Bottom up</option>
-              <option value="backlit">Backlit / Rim</option>
-            </select>
-          </div>
-          <div class="compose-slider-row" id="compose-lighting-intensity-row" style="display:none">
-            <span class="compose-slider-label">Intensity</span>
-            <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-lighting-val">60%</span>
-          </div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Contrast</span>
-            <input type="range" id="compose-layer-contrast" min="50" max="200" value="100" oninput="setComposeLayerContrast(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-layer-contrast-val">100%</span>
-          </div>
-          <div class="compose-slider-row">
-            <span class="compose-slider-label">Saturation</span>
-            <input type="range" id="compose-layer-saturation" min="0" max="200" value="100" oninput="setComposeLayerSaturation(this.value)" onmousedown="captureUndoState()">
-            <span class="compose-slider-val" id="compose-layer-saturation-val">100%</span>
-          </div>
-          <button onclick="flipComposeLayerH()" style="width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">⇔ Flip Horizontal</button>
-          <textarea id="compose-layer-prompt" style="width:100%;min-height:44px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-top:6px"></textarea>
-          <button id="btn-apply-layer-prompt" onclick="applyLayerPrompt()" style="width:100%;margin-top:4px;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">Apply Prompt to Layer</button>
-          <button class="btn btn-remove-layer" style="width:100%;margin-top:4px" onclick="removeComposeLayer()">Remove Layer</button>
-        </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Run Prompt on Image</div>
-          <textarea id="compose-prompt-input" placeholder="Describe what to change…" style="width:100%;min-height:50px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-bottom:5px"></textarea>
-          <button id="btn-apply-compose-prompt" onclick="applyComposePrompt()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">✦ Apply Prompt</button>
-        </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Scene Lighting</div>
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <label style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Color / Temperature</label>
-            <select id="compose-global-lighting" onchange="setComposeGlobalLighting(this.value)" style="width:100%;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px">
-              <option value="none">None</option>
-              <option value="warm">Warm Daylight</option>
-              <option value="golden">Golden Hour</option>
-              <option value="cool">Cool Tone</option>
-              <option value="night">Night / Dark</option>
-              <option value="overcast">Overcast</option>
-              <option value="dramatic">Dramatic (Vignette)</option>
-            </select>
-            <label style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Lighting Direction</label>
-            <select id="compose-lighting-dir" onchange="setComposeGlobalLightingDir(this.value)" style="width:100%;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px">
-              <option value="none">None</option>
-              <option value="front">Front</option>
-              <option value="three-quarter-left">3/4 Left</option>
-              <option value="left">Left Side</option>
-              <option value="three-quarter-right">3/4 Right</option>
-              <option value="right">Right Side</option>
-              <option value="backlight">Backlight / Rim</option>
-              <option value="top">Top Down</option>
-              <option value="under">Underlight</option>
-            </select>
-            <button id="btn-ai-relight" onclick="applyAIRelight()" style="display:none;width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a2030;color:#7ab3f0;border:1px solid #2a3f5a;border-radius:4px;cursor:pointer">✦ Apply AI Lighting</button>
+          <div class="compose-section">
+            <div class="compose-section-title">Image Versions</div>
+            <button onclick="saveComposeVersion()" style="width:100%;padding:4px 8px;font-size:11px;background:#162a1e;color:#4ade80;border:1px solid #254a31;border-radius:4px;cursor:pointer;margin-bottom:6px">+ Save as Version</button>
+            <div id="compose-history-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto"></div>
           </div>
         </div>
-        <div class="compose-section">
-          <div class="compose-section-title">Image Versions</div>
-          <button onclick="saveComposeVersion()" style="width:100%;padding:4px 8px;font-size:11px;background:#162a1e;color:#4ade80;border:1px solid #254a31;border-radius:4px;cursor:pointer;margin-bottom:6px">+ Save as Version</button>
-          <div id="compose-history-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto"></div>
-        </div>
-        <div class="compose-section">
-          <p class="compose-hint-text">Drag corners to resize. Delete key removes selected layer.</p>
+
+        <!-- ── Layer tab ── -->
+        <div class="compose-tab-panel" id="compose-tabpanel-layer" style="display:none">
+          <div class="compose-section" id="compose-layer-panel">
+            <div class="compose-section-title">Selected Layer</div>
+            <div id="compose-layer-no-selection" style="color:#444;font-size:11px;font-style:italic">Click a character on the canvas to select a layer.</div>
+            <div id="compose-layer-controls-inner" style="display:none">
+              <div class="compose-slider-row">
+                <span class="compose-slider-label">Size</span>
+                <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
+                <span class="compose-slider-val" id="compose-scale-val">30%</span>
+              </div>
+              <div class="compose-slider-row">
+                <span class="compose-slider-label">Opacity</span>
+                <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)" onmousedown="captureUndoState()">
+                <span class="compose-slider-val" id="compose-opacity-val">100%</span>
+              </div>
+              <div class="compose-slider-row" style="flex-direction:column;align-items:stretch;gap:6px">
+                <span class="compose-slider-label">Lighting</span>
+                <select id="compose-lighting-select" onchange="setComposeLayerLighting(this.value)" style="font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;width:100%">
+                  <option value="none">None</option>
+                  <option value="front">Front (soft)</option>
+                  <option value="left">Side — Left</option>
+                  <option value="right">Side — Right</option>
+                  <option value="top">Top down</option>
+                  <option value="bottom">Bottom up</option>
+                  <option value="backlit">Backlit / Rim</option>
+                </select>
+              </div>
+              <div class="compose-slider-row" id="compose-lighting-intensity-row" style="display:none">
+                <span class="compose-slider-label">Intensity</span>
+                <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)" onmousedown="captureUndoState()">
+                <span class="compose-slider-val" id="compose-lighting-val">60%</span>
+              </div>
+              <div class="compose-slider-row">
+                <span class="compose-slider-label">Contrast</span>
+                <input type="range" id="compose-layer-contrast" min="50" max="200" value="100" oninput="setComposeLayerContrast(this.value)" onmousedown="captureUndoState()">
+                <span class="compose-slider-val" id="compose-layer-contrast-val">100%</span>
+              </div>
+              <div class="compose-slider-row">
+                <span class="compose-slider-label">Saturation</span>
+                <input type="range" id="compose-layer-saturation" min="0" max="200" value="100" oninput="setComposeLayerSaturation(this.value)" onmousedown="captureUndoState()">
+                <span class="compose-slider-val" id="compose-layer-saturation-val">100%</span>
+              </div>
+              <button onclick="flipComposeLayerH()" style="width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">⇔ Flip Horizontal</button>
+              <textarea id="compose-layer-prompt" placeholder="Prompt to alter this layer…" class="compose-tool-textarea" style="margin-top:6px"></textarea>
+              <button id="btn-apply-layer-prompt" onclick="applyLayerPrompt()" class="compose-tool-btn-purple" style="margin-top:4px">Apply Prompt to Layer</button>
+              <button class="btn btn-remove-layer" style="width:100%;margin-top:4px" onclick="removeComposeLayer()">Remove Layer</button>
+            </div>
+          </div>
+          <div class="compose-section">
+            <p class="compose-hint-text">Drag corners to resize. Delete key removes selected layer.</p>
+          </div>
         </div>
       </div>
     </div>
