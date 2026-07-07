@@ -13,7 +13,7 @@ const http = require('http');
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
-app.use(express.static('public'));
+app.use(express.static('public', { etag: false, lastModified: false, setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 fal.config({ credentials: process.env.FAL_KEY });
@@ -124,12 +124,33 @@ app.post('/api/parse-script', upload.single('file'), async (req, res) => {
       max_tokens: 4096,
       messages: [{
         role: 'user',
-        content: `Analyze this script/screenplay/lyrics and extract every distinct character and every distinct location/setting.
-For each character provide a name and a visual reference description (appearance, clothing, style, mood). Do NOT mention any props or held objects.
+        content: `Analyze this script/screenplay/lyrics and extract every distinct character or group of characters, and every distinct location/setting.
+
+For each character:
+1. Determine if the name is PLURAL (e.g. "Girls", "Backup Dancers", "The Twins"). If plural, set isPlural=true and pluralCount=3 (or the number specified in the script).
+2. Extract ALL visual and behavioral attributes you can observe or clearly infer — focus on: body type, face, hair, skin tone, clothing style, and visible personality traits.
+3. For each attribute, determine:
+   - "text": the attribute label (e.g. "Overweight", "Short curly hair", "Wears glasses")
+   - "sometimes": true if this only applies in SOME scenes/moments, false if consistent throughout
+   - "reasoning": one brief sentence explaining how you derived this from the script
+4. Do NOT mention props, held objects, or setting details.
+
 For each location provide a name and a visual reference description (environment, lighting, time of day, atmosphere, notable visual features).
 
 Respond with valid JSON only, no markdown:
-{ "characters": [{ "name": "string", "description": "string" }], "locations": [{ "name": "string", "description": "string" }] }
+{
+  "characters": [
+    {
+      "name": "string",
+      "isPlural": false,
+      "pluralCount": 1,
+      "attributes": [
+        { "text": "string", "sometimes": false, "reasoning": "string" }
+      ]
+    }
+  ],
+  "locations": [{ "name": "string", "description": "string" }]
+}
 
 Document:
 ${text}`
@@ -156,11 +177,30 @@ app.post('/api/parse-characters', async (req, res) => {
       max_tokens: 4096,
       messages: [{
         role: 'user',
-        content: `Analyze this script/screenplay/lyrics and extract every distinct character.
-For each character provide a name and a visual reference description (appearance, clothing, style, mood). Do NOT mention any props or held objects.
+        content: `Analyze this script/screenplay/lyrics and extract every distinct character or group of characters.
+
+For each character:
+1. Determine if the name is PLURAL (e.g. "Girls", "Backup Dancers", "The Twins"). If plural, set isPlural=true and pluralCount=3 (or the number specified in the script).
+2. Extract ALL visual and behavioral attributes you can observe or clearly infer — focus on: body type, face, hair, skin tone, clothing style, and visible personality traits.
+3. For each attribute, determine:
+   - "text": the attribute label (e.g. "Overweight", "Short curly hair", "Wears glasses")
+   - "sometimes": true if this only applies in SOME scenes/moments, false if consistent throughout
+   - "reasoning": one brief sentence explaining how you derived this from the script
+4. Do NOT mention props, held objects, or setting details.
 
 Respond with valid JSON only, no markdown:
-{ "characters": [{ "name": "string", "description": "string" }] }
+{
+  "characters": [
+    {
+      "name": "string",
+      "isPlural": false,
+      "pluralCount": 1,
+      "attributes": [
+        { "text": "string", "sometimes": false, "reasoning": "string" }
+      ]
+    }
+  ]
+}
 
 Document:
 ${scriptText}`
@@ -263,17 +303,29 @@ app.post('/api/generate-prompt', async (req, res) => {
     if (referenceImage) {
       userContent.push({ type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } });
     }
+    const { customRules } = req.body;
+    const defaultLocationRules = `- Every object, architectural feature, and environmental element MUST come directly from the reference. Do not invent new rooms, furniture, exterior features, props, or setting details not mentioned.
+- You may only add adjectives and sensory details that enhance what is already described (e.g. lighting quality, texture, atmospheric mood, material finishes).
+- Describe one fixed moment — single lighting condition, one time of day. No variations or transitions.
+- Do NOT include any characters or people. Do NOT include style instructions, aspect ratio, or technical rendering notes.`;
+    const defaultCharacterRules = `- Every physical feature, clothing item, and accessory MUST come directly from the reference. Do not invent new clothing, hairstyles, facial features, accessories, or body details not mentioned.
+- You may only add adjectives and sensory details that enhance what is already described (e.g. fabric texture, color shading, material quality).
+- Describe one fixed appearance — one outfit, one hairstyle, one expression. No variations.
+- Do NOT include pose, framing, background, style, aspect ratio, or technical rendering notes.`;
+    const rules = customRules || (isLocation ? defaultLocationRules : defaultCharacterRules);
     const promptInstruction = isLocation
-      ? `You are an expert at writing AI image generation prompts. Write a description of a location/setting for use in an image generation prompt.
+      ? `You are an expert at writing AI image generation prompts. Write a 2-sentence description of a location/setting for use in an image generation prompt.
 
-Output ONLY the location description — physical environment details: architecture, landscape, natural features, time of day, lighting conditions, atmosphere, textures, and mood. Do NOT include any characters or people. Do NOT include style instructions, background instructions, aspect ratio, or any technical rendering notes — those will be added separately.
+STRICT RULES:
+${rules}
 
-Be specific and vivid. Output only the description text, nothing else.${referenceDescription ? `\n\nReference: ${referenceDescription}` : ''}`
-      : `You are an expert at writing AI image generation prompts. Write a character appearance description for use in an image generation prompt.
+Output ONLY the 2-sentence description, nothing else.${referenceDescription ? `\n\nReference: ${referenceDescription}` : ''}`
+      : `You are an expert at writing AI image generation prompts. Write a 2-sentence description of a character's appearance for use in an image generation prompt.
 
-Output ONLY the character's physical appearance: body type, face, hair, eyes, skin, clothing, and accessories. Do NOT include pose, framing, background, style, aspect ratio, or any technical rendering notes — those will be added separately.
+STRICT RULES:
+${rules}
 
-Be specific and vivid. Output only the description text, nothing else.${referenceDescription ? `\n\nReference: ${referenceDescription}` : ''}`;
+Output ONLY the 2-sentence description, nothing else.${referenceDescription ? `\n\nReference: ${referenceDescription}` : ''}`;
 
     userContent.push({ type: 'text', text: promptInstruction });
 
@@ -354,6 +406,47 @@ Respond with valid JSON only, no markdown:
   }
 });
 
+app.post('/api/generate-location-angle-prompts', async (req, res) => {
+  const { locationPrompt, locationName, angles } = req.body;
+  if (!locationPrompt && !locationName) return res.status(400).json({ error: 'locationPrompt or locationName required' });
+  log('info', 'generate-location-angle-prompts started', { locationName });
+  const t0 = Date.now();
+  try {
+    const angleList = (angles || ['Wide establishing shot', 'Reverse angle wide shot', '3/4 left shot', '3/4 right shot', 'High angle shot', 'Low angle shot']).join(', ');
+    const message = await anthropic.messages.create({
+      model: 'claude-opus-4-8',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: `You are an expert cinematographer writing AI image generation prompts for different camera angles of the same location.
+
+Location: ${locationName || 'Unknown'}
+Location description: ${locationPrompt || locationName}
+
+For each of the following camera angles, write a single concise sentence (20-35 words) describing:
+- Where the camera is positioned
+- What is in the foreground of the shot
+- What is in the background of the shot
+Do NOT describe character appearances. Do NOT add style instructions.
+
+Angles: ${angleList}
+
+Respond with ONLY a JSON object mapping each angle name exactly to its prompt string. Example format:
+{"Wide establishing shot": "Camera placed far back at eye level, open floor space in foreground, full room visible in background.", "Reverse angle wide shot": "..."}`
+      }]
+    });
+    const text = message.content[0].text.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON found in response');
+    const prompts = JSON.parse(jsonMatch[0]);
+    log('info', 'generate-location-angle-prompts done', { ms: Date.now() - t0 });
+    res.json({ prompts });
+  } catch (e) {
+    log('error', 'generate-location-angle-prompts failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/upload-reference', async (req, res) => {
   const { base64, mediaType } = req.body;
   if (!base64) return res.status(400).json({ error: 'base64 required' });
@@ -387,19 +480,35 @@ app.post('/api/generate-images', async (req, res) => {
 });
 
 app.post('/api/generate-shot-images', async (req, res) => {
-  const { prompt, referenceImageUrls, stylePrompt } = req.body;
+  const { prompt, referenceImageUrls, stylePrompt, charImageUrls, locImageUrls } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
-  const refs = Array.isArray(referenceImageUrls) ? referenceImageUrls.filter(Boolean) : [];
-  log('info', 'generate-shot-images started', { prompt_chars: prompt.length, refCount: refs.length, model: refs.length >= 2 ? 'kontext-multi' : refs.length === 1 ? 'kontext-single' : 'kling' });
+
+  // Build ref list — prefer explicit char/loc split, fall back to combined array
+  const chars = Array.isArray(charImageUrls) ? charImageUrls.filter(Boolean) : [];
+  const locs = Array.isArray(locImageUrls) ? locImageUrls.filter(Boolean) : [];
+  const hasSplit = chars.length > 0 || locs.length > 0;
+  // Location image goes FIRST so Kontext uses it as the base scene to compose into.
+  // Character image(s) follow so the subject is placed into that scene.
+  const refs = hasSplit ? [...locs, ...chars] : (Array.isArray(referenceImageUrls) ? referenceImageUrls.filter(Boolean) : []);
+
+  // When both are present, label them so the model understands their roles
+  let finalPrompt = prompt;
+  if (hasSplit && chars.length > 0 && locs.length > 0) {
+    const locLabel = locs.length === 1 ? 'Reference image 1 is the location/background scene' : `Reference images 1–${locs.length} are the location/background scene`;
+    const charLabel = chars.length === 1 ? `reference image ${locs.length + 1} is the character to place in the scene` : `reference images ${locs.length + 1}–${refs.length} are the characters to place in the scene`;
+    finalPrompt = `[${locLabel}; ${charLabel}] ${prompt}`;
+  }
+
+  log('info', 'generate-shot-images started', { prompt_chars: prompt.length, refCount: refs.length, chars: chars.length, locs: locs.length, model: refs.length >= 2 ? 'kontext-multi' : refs.length === 1 ? 'kontext-single' : 'plain' });
   const t0 = Date.now();
   try {
     let images;
     if (refs.length >= 2) {
-      images = await generateShotImageKontextMulti(prompt, refs, stylePrompt);
+      images = await generateShotImageKontextMulti(finalPrompt, refs, stylePrompt);
     } else if (refs.length === 1) {
-      images = await generateShotImageKontextSingle(prompt, refs[0], stylePrompt);
+      images = await generateShotImageKontextSingle(finalPrompt, refs[0], stylePrompt);
     } else {
-      images = await generateImages(prompt, stylePrompt);
+      images = await generateImages(finalPrompt, stylePrompt);
     }
     log('info', 'generate-shot-images done', { count: images.length, ms: Date.now() - t0 });
     res.json({ images });

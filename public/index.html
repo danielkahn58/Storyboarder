@@ -8,8 +8,13 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; min-height: 100vh; }
 
-  header { padding: 20px 32px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+  header { background: #0f0f0f; border-bottom: 1px solid #222; position: sticky; top: 0; z-index: 200; }
+  .header-main { padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
   header h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+  .section-nav { display: flex; gap: 0; padding: 0 24px; border-top: 1px solid #1a1a1a; }
+  .section-nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-size: 12px; font-weight: 500; padding: 8px 14px; cursor: pointer; letter-spacing: 0.2px; transition: color 0.12s; white-space: nowrap; }
+  .section-nav-btn:hover { color: #bbb; }
+  .section-nav-btn.active { color: #e8e8e8; border-bottom-color: #5865f2; }
   .save-btn { background: #5865f2; color: #fff; border: none; padding: 8px 18px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; transition: background 0.15s; }
   .save-btn:hover { background: #4752c4; }
   .save-btn.saved { background: #2d7d46; }
@@ -247,6 +252,8 @@
   .compose-thumb img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
   .compose-thumb-name { font-size: 11px; color: #aaa; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .compose-thumb-add { font-size: 16px; color: #4ade80; flex-shrink: 0; }
+  .compose-loc-bg-row { display: flex; flex-direction: column; gap: 2px; }
+  .compose-loc-bg-row.selected > .compose-thumb { border-color: #818cf8; background: #1a1a2e; }
   .compose-empty { font-size: 11px; color: #383838; font-style: italic; }
   .compose-layer-controls { display: none; }
   .compose-layer-controls.visible { display: block; }
@@ -287,20 +294,108 @@
   .btn-comp-add:hover { background: #1c3526; }
   .btn-comp-gen { background: #1a1a2e; color: #818cf8; border: 1px solid #2e2e50; }
   .btn-comp-gen:hover { background: #20203a; }
+
+  /* rich reference field (contenteditable) */
+  .ref-rich { background: #161616; border: 1px solid #252525; border-radius: 5px; color: #e8e8e8; font-size: 12px; padding: 7px 9px; min-height: 72px; line-height: 1.6; font-family: inherit; cursor: text; }
+  .ref-rich:focus { outline: none; border-color: #5865f2; }
+  .ref-rich[contenteditable=true]:empty:before { content: attr(data-placeholder); color: #444; pointer-events: none; display: block; }
+  .ref-rich ul { list-style: none; padding: 0; margin: 0; }
+  .ref-rich li { margin-bottom: 2px; }
+  .ref-rich strong { color: #e8e8e8; font-weight: 600; }
+  .ref-rich em, .ref-rich span.reasoning { color: #666; font-style: normal; }
+
+  /* location shot angles */
+  .loc-shot-row { background: #0a0a0a; }
+  .loc-shot-inner { padding: 10px 14px; }
+  .loc-shot-table { width: 100%; border-collapse: collapse; }
+  .loc-shot-table td { padding: 5px 8px; vertical-align: middle; }
+  .loc-shot-label { font-size: 11px; color: #555; white-space: nowrap; width: 150px; }
+  .loc-shot-img-slot { width: 160px; }
+  .loc-shot-img-slot img { width: 160px; height: 90px; object-fit: cover; border-radius: 3px; display: block; }
+  .loc-shot-placeholder { width: 160px; height: 90px; background: #111; border: 1px dashed #222; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #333; font-size: 10px; }
+  .loc-angle-prompt { width: 100%; min-height: 48px; background: #0e0e0e; border: 1px solid #222; border-radius: 4px; color: #aaa; font-size: 11px; padding: 5px 7px; resize: vertical; font-family: inherit; box-sizing: border-box; }
+  .loc-angle-prompt:focus { outline: none; border-color: #444; }
+  .btn-regen-angle { background: #111; color: #555; border: 1px solid #222; border-radius: 4px; font-size: 10px; padding: 3px 8px; cursor: pointer; white-space: nowrap; margin-top: 3px; display: block; }
+  .btn-regen-angle:hover { color: #818cf8; border-color: #2e2e50; }
+  .btn-gen-shot-angles { background: #1a1a2e; color: #818cf8; border: 1px solid #2e2e50; border-radius: 5px; font-size: 11px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+  .btn-gen-shot-angles:hover { background: #20203a; }
+
+  /* shot reference image */
+  .shot-ref-zone { width: 52px; height: 38px; background: #111; border: 1px dashed #2a2a2a; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; color: #444; margin-top: 5px; position: relative; overflow: hidden; }
+  .shot-ref-zone:hover { border-color: #818cf8; color: #818cf8; }
+  .shot-ref-remove { position: absolute; top: 1px; right: 2px; background: rgba(0,0,0,0.7); color: #f87171; border: none; font-size: 9px; cursor: pointer; border-radius: 2px; padding: 0 2px; line-height: 1.4; }
+  .compose-color-thumb { display: flex; align-items: center; gap: 8px; background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 5px 7px; cursor: pointer; margin-top: 3px; }
+  .compose-color-thumb:hover { border-color: #4ade80; }
+  .compose-color-swatch { width: 22px; height: 22px; border-radius: 4px; border: 1px solid #333; flex-shrink: 0; }
+  .compose-history-thumb { display: flex; align-items: center; gap: 7px; cursor: pointer; background: #1a1a1a; border: 1px solid #252525; border-radius: 5px; padding: 4px 6px; }
+  .compose-history-thumb:hover { border-color: #4ade80; }
+  .compose-history-thumb img { width: 38px; height: 22px; object-fit: cover; border-radius: 3px; flex-shrink: 0; }
+  .compose-history-info { font-size: 10px; color: #666; }
+  .btn-toggle-shot-angles { background: none; border: none; color: #444; font-size: 11px; cursor: pointer; padding: 3px 6px; white-space: nowrap; }
+  .btn-toggle-shot-angles:hover { color: #888; }
+
+  /* redundancy warning */
+  .loc-dup-flag { display: inline-block; background: #2a1a00; border: 1px solid #5a3a00; color: #f59e0b; font-size: 10px; border-radius: 4px; padding: 2px 6px; margin-top: 4px; cursor: help; }
+
+  /* ── generation rules ── */
+  .gen-rules-section { border-bottom: 1px solid #1a1a1a; }
+  .gen-rules-header { padding: 8px 32px; display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+  .gen-rules-header:hover { background: #111; }
+  .gen-rules-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #444; }
+  .gen-rules-toggle { font-size: 10px; color: #333; transition: transform 0.15s; }
+  .gen-rules-toggle.open { transform: rotate(90deg); }
+  .gen-rules-body { padding: 0 32px 16px; display: none; }
+  .gen-rules-body.open { display: flex; gap: 20px; }
+  .gen-rules-col { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .gen-rules-col-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: #444; }
+  .gen-rules-textarea { background: #0e0e0e; border: 1px solid #1a1a1a; border-radius: 4px; color: #555; font-size: 11px; padding: 8px 10px; resize: vertical; min-height: 90px; line-height: 1.6; font-family: inherit; width: 100%; }
+  .gen-rules-textarea:focus { outline: none; border-color: #2a2a2a; color: #888; }
+  .gen-rules-reset { background: none; border: none; color: #2a2a2a; font-size: 10px; cursor: pointer; padding: 0; text-decoration: underline; align-self: flex-end; }
+  .gen-rules-reset:hover { color: #555; }
+
+  /* ── projects view ── */
+  #view-projects { max-width: 900px; margin: 0 auto; padding: 48px 32px; }
+  .projects-heading { font-size: 28px; font-weight: 700; color: #e8e8e8; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .projects-sub { font-size: 13px; color: #555; margin-bottom: 36px; }
+  .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .project-card { background: #111; border: 1px solid #1e1e1e; border-radius: 10px; padding: 20px; cursor: pointer; transition: border-color 0.15s, background 0.15s; position: relative; }
+  .project-card:hover { border-color: #333; background: #161616; }
+  .project-card-name { font-size: 15px; font-weight: 600; color: #e8e8e8; margin-bottom: 6px; word-break: break-word; }
+  .project-card-name-input { background: transparent; border: none; border-bottom: 1px solid #5865f2; outline: none; font-size: 15px; font-weight: 600; color: #e8e8e8; width: 100%; padding: 0 0 2px; font-family: inherit; }
+  .project-card-meta { font-size: 11px; color: #444; margin-bottom: 16px; }
+  .project-card-footer { display: flex; align-items: center; justify-content: space-between; }
+  .btn-open-project { background: #5865f2; color: #fff; border: none; border-radius: 6px; padding: 7px 16px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn-open-project:hover { background: #4752c4; }
+  .btn-delete-project { background: none; border: none; color: #333; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: color 0.15s; }
+  .btn-delete-project:hover { color: #e05; }
+  .btn-new-project { background: #1a2440; color: #818cf8; border: 1px solid #2e2e50; border-radius: 8px; padding: 18px 24px; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; transition: all 0.15s; display: flex; align-items: center; gap: 10px; }
+  .btn-new-project:hover { background: #202d50; border-color: #4a4e80; }
+  .btn-new-project .plus { font-size: 20px; font-weight: 300; color: #818cf8; }
+  .project-versions-badge { font-size: 10px; color: #333; }
+
+  /* ── editor header back button ── */
+  .header-project-name { font-size: 14px; font-weight: 600; color: #ccc; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding: 2px 4px; border-radius: 3px; }
+  .header-project-name:hover { background: #1a1a1a; color: #fff; }
+  .btn-back-projects { background: none; border: none; color: #555; font-size: 12px; cursor: pointer; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .btn-back-projects:hover { color: #aaa; background: #1a1a1a; }
+  .header-divider { width: 1px; height: 18px; background: #222; }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Storyboard Generator</h1>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <div id="version-ui" class="version-bar"><!-- rendered by renderVersionUI() --></div>
-    <a href="/vrm-builder.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">VRM Builder</a>
-    <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
-    <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
-    <button class="save-btn" onclick="saveData()">Save</button>
+<header id="main-header"><!-- rendered by renderHeader() --></header>
+
+<!-- ── Projects View ── -->
+<div id="view-projects">
+  <div style="max-width:900px;margin:0 auto;padding:48px 32px;">
+    <div class="projects-heading">Storyboard Generator</div>
+    <div class="projects-sub">Select a project to open, or create a new one.</div>
+    <div id="projects-grid" class="projects-grid"><!-- rendered by renderProjectsView() --></div>
   </div>
-</header>
+</div>
+
+<!-- ── Editor View ── -->
+<div id="view-editor" style="display:none;">
 
 <!-- ── Visual Style ── -->
 <div class="style-section">
@@ -315,6 +410,31 @@
     <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
       <span style="font-size:10px;color:#555;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;">Character Framing Boilerplate</span>
       <textarea id="debug-boilerplate" rows="2" style="width:100%;background:#111;border:1px solid #2a2a2a;border-radius:4px;color:#aaa;font-size:11px;padding:6px 8px;resize:vertical;line-height:1.5;" oninput="onBoilerplateChange(this.value)"></textarea>
+    </div>
+  </div>
+</div>
+
+<!-- ── Generation Rules ── -->
+<div class="gen-rules-section">
+  <div class="gen-rules-header" onclick="toggleGenRules()">
+    <span class="gen-rules-toggle" id="gen-rules-toggle">▸</span>
+    <span class="gen-rules-title">Generation Rules</span>
+  </div>
+  <div class="gen-rules-body" id="gen-rules-body">
+    <div class="gen-rules-col">
+      <div class="gen-rules-col-label">Character Prompts</div>
+      <textarea class="gen-rules-textarea" id="char-gen-rules" oninput="onCharRulesChange(this.value)"></textarea>
+      <button class="gen-rules-reset" onclick="resetCharRules()">Reset to default</button>
+    </div>
+    <div class="gen-rules-col">
+      <div class="gen-rules-col-label">Location Prompts</div>
+      <textarea class="gen-rules-textarea" id="loc-gen-rules" oninput="onLocRulesChange(this.value)"></textarea>
+      <button class="gen-rules-reset" onclick="resetLocRules()">Reset to default</button>
+    </div>
+    <div class="gen-rules-col">
+      <div class="gen-rules-col-label">Character Image Framing</div>
+      <textarea class="gen-rules-textarea" id="char-framing-rules" oninput="onBoilerplateChange(this.value)"></textarea>
+      <button class="gen-rules-reset" onclick="resetFramingRules()">Reset to default</button>
     </div>
   </div>
 </div>
@@ -336,12 +456,13 @@
 </div>
 
 <!-- ── Characters ── -->
-<div class="section-header">
+<div class="section-header" id="sec-characters">
   <h2>Characters</h2>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button class="btn-upload" id="btn-gen-chars" onclick="generateCharactersFromScript()" style="font-size:12px;padding:6px 14px;">Generate Characters</button>
     <button class="btn-upload" id="btn-gen-missing-prompts" onclick="generateMissingCharPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
     <button class="btn-upload" id="btn-gen-missing-images" onclick="generateMissingCharImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
+    <button onclick="deleteAllCharacters()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
   </div>
 </div>
 <div class="table-wrap">
@@ -366,9 +487,14 @@
 <div class="divider"></div>
 
 <!-- ── Locations ── -->
-<div class="section-header">
+<div class="section-header" id="sec-locations">
   <h2>Locations</h2>
-  <button class="btn-upload" id="btn-gen-locs" onclick="generateLocationsFromScript()" style="font-size:12px;padding:6px 14px;">Generate Locations</button>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn-upload" id="btn-gen-locs" onclick="generateLocationsFromScript()" style="font-size:12px;padding:6px 14px;">Generate Locations</button>
+    <button class="btn-upload" id="btn-gen-missing-loc-prompts" onclick="generateMissingLocPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
+    <button class="btn-upload" id="btn-gen-missing-loc-images" onclick="generateMissingLocImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
+    <button onclick="deleteAllLocations()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
+  </div>
 </div>
 <div class="table-wrap">
   <table class="char-table">
@@ -392,7 +518,7 @@
 <div class="divider"></div>
 
 <!-- ── Shot Sequence ── -->
-<div class="section-header">
+<div class="section-header" id="sec-shots">
   <h2>Shot Sequence</h2>
   <button class="btn-upload" id="btn-gen-shots" onclick="generateShotSequence()" style="font-size:12px;padding:6px 14px;">Generate Shot Sequence</button>
 </div>
@@ -428,6 +554,7 @@
     <div class="compose-header">
       <h3>Compose Shot</h3>
       <div class="compose-header-right">
+        <button id="btn-compose-undo" onclick="undo()" disabled title="Nothing to undo" style="padding:5px 12px;font-size:11px;background:#1a1a1a;color:#555;border:1px solid #2a2a2a;border-radius:5px;cursor:pointer">↩ Undo</button>
         <button class="btn btn-save-compose" onclick="saveCompose()">Save as Final Image</button>
         <button class="compose-close" onclick="closeCompose()">✕</button>
       </div>
@@ -443,28 +570,86 @@
         </div>
         <div class="compose-section">
           <div class="compose-section-title">Background</div>
-          <div class="compose-thumbs" id="compose-loc-thumbs"></div>
+
+          <!-- Locations (with per-location view dropdown) -->
+          <div class="compose-thumb-group-label">Locations</div>
+          <div id="compose-loc-thumbs"></div>
+
+          <!-- This shot's AI-generated images -->
+          <div id="compose-shot-bg-section" style="display:none">
+            <div class="compose-thumb-group-label" style="margin-top:7px">Shot Images</div>
+            <div class="compose-thumbs" id="compose-shot-bg-thumbs"></div>
+          </div>
+
+          <!-- Solid Color -->
+          <div style="margin-top:7px">
+            <div class="compose-thumb-group-label">Solid Color</div>
+            <div class="compose-color-thumb" onclick="document.getElementById('compose-bg-color-picker').click()" title="Use solid color as background">
+              <div class="compose-color-swatch" id="compose-color-swatch" style="background:#000000"></div>
+              <span class="compose-thumb-name">Pick color…</span>
+            </div>
+            <input type="color" id="compose-bg-color-picker" style="display:none" value="#000000" onmousedown="captureUndoState()" oninput="setComposeSolidColor(this.value)">
+          </div>
+
+          <!-- Other shot's final image -->
+          <div style="margin-top:7px">
+            <div class="compose-thumb-group-label">Other Shot</div>
+            <button onclick="toggleShotBgPicker()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">Select from other shots…</button>
+            <div id="compose-shot-bg-picker" style="display:none;margin-top:5px;max-height:140px;overflow-y:auto"></div>
+          </div>
+
+          <!-- Alter Background prompt -->
+          <div style="margin-top:10px">
+            <div class="compose-thumb-group-label">Alter Background</div>
+            <textarea id="compose-bg-prompt-input" placeholder="Describe changes to background only…" style="width:100%;min-height:44px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-bottom:4px"></textarea>
+            <button id="btn-apply-bg-prompt" onclick="applyBgOnlyPrompt()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">✦ Apply to background</button>
+          </div>
+
+          <!-- Save current bg as a location view -->
+          <div style="margin-top:8px">
+            <div class="compose-thumb-group-label">Save as Location View</div>
+            <input type="text" id="compose-save-bg-name" placeholder="View name…" style="width:100%;background:#161616;border:1px solid #252525;border-radius:5px;color:#e8e8e8;font-size:11px;padding:5px 7px;margin-bottom:4px;box-sizing:border-box">
+            <div style="display:flex;gap:4px">
+              <select id="compose-save-bg-loc-select" style="flex:1;background:#161616;border:1px solid #252525;border-radius:5px;color:#888;font-size:11px;padding:5px 6px">
+                <option value="">Select location…</option>
+              </select>
+              <button onclick="saveBgAsLocAltView()" style="padding:5px 8px;font-size:11px;background:#162a1e;color:#4ade80;border:1px solid #254a31;border-radius:4px;cursor:pointer;white-space:nowrap">Save</button>
+            </div>
+          </div>
         </div>
         <div class="compose-section">
           <div class="compose-section-title">Subject Separation</div>
           <div class="compose-slider-row">
             <span class="compose-slider-label">Depth</span>
-            <input type="range" id="compose-separation-slider" min="0" max="100" value="0" oninput="setComposeBgSeparation(this.value)">
+            <input type="range" id="compose-separation-slider" min="0" max="100" value="0" oninput="setComposeBgSeparation(this.value)" onmousedown="captureUndoState()">
             <span class="compose-slider-val" id="compose-separation-val">0%</span>
           </div>
           <button id="btn-detect-subjects" onclick="detectBgSubjects()" style="width:100%;margin-top:5px;padding:5px 8px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;font-size:10px;cursor:pointer">✦ Detect Human Subjects</button>
           <p id="detect-subjects-status" style="font-size:9px;color:#444;margin:4px 0 0;line-height:1.4">Darkens & desaturates the background to visually separate subjects from the scene. Click "Detect" to apply only to background, protecting human subjects.</p>
         </div>
+        <div class="compose-section">
+          <div class="compose-section-title">Global Adjustments</div>
+          <div class="compose-slider-row">
+            <span class="compose-slider-label">Contrast</span>
+            <input type="range" id="compose-contrast-slider" min="50" max="200" value="100" oninput="setComposeGlobalContrast(this.value)" onmousedown="captureUndoState()">
+            <span class="compose-slider-val" id="compose-contrast-val">100%</span>
+          </div>
+          <div class="compose-slider-row">
+            <span class="compose-slider-label">Saturation</span>
+            <input type="range" id="compose-saturation-slider" min="0" max="200" value="100" oninput="setComposeGlobalSaturation(this.value)" onmousedown="captureUndoState()">
+            <span class="compose-slider-val" id="compose-saturation-val">100%</span>
+          </div>
+        </div>
         <div class="compose-section compose-layer-controls" id="compose-layer-panel">
           <div class="compose-section-title">Selected Layer</div>
           <div class="compose-slider-row">
             <span class="compose-slider-label">Size</span>
-            <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)">
+            <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
             <span class="compose-slider-val" id="compose-scale-val">30%</span>
           </div>
           <div class="compose-slider-row">
             <span class="compose-slider-label">Opacity</span>
-            <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)">
+            <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)" onmousedown="captureUndoState()">
             <span class="compose-slider-val" id="compose-opacity-val">100%</span>
           </div>
           <div class="compose-slider-row" style="flex-direction:column;align-items:stretch;gap:6px">
@@ -481,10 +666,28 @@
           </div>
           <div class="compose-slider-row" id="compose-lighting-intensity-row" style="display:none">
             <span class="compose-slider-label">Intensity</span>
-            <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)">
+            <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)" onmousedown="captureUndoState()">
             <span class="compose-slider-val" id="compose-lighting-val">60%</span>
           </div>
+          <div class="compose-slider-row">
+            <span class="compose-slider-label">Contrast</span>
+            <input type="range" id="compose-layer-contrast" min="50" max="200" value="100" oninput="setComposeLayerContrast(this.value)" onmousedown="captureUndoState()">
+            <span class="compose-slider-val" id="compose-layer-contrast-val">100%</span>
+          </div>
+          <div class="compose-slider-row">
+            <span class="compose-slider-label">Saturation</span>
+            <input type="range" id="compose-layer-saturation" min="0" max="200" value="100" oninput="setComposeLayerSaturation(this.value)" onmousedown="captureUndoState()">
+            <span class="compose-slider-val" id="compose-layer-saturation-val">100%</span>
+          </div>
+          <button onclick="flipComposeLayerH()" style="width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">⇔ Flip Horizontal</button>
+          <textarea id="compose-layer-prompt" style="width:100%;min-height:44px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-top:6px"></textarea>
+          <button id="btn-apply-layer-prompt" onclick="applyLayerPrompt()" style="width:100%;margin-top:4px;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">Apply Prompt to Layer</button>
           <button class="btn btn-remove-layer" style="width:100%;margin-top:4px" onclick="removeComposeLayer()">Remove Layer</button>
+        </div>
+        <div class="compose-section">
+          <div class="compose-section-title">Run Prompt on Image</div>
+          <textarea id="compose-prompt-input" placeholder="Describe what to change…" style="width:100%;min-height:50px;background:#0e0e0e;border:1px solid #222;border-radius:4px;color:#aaa;font-size:11px;padding:5px 7px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-bottom:5px"></textarea>
+          <button id="btn-apply-compose-prompt" onclick="applyComposePrompt()" style="width:100%;padding:5px 8px;font-size:11px;background:#1a1a2e;color:#818cf8;border:1px solid #2e2e50;border-radius:4px;cursor:pointer">✦ Apply Prompt</button>
         </div>
         <div class="compose-section">
           <div class="compose-section-title">Scene Lighting</div>
@@ -515,6 +718,11 @@
           </div>
         </div>
         <div class="compose-section">
+          <div class="compose-section-title">Image Versions</div>
+          <button onclick="saveComposeVersion()" style="width:100%;padding:4px 8px;font-size:11px;background:#162a1e;color:#4ade80;border:1px solid #254a31;border-radius:4px;cursor:pointer;margin-bottom:6px">+ Save as Version</button>
+          <div id="compose-history-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto"></div>
+        </div>
+        <div class="compose-section">
           <p class="compose-hint-text">Drag corners to resize. Delete key removes selected layer.</p>
         </div>
       </div>
@@ -522,2657 +730,8 @@
   </div>
 </div>
 
-<script>
-// ── state ──────────────────────────────────────────────────────────────────
-let characters = [];
-let locations = [];
-let shots = [];
-let selectedStyleId = '';
-let visualStyles = [
-  { id: 'style-photo', name: 'Photorealistic', prompt: 'Photorealistic, hyperrealistic, cinematic photography, 8k, sharp detail.' },
-  { id: 'style-2d',    name: '2D Animation',   prompt: '2D animation style. Clean bold line art, smooth cel-shading, bright saturated colors. No shadows on background.' },
-  { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
-];
-// Keep legacy alias for server calls that still send visualStyle as a string
-Object.defineProperty(window, 'visualStyle', { get: () => selectedStyleId, set: v => { selectedStyleId = v; } });
+</div><!-- /#view-editor -->
 
-let CHAR_BOILERPLATE = 'ONE character. ONE pose. Front view only. Single figure centered in frame. Do NOT show multiple views, do NOT show side or back angles, do NOT create a turnaround sheet. Full body from head to toe, character fills the full height of the frame. Solid flat white background only — no background elements, no scenery.';
-let debugMode = false;
-
-// ── versioning ────────────────────────────────────────────────────────────
-let versions = []; // { id, label, parentLabel, data, timestamp }
-let currentVersionLabel = null;
-let editsSinceVersion = 0;
-const AUTO_VERSION_EVERY = 100;
-
-let lastScriptText = null;
-let lastScriptName = null;
-
-const SHOT_SIZES     = ['Extreme Wide Shot','Wide Shot','Medium Wide Shot','Medium Shot','Medium Close Up','Close Up','Extreme Close Up'];
-const SHOT_ANGLES    = ["Eye Level","Low Angle","High Angle","Bird's Eye View","Worm's Eye View","Dutch Angle","Over the Shoulder"];
-const SHOT_MOVEMENTS = ['Static','Pan Left','Pan Right','Tilt Up','Tilt Down','Slow Zoom In','Slow Zoom Out','Dolly In','Dolly Out','Tracking Shot','Handheld','Crane Up','Crane Down','Whip Pan'];
-
-function genId() { return Math.random().toString(36).slice(2, 9); }
-
-// ── persistence ───────────────────────────────────────────────────────────
-function loadData() {
-  loadVersions();
-  try {
-    const saved = localStorage.getItem('character-generator-data');
-    if (saved) {
-      const d = JSON.parse(saved);
-      characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
-      if (d.visualStyles) {
-        const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
-        const filtered = d.visualStyles.filter(s => !LEGACY.has(s.id) && !LEGACY.has(s.name));
-        // Always ensure the 3 default styles exist; merge saved custom styles on top
-        const defaults = [
-          { id: 'style-photo', name: 'Photorealistic', prompt: 'Photorealistic, hyperrealistic, cinematic photography, 8k, sharp detail.' },
-          { id: 'style-2d',    name: '2D Animation',   prompt: '2D animation style. Clean bold line art, smooth cel-shading, bright saturated colors. No shadows on background.' },
-          { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
-        ];
-        const merged = [...defaults];
-        for (const s of filtered) {
-          if (!merged.find(m => m.id === s.id)) merged.push(s);
-        }
-        visualStyles = merged;
-      }
-      selectedStyleId = d.selectedStyleId && visualStyles.find(s => s.id === d.selectedStyleId) ? d.selectedStyleId : (visualStyles[0]?.id || '');
-    }
-  } catch {}
-  if (!characters.length) characters = [newCharacter()];
-  if (!locations.length) locations = [newLocation()];
-  try {
-    const savedScript = localStorage.getItem('character-generator-script');
-    if (savedScript) { const s = JSON.parse(savedScript); lastScriptText = s.text; lastScriptName = s.name; }
-  } catch {}
-  applyStyleUI();
-  renderScriptPreview();
-  renderCharacters();
-  renderLocations();
-  renderShots();
-  renderVersionUI();
-}
-
-function saveData() {
-  syncFromDOM();
-  localStorage.setItem('character-generator-data', JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId }));
-  const btn = document.querySelector('.save-btn');
-  btn.textContent = 'Saved!'; btn.classList.add('saved');
-  setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800);
-}
-
-function autoSave() {
-  syncFromDOM();
-  localStorage.setItem('character-generator-data', JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId }));
-  editsSinceVersion++;
-  if (editsSinceVersion >= AUTO_VERSION_EVERY) {
-    createVersion(true); // auto
-  } else {
-    saveVersionMeta();
-    const el = document.getElementById('version-edit-count');
-    if (el) el.textContent = `${editsSinceVersion}/${AUTO_VERSION_EVERY}`;
-  }
-}
-
-let _saveTimer = null;
-function debouncedSave() {
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(autoSave, 400);
-}
-
-function saveVersionMeta() {
-  localStorage.setItem('character-generator-versions', JSON.stringify({ versions, currentVersionLabel, editsSinceVersion }));
-}
-
-function loadVersions() {
-  try {
-    const saved = localStorage.getItem('character-generator-versions');
-    if (saved) {
-      const d = JSON.parse(saved);
-      versions = d.versions || [];
-      currentVersionLabel = d.currentVersionLabel ?? null;
-      editsSinceVersion = d.editsSinceVersion || 0;
-    }
-  } catch {}
-}
-
-function createVersion(isAuto = false) {
-  syncFromDOM();
-  const parentLabel = currentVersionLabel;
-  const siblings = versions.filter(v => v.parentLabel === parentLabel);
-  const label = parentLabel ? `${parentLabel}.${siblings.length + 1}` : String(siblings.length + 1);
-  versions.push({
-    id: genId(),
-    label,
-    parentLabel,
-    data: JSON.parse(JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId })),
-    timestamp: Date.now(),
-    auto: isAuto
-  });
-  currentVersionLabel = label;
-  editsSinceVersion = 0;
-  saveVersionMeta();
-  renderVersionUI();
-  if (!isAuto) {
-    const btn = document.getElementById('btn-new-version');
-    if (btn) { btn.classList.add('saved-flash'); setTimeout(() => btn.classList.remove('saved-flash'), 1500); }
-  }
-}
-
-function loadVersion(label) {
-  if (!label) return;
-  const v = versions.find(v => v.label === label);
-  if (!v) return;
-  const d = v.data;
-  characters = JSON.parse(JSON.stringify(d.characters || []));
-  locations  = JSON.parse(JSON.stringify(d.locations  || []));
-  shots      = JSON.parse(JSON.stringify(d.shots      || []));
-  if (d.visualStyles) {
-    const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
-    const filtered = d.visualStyles.filter(s => !LEGACY.has(s.id) && !LEGACY.has(s.name));
-    const defaults = [
-      { id: 'style-photo', name: 'Photorealistic', prompt: 'Photorealistic, hyperrealistic, cinematic photography, 8k, sharp detail.' },
-      { id: 'style-2d',    name: '2D Animation',   prompt: '2D animation style. Clean bold line art, smooth cel-shading, bright saturated colors. No shadows on background.' },
-      { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
-    ];
-    const merged = [...defaults];
-    for (const s of filtered) { if (!merged.find(m => m.id === s.id)) merged.push(s); }
-    visualStyles = merged;
-  }
-  selectedStyleId = d.selectedStyleId && visualStyles.find(s => s.id === d.selectedStyleId)
-    ? d.selectedStyleId : (visualStyles[0]?.id || '');
-  currentVersionLabel = label;
-  editsSinceVersion = 0;
-  localStorage.setItem('character-generator-data', JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId }));
-  saveVersionMeta();
-  applyStyleUI();
-  renderVisualStyles();
-  renderCharacters();
-  renderLocations();
-  renderShots();
-  renderVersionUI();
-  showToast(`Loaded version ${label}`);
-}
-
-function timeAgo(ts) {
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
-function renderVersionUI() {
-  const el = document.getElementById('version-ui');
-  if (!el) return;
-  const sorted = [...versions].sort((a, b) => b.timestamp - a.timestamp);
-  el.innerHTML = `
-    ${versions.length > 0 ? `
-      <select class="version-select" onchange="loadVersion(this.value)">
-        <option value="">version history…</option>
-        ${sorted.map(v => `<option value="${v.label}" ${v.label === currentVersionLabel ? 'selected' : ''}>v${v.label}${v.auto ? ' ⟳' : ''} · ${timeAgo(v.timestamp)}</option>`).join('')}
-      </select>
-    ` : ''}
-    <button id="btn-new-version" class="btn-new-version" onclick="createVersion()">+ New Version</button>
-    ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
-    <span id="version-edit-count" class="version-edit-count">${editsSinceVersion > 0 ? `${editsSinceVersion}/${AUTO_VERSION_EVERY}` : ''}</span>
-  `;
-}
-
-function syncFromDOM() {
-  document.querySelectorAll('#characters-body tr[data-id]').forEach(row => {
-    const char = characters.find(c => c.id === row.dataset.id);
-    if (!char) return;
-    char.name = row.querySelector('.field-name').value;
-    char.reference = row.querySelector('.field-ref').value;
-    char.prompt = row.querySelector('.field-prompt').value;
-  });
-  document.querySelectorAll('#characters-body .char-angle-row').forEach(angleRow => {
-    const charId = angleRow.id.replace('char-angles-', '');
-    const char = characters.find(c => c.id === charId);
-    if (!char) return;
-    if (!char.angles) char.angles = {};
-    angleRow.querySelectorAll('.angle-prompt-field').forEach(field => {
-      const angle = field.dataset.angle;
-      if (!char.angles[angle]) char.angles[angle] = {};
-      char.angles[angle].prompt = field.value;
-    });
-  });
-  document.querySelectorAll('#locations-body tr[data-id]').forEach(row => {
-    const loc = locations.find(l => l.id === row.dataset.id);
-    if (!loc) return;
-    loc.name = row.querySelector('.field-name').value;
-    loc.reference = row.querySelector('.field-ref').value;
-    loc.prompt = row.querySelector('.field-prompt').value;
-  });
-  document.querySelectorAll('#shots-body tr[data-id]').forEach(row => {
-    const shot = shots.find(s => s.id === row.dataset.id);
-    if (!shot) return;
-    shot.lyric = row.querySelector('.field-lyric').value;
-    shot.description = row.querySelector('.field-desc').value;
-    shot.imagePrompt = row.querySelector('.field-imgprompt').value;
-    shot.videoPrompt = row.querySelector('.field-vidprompt').value;
-    shot.shotSize = row.querySelector('.field-size').value;
-    shot.shotAngle = row.querySelector('.field-angle')?.value || shot.shotAngle;
-    shot.shotMovement = row.querySelector('.field-movement').value;
-    shot.characterIds = [...row.querySelectorAll('.char-cb:checked')].map(cb => cb.value);
-    shot.locationId = row.querySelector('.field-loc-select')?.value || '';
-  });
-  document.querySelectorAll('#shots-body .shot-detail-row').forEach(detRow => {
-    const shotId = detRow.id.replace('shot-detail-', '');
-    const shot = shots.find(s => s.id === shotId);
-    if (!shot) return;
-    if (!shot.characterDetails) shot.characterDetails = {};
-    // Don't overwrite characterDetails from DOM when compositor is open for this shot
-    // (compositor is the source of truth for angle/expression while open)
-    if (_compose && _compose.shotId === shotId) return;
-    detRow.querySelectorAll('tr[data-char-id]').forEach(cRow => {
-      const cid = cRow.dataset.charId;
-      if (!shot.characterDetails[cid]) shot.characterDetails[cid] = {};
-      const d = shot.characterDetails[cid];
-      d.expression = cRow.querySelector('.det-expression')?.value || '';
-      d.facingDir   = cRow.querySelector('.det-facing')?.value || 'Front';
-    });
-  });
-}
-
-// ── visual style ──────────────────────────────────────────────────────────
-function toggleDebugMode() {
-  debugMode = !debugMode;
-  const panel = document.getElementById('debug-panel');
-  const btn = document.getElementById('btn-debug-toggle');
-  panel.style.display = debugMode ? 'block' : 'none';
-  btn.style.color = debugMode ? '#e05050' : '#444';
-  btn.style.borderColor = debugMode ? '#5a1a1a' : '#222';
-  btn.style.background = debugMode ? '#1a0505' : 'none';
-  if (debugMode) {
-    const ta = document.getElementById('debug-boilerplate');
-    if (ta) ta.value = CHAR_BOILERPLATE;
-  }
-}
-
-function onBoilerplateChange(val) {
-  CHAR_BOILERPLATE = val;
-  document.querySelectorAll('.char-prompt-static').forEach(el => {
-    // Only update framing cells (first static block per character), not style previews
-    if (!el.classList.contains('char-style-preview')) el.textContent = val;
-  });
-}
-
-function setStyle(id) {
-  selectedStyleId = id;
-  renderVisualStyles();
-  autoSave();
-  document.querySelectorAll('.char-style-preview').forEach(el => {
-    el.textContent = getStylePrompt() || '(no style selected)';
-  });
-}
-
-function applyStyleUI() {
-  renderVisualStyles();
-}
-
-function getStylePrompt() {
-  return visualStyles.find(s => s.id === selectedStyleId)?.prompt || '';
-}
-
-function getCharFullPrompt(charPrompt) {
-  const parts = [charPrompt.trim(), CHAR_BOILERPLATE, getStylePrompt()].filter(Boolean);
-  return parts.join('\n\n');
-}
-
-function renderVisualStyles() {
-  const container = document.getElementById('style-options');
-  if (!container) return;
-  if (!selectedStyleId && visualStyles.length) selectedStyleId = visualStyles[0].id;
-  const sel = visualStyles.find(s => s.id === selectedStyleId);
-  const pills = visualStyles.map(s => `
-    <label class="style-pill">
-      <input type="radio" name="style" value="${esc(s.id)}" ${s.id === selectedStyleId ? 'checked' : ''} onchange="setStyle('${esc(s.id)}')">
-      <span class="style-pill-name">${esc(s.name)}</span>
-      <button class="style-pill-del" onclick="event.preventDefault();deleteVisualStyle('${esc(s.id)}')" title="Remove">✕</button>
-    </label>`).join('');
-  container.innerHTML = `
-    <div class="style-pills">
-      ${pills}
-      <button class="btn-add-style" onclick="addVisualStyle()">+ Add Style</button>
-    </div>
-    ${sel ? `<div class="style-prompt-row">
-      <textarea class="style-prompt-input" placeholder="Style prompt…" oninput="onStylePromptChange('${esc(sel.id)}',this.value)">${esc(sel.prompt)}</textarea>
-    </div>` : ''}`;
-}
-
-function onStyleNameChange(id, val) {
-  const s = visualStyles.find(s => s.id === id);
-  if (!s) return;
-  s.name = val;
-  // Update the pill label without full re-render (avoids losing textarea focus)
-  const pill = document.querySelector(`.style-pill input[value="${CSS.escape(id)}"] + .style-pill-name`);
-  if (pill) pill.textContent = val;
-  autoSave();
-}
-
-function onStylePromptChange(id, val) {
-  const s = visualStyles.find(s => s.id === id);
-  if (s) {
-    s.prompt = val;
-    autoSave();
-    if (id === selectedStyleId) {
-      document.querySelectorAll('.char-style-preview').forEach(el => {
-        el.textContent = val || '(no style selected)';
-      });
-    }
-  }
-}
-
-function addVisualStyle() {
-  const s = { id: 'style-' + genId(), name: 'New Style', prompt: '' };
-  visualStyles.push(s);
-  renderVisualStyles();
-  autoSave();
-}
-
-function deleteVisualStyle(id) {
-  if (visualStyles.length <= 1) { showToast('Need at least one style.', true); return; }
-  visualStyles = visualStyles.filter(s => s.id !== id);
-  if (selectedStyleId === id) selectedStyleId = visualStyles[0]?.id || '';
-  renderVisualStyles();
-  autoSave();
-}
-
-// ── character helpers ─────────────────────────────────────────────────────
-// Angles generated by AI (left side + back)
-const CHAR_ANGLES_AI = ['3/4 Left', 'Profile Left', '3/4 Back Left', 'Back'];
-// Right-side angles mirrored from their left counterparts
-const MIRROR_PAIRS = { '3/4 Right': '3/4 Left', 'Profile Right': 'Profile Left', '3/4 Back Right': '3/4 Back Left' };
-// All non-front angles displayed in subrows (walk-around order)
-const CHAR_ANGLES = ['3/4 Left', 'Profile Left', '3/4 Back Left', 'Back', '3/4 Back Right', 'Profile Right', '3/4 Right'];
-const ANGLE_DESC = {
-  'Front':          'front view, facing forward, full body, solid flat white background, no shadows, no gradients',
-  '3/4 Left':       'three-quarter profile turned slightly to the left, full body, solid flat white background, no shadows, no gradients',
-  'Profile Left':   'pure side profile facing left, 90 degree side view, full body, solid flat white background, no shadows, no gradients',
-  '3/4 Back Left':  'three-quarter rear view angled to the left, back of character mostly visible, full body, solid flat white background, no shadows, no gradients',
-  'Back':           'rear view from behind, back of character fully visible, full body, solid flat white background, no shadows, no gradients',
-  '3/4 Back Right': 'three-quarter rear view angled to the right, back of character mostly visible, full body, solid flat white background, no shadows, no gradients',
-  'Profile Right':  'pure side profile facing right, 90 degree side view, full body, solid flat white background, no shadows, no gradients',
-  '3/4 Right':      'three-quarter profile turned slightly to the right, full body, solid flat white background, no shadows, no gradients',
-};
-
-function newCharacter() { return { id: genId(), name: '', reference: '', referenceImage: null, prompt: '', images: [], angles: {}, expressionCache: {} }; }
-
-function addCharacter() {
-  syncFromDOM(); characters.push(newCharacter()); renderCharacters(); renderShots(); autoSave();
-}
-function deleteCharacter(id) {
-  syncFromDOM();
-  characters = characters.filter(c => c.id !== id);
-  if (!characters.length) characters = [newCharacter()];
-  shots.forEach(s => { s.characterIds = (s.characterIds || []).filter(cid => cid !== id); });
-  renderCharacters(); renderShots(); autoSave();
-}
-
-// ── location helpers ──────────────────────────────────────────────────────
-function newLocation() { return { id: genId(), name: '', reference: '', referenceImage: null, prompt: '', images: [] }; }
-
-function addLocation() {
-  syncFromDOM(); locations.push(newLocation()); renderLocations(); renderShots(); autoSave();
-}
-function deleteLocation(id) {
-  syncFromDOM();
-  locations = locations.filter(l => l.id !== id);
-  if (!locations.length) locations = [newLocation()];
-  shots.forEach(s => { if (s.locationId === id) s.locationId = ''; });
-  renderLocations(); renderShots(); autoSave();
-}
-
-// ── shot helpers ──────────────────────────────────────────────────────────
-function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {} }; }
-
-function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); autoSave(); }
-function deleteShot(id) { syncFromDOM(); shots = shots.filter(s => s.id !== id); renderShots(); autoSave(); }
-function onShotLocationChange(shotId, locationId) {
-  const shot = shots.find(s => s.id === shotId);
-  if (shot) shot.locationId = locationId;
-  // Sync final-image-cell dropdown
-  const finalCell = document.getElementById(`final-img-${shotId}`);
-  if (finalCell) {
-    const finalSel = finalCell.querySelector('.final-loc-select');
-    if (finalSel) finalSel.value = locationId;
-    // Update location preview image
-    const loc = locations.find(l => l.id === locationId);
-    const locImg = loc?.images?.[0] || null;
-    const preview = finalCell.querySelector('.final-image-loc-preview');
-    if (preview) {
-      const existing = preview.querySelector('.final-image-preview');
-      const empty = preview.querySelector('.final-image-loc-empty');
-      if (locImg) {
-        if (existing) existing.src = locImg;
-        else { if (empty) empty.remove(); const img = document.createElement('img'); img.className = 'final-image-preview'; img.src = locImg; preview.insertBefore(img, preview.firstChild); }
-      } else {
-        if (existing) existing.remove();
-        if (!empty) { const d = document.createElement('div'); d.className = 'final-image-loc-empty'; d.innerHTML = '<span>No location</span>'; preview.insertBefore(d, preview.firstChild); }
-      }
-    }
-  }
-  // If compositor is open for this shot, update the background
-  if (_compose && _compose.shotId === shotId) {
-    const loc = locations.find(l => l.id === locationId);
-    loadComposeBackground(loc?.images?.[0] || null);
-  }
-}
-
-function onFinalLocChange(shotId, locationId) {
-  // Sync the shot row's location select
-  const row = document.querySelector(`tr[data-id="${shotId}"]`);
-  if (row) {
-    const sel = row.querySelector('.field-loc-select');
-    if (sel) sel.value = locationId;
-  }
-  onShotLocationChange(shotId, locationId);
-  autoSave();
-}
-function moveShot(id, dir) {
-  syncFromDOM();
-  const idx = shots.findIndex(s => s.id === id);
-  const newIdx = idx + dir;
-  if (newIdx < 0 || newIdx >= shots.length) return;
-  [shots[idx], shots[newIdx]] = [shots[newIdx], shots[idx]];
-  renderShots(); autoSave();
-}
-
-// ── render ────────────────────────────────────────────────────────────────
-function renderCharacters() {
-  document.getElementById('characters-body').innerHTML = characters.map(c => charRowHTML(c) + charAngleRowHTML(c)).join('');
-}
-function renderLocations() { document.getElementById('locations-body').innerHTML = locations.map(l => locRowHTML(l)).join(''); }
-function renderShots() {
-  const openIds = new Set(
-    [...document.querySelectorAll('.shot-detail-row')]
-      .filter(r => r.style.display !== 'none')
-      .map(r => r.id.replace('shot-detail-', ''))
-  );
-  document.getElementById('shots-body').innerHTML = shots.map((s, i) => shotRowHTML(s, i)).join('');
-  openIds.forEach(id => {
-    const row = document.getElementById(`shot-detail-${id}`);
-    if (row) {
-      row.style.display = '';
-      const btn = document.querySelector(`#shots-body tr[data-id="${id}"] .btn-detail-toggle`);
-      if (btn) btn.textContent = '▼';
-    }
-  });
-}
-
-function charRowHTML(c) {
-  const frontUrl = c.images?.[0] || null;
-  const frontHTML = frontUrl
-    ? `<img src="${esc(frontUrl)}" alt="Front">`
-    : `<span class="placeholder">·</span>`;
-  const refImgHTML = c.referenceImage
-    ? `<img src="${esc(c.referenceImage.dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${c.id}', event)">✕</button>`
-    : `<div class="upload-hint">Click to<br>upload</div>`;
-  return `<tr data-id="${c.id}">
-    <td><input type="text" class="field-name" placeholder="Name…" value="${esc(c.name)}" oninput="debouncedSave()"></td>
-    <td><textarea class="field-ref" rows="3" placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${esc(c.reference)}</textarea></td>
-    <td>
-      <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="triggerImageUpload('${c.id}')">${refImgHTML}</div>
-        <input type="file" id="file-${c.id}" class="hidden" accept="image/*" onchange="handleImageUpload('${c.id}', this)">
-      </div>
-    </td>
-    <td>
-      <div class="char-prompt-section">
-        <span class="char-prompt-label">Character Description</span>
-        <textarea class="field-prompt" rows="3" placeholder="Describe the character's appearance…" oninput="debouncedSave()">${esc(c.prompt)}</textarea>
-        <span class="char-prompt-label" style="margin-top:4px">Framing (applied to all characters)</span>
-        <div class="char-prompt-static">${esc(CHAR_BOILERPLATE)}</div>
-        <span class="char-prompt-label" style="margin-top:4px">Visual Style</span>
-        <div class="char-prompt-static char-style-preview">${esc(getStylePrompt()) || '(no style selected)'}</div>
-      </div>
-    </td>
-    <td>
-      <div class="char-front-wrap">
-        <div class="char-front-slot" id="char-front-${c.id}">${frontHTML}</div>
-        <select class="expr-select" id="expr-${c.id}" onchange="applyCharExpression('${c.id}')">
-          <option value="neutral">Neutral</option>
-          <option value="happy">Happy</option>
-          <option value="sad">Sad</option>
-          <option value="surprised">Surprised</option>
-          <option value="wink">Wink</option>
-          <option value="angry">Angry</option>
-        </select>
-      </div>
-    </td>
-    <td>
-      <div class="actions">
-        <button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')">▶ Angles</button>
-        <button class="btn btn-gen-prompt" onclick="generateCharPrompt('${c.id}')">Generate Prompt</button>
-        <button class="btn btn-gen-images" onclick="generateCharFrontProfile('${c.id}')">Generate Front Profile</button>
-        <button class="btn btn-gen-images" style="background:#162a2a;border-color:#254a4a;color:#4adede" onclick="generateCharAngles('${c.id}')">Generate Angles</button>
-        <button class="btn btn-delete" onclick="deleteCharacter('${c.id}')">Remove</button>
-      </div>
-    </td>
-  </tr>`;
-}
-
-function charAngleRowHTML(c) {
-  const rows = CHAR_ANGLES.map(angle => {
-    const d = c.angles?.[angle] || {};
-    const isMirror = !!MIRROR_PAIRS[angle];
-    const imgHTML = d.image
-      ? `<img src="${esc(d.image)}" alt="${esc(angle)}">`
-      : `<span class="placeholder">·</span>`;
-    const labelHTML = isMirror
-      ? `${esc(angle)} <span style="color:#555;font-size:9px">🪞</span>`
-      : esc(angle);
-    const promptCell = isMirror
-      ? `<td style="color:#383838;font-size:10px;font-style:italic;vertical-align:middle">Mirrored from ${esc(MIRROR_PAIRS[angle])}</td>`
-      : `<td><textarea class="angle-prompt-field" data-angle="${esc(angle)}" rows="3" oninput="debouncedSave()">${esc(d.prompt || '')}</textarea></td>`;
-    return `<tr>
-      <td class="angle-label">${labelHTML}</td>
-      ${promptCell}
-      <td><div class="angle-img-slot" id="angle-img-${c.id}-${angle.replace(/\W/g,'_')}">${imgHTML}</div></td>
-      <td><button class="btn btn-regen" onclick="regenerateCharAngle('${c.id}','${angle}')">${isMirror ? '🪞 Re-mirror' : '↺ Regenerate'}</button></td>
-    </tr>`;
-  }).join('');
-  return `<tr class="char-angle-row" id="char-angles-${c.id}" style="display:none">
-    <td colspan="6">
-      <div class="char-angle-inner">
-        <table class="angle-subtable">
-          <thead><tr><th>Angle</th><th>Prompt</th><th>Image</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </td>
-  </tr>`;
-}
-
-function locRowHTML(l) {
-  const imgsHTML = Array.from({ length: 2 }, (_, i) => {
-    const url = l.images[i];
-    return `<div class="img-slot">${url ? `<img src="${esc(url)}" alt="">` : `<span class="placeholder">·</span>`}</div>`;
-  }).join('');
-  const refImgHTML = l.referenceImage
-    ? `<img src="${esc(l.referenceImage.dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${l.id}', event)">✕</button>`
-    : `<div class="upload-hint">Click to<br>upload</div>`;
-  return `<tr data-id="${l.id}">
-    <td><input type="text" class="field-name" placeholder="Name…" value="${esc(l.name)}" oninput="debouncedSave()"></td>
-    <td><textarea class="field-ref" rows="3" placeholder="Describe environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.reference)}</textarea></td>
-    <td>
-      <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="triggerLocImageUpload('${l.id}')">${refImgHTML}</div>
-        <input type="file" id="locfile-${l.id}" class="hidden" accept="image/*" onchange="handleLocImageUpload('${l.id}', this)">
-      </div>
-    </td>
-    <td>
-      <div class="char-prompt-section">
-        <span class="char-prompt-label">Location Description</span>
-        <textarea class="field-prompt" rows="3" placeholder="Describe the environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.prompt)}</textarea>
-        <span class="char-prompt-label" style="margin-top:4px">Visual Style</span>
-        <div class="char-prompt-static char-style-preview">${esc(getStylePrompt()) || '(no style selected)'}</div>
-      </div>
-    </td>
-    <td><div class="images-grid" id="loc-imgs-${l.id}">${imgsHTML}</div></td>
-    <td>
-      <div class="actions">
-        <button class="btn btn-gen-prompt" onclick="generateLocPrompt('${l.id}')">Generate Prompt</button>
-        <button class="btn btn-gen-images" onclick="generateLocImages('${l.id}')">Generate Images</button>
-        <button class="btn btn-delete" onclick="deleteLocation('${l.id}')">Remove</button>
-      </div>
-    </td>
-  </tr>`;
-}
-
-function shotRowHTML(s, idx) {
-  const imgsHTML = Array.from({ length: 2 }, (_, i) => {
-    const url = s.images?.[i];
-    return `<div class="img-slot">${url ? `<img src="${esc(url)}" alt="">` : `<span class="placeholder">·</span>`}</div>`;
-  }).join('');
-  const charChecks = characters.length
-    ? characters.map(c => `<label class="char-check-item"><input type="checkbox" class="char-cb" value="${c.id}"${(s.characterIds||[]).includes(c.id) ? ' checked' : ''} onchange="autoSave();refreshShotDetailIfOpen('${s.id}')">${esc(c.name || 'Unnamed')}</label>`).join('')
-    : `<span class="char-checks-empty">No characters yet</span>`;
-  const locOpts = `<option value="">— None —</option>` + locations.map(l => `<option value="${esc(l.id)}"${(s.locationId||'')=== l.id?' selected':''}>${esc(l.name||'Unnamed')}</option>`).join('');
-  const sizeOpts = SHOT_SIZES.map(v => `<option${s.shotSize === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  const angleOpts = SHOT_ANGLES.map(v => `<option${s.shotAngle === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  const moveOpts = SHOT_MOVEMENTS.map(v => `<option${s.shotMovement === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  return `<tr data-id="${s.id}">
-    <td><div class="order-btns">
-      <button class="btn-ord" onclick="moveShot('${s.id}',-1)" ${idx===0?'disabled':''}>▲</button>
-      <button class="btn-ord" onclick="moveShot('${s.id}',1)" ${idx===shots.length-1?'disabled':''}>▼</button>
-      <button class="btn-ord btn-detail-toggle" onclick="toggleShotDetail('${s.id}')" title="Character details">▶</button>
-    </div></td>
-    <td><textarea class="field-lyric" rows="3" placeholder="Lyric or action…" oninput="debouncedSave()">${esc(s.lyric)}</textarea></td>
-    <td><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
-    <td><div class="char-checks">${charChecks}</div></td>
-    <td><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select></td>
-    <td><select class="field-size" onchange="autoSave()">${sizeOpts}</select></td>
-    <td><select class="field-movement" onchange="autoSave()">${moveOpts}</select></td>
-    <td><textarea class="field-imgprompt" rows="3" placeholder="Image prompt (opening frame)…" oninput="debouncedSave()">${esc(s.imagePrompt)}</textarea></td>
-    <td><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea></td>
-    <td><div class="images-grid" id="shot-imgs-${s.id}">${imgsHTML}</div></td>
-    <td>
-      <div class="final-image-cell" id="final-img-${s.id}">
-        ${(() => {
-          const loc = locations.find(l => l.id === s.locationId);
-          const locImg = loc?.images?.[0] || null;
-          const previewImg = s.finalImage || locImg;
-          const locOpts2 = `<option value="">— No Location —</option>` + locations.map(l => `<option value="${esc(l.id)}"${s.locationId === l.id?' selected':''}>${esc(l.name||'Unnamed')}</option>`).join('');
-          return `<div class="final-image-loc-preview" onclick="openCompose('${s.id}')">
-            ${previewImg ? `<img src="${esc(previewImg)}" class="final-image-preview">` : `<div class="final-image-loc-empty"><span>No location</span></div>`}
-            ${s.finalImage ? `<div class="final-image-badge">✎ Final</div>` : ''}
-            <div class="final-image-compose-hint">Click to compose</div>
-          </div>
-          <div class="final-image-loc-row">
-            <select class="final-loc-select" onchange="onFinalLocChange('${s.id}',this.value);event.stopPropagation()">${locOpts2}</select>
-          </div>`;
-        })()}
-      </div>
-    </td>
-    <td>
-      <div class="actions">
-        <button class="btn btn-gen-prompt" onclick="generateShotPrompts('${s.id}')">Generate Prompts</button>
-        <button class="btn btn-gen-images" onclick="generateShotImages('${s.id}')">Generate Images</button>
-        <button class="btn btn-delete" onclick="deleteShot('${s.id}')">Remove</button>
-      </div>
-    </td>
-  </tr>` + shotDetailRowHTML(s);
-}
-
-// ── script upload ─────────────────────────────────────────────────────────
-function renderScriptPreview() {
-  const preview = document.getElementById('script-preview');
-  if (lastScriptText) {
-    document.getElementById('script-filename').textContent = lastScriptName || 'Script';
-    document.getElementById('script-text').textContent = lastScriptText;
-    preview.classList.add('visible');
-  } else {
-    preview.classList.remove('visible');
-  }
-}
-
-function removeScript() {
-  lastScriptText = null; lastScriptName = null;
-  localStorage.removeItem('character-generator-script');
-  renderScriptPreview();
-  document.getElementById('upload-status').textContent = 'Accepts .txt, .pdf, .docx';
-  document.getElementById('upload-status').className = 'upload-status';
-}
-
-async function handleScriptUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const status = document.getElementById('upload-status');
-  status.textContent = 'Parsing script…'; status.className = 'upload-status loading';
-  const formData = new FormData();
-  formData.append('file', file);
-  try {
-    const res = await fetch('/api/parse-script', { method: 'POST', body: formData });
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch { throw new Error(text || `HTTP ${res.status}`); }
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    syncFromDOM();
-    lastScriptText = data.scriptText || null;
-    lastScriptName = file.name;
-    if (lastScriptText) localStorage.setItem('character-generator-script', JSON.stringify({ text: lastScriptText, name: lastScriptName }));
-    renderScriptPreview();
-    if (data.characters?.length) mergeCharacters(data.characters);
-    if (data.locations?.length) mergeLocations(data.locations);
-    status.textContent = `Parsed ${data.characters?.length ?? 0} characters and ${data.locations?.length ?? 0} locations from "${file.name}" — click Generate Shot Sequence to build shots`;
-    status.className = 'upload-status done';
-  } catch (e) {
-    status.textContent = 'Error: ' + e.message; status.className = 'upload-status error';
-    showToast('Script parse failed: ' + e.message, true);
-  }
-  input.value = '';
-}
-
-function mergeCharacters(incoming) {
-  for (const c of incoming) {
-    const name = (c.name || '').trim();
-    const existing = characters.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
-    if (existing) { if (!existing.reference && c.description) existing.reference = c.description; }
-    else characters.push({ ...newCharacter(), name, reference: c.description || '' });
-  }
-  if (!characters.length) characters = [newCharacter()];
-  renderCharacters();
-  renderShots();
-  autoSave();
-}
-
-function mergeLocations(incoming) {
-  for (const l of incoming) {
-    const name = (l.name || '').trim();
-    const existing = locations.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
-    if (existing) { if (!existing.reference && l.description) existing.reference = l.description; }
-    else locations.push({ ...newLocation(), name, reference: l.description || '' });
-  }
-  if (!locations.length) locations = [newLocation()];
-  renderLocations();
-  renderShots();
-  autoSave();
-}
-
-async function generateCharactersFromScript() {
-  if (!lastScriptText) { showToast('Upload a script first.', true); return; }
-  const btn = document.getElementById('btn-gen-chars');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    syncFromDOM();
-    const data = await apiFetch('/api/parse-characters', { scriptText: lastScriptText });
-    if (data.characters?.length) mergeCharacters(data.characters);
-    showToast(`Generated ${data.characters?.length ?? 0} characters.`);
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Characters'; }
-}
-
-async function generateLocationsFromScript() {
-  if (!lastScriptText) { showToast('Upload a script first.', true); return; }
-  const btn = document.getElementById('btn-gen-locs');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    syncFromDOM();
-    const data = await apiFetch('/api/parse-locations', { scriptText: lastScriptText });
-    if (data.locations?.length) mergeLocations(data.locations);
-    showToast(`Generated ${data.locations?.length ?? 0} locations.`);
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Locations'; }
-}
-
-async function generateShotSequence() {
-  if (!lastScriptText) { showToast('Upload a script first.', true); return; }
-  const btn = document.getElementById('btn-gen-shots');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    syncFromDOM();
-    const data = await apiFetch('/api/generate-shot-sequence', {
-      scriptText: lastScriptText,
-      characters: characters.map(c => ({ id: c.id, name: c.name })),
-      locations: locations.map(l => ({ id: l.id, name: l.name }))
-    });
-    if (data.shots?.length) {
-      const newShots = data.shots.map(s => ({ ...newShot(), ...s, characterIds: s.characterIds || [], locationId: s.locationId || (s.locationIds?.[0] || '') }));
-      shots = [...shots.filter(s => s.lyric || s.description), ...newShots];
-    }
-    renderShots();
-    autoSave();
-    showToast(`Generated ${data.shots?.length ?? 0} shots.`);
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Shot Sequence'; }
-}
-
-// ── image upload ──────────────────────────────────────────────────────────
-function triggerImageUpload(id) { document.getElementById(`file-${id}`).click(); }
-function handleImageUpload(id, input) {
-  const file = input.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width; canvas.height = img.height;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      const base64 = dataUrl.split(',')[1];
-      const char = characters.find(c => c.id === id);
-      if (char) char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
-      const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
-      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
-      autoSave();
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-function removeRefImage(id, event) {
-  event.stopPropagation();
-  const char = characters.find(c => c.id === id);
-  if (char) char.referenceImage = null;
-  const preview = document.querySelector(`#characters-body tr[data-id="${id}"] .ref-img-preview`);
-  if (preview) preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
-  autoSave();
-}
-
-// ── location image upload ─────────────────────────────────────────────────
-function triggerLocImageUpload(id) { document.getElementById(`locfile-${id}`).click(); }
-function handleLocImageUpload(id, input) {
-  const file = input.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width; canvas.height = img.height;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      const base64 = dataUrl.split(',')[1];
-      const loc = locations.find(l => l.id === id);
-      if (loc) loc.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
-      const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
-      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
-      autoSave();
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-function removeLocRefImage(id, event) {
-  event.stopPropagation();
-  const loc = locations.find(l => l.id === id);
-  if (loc) loc.referenceImage = null;
-  const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
-  if (preview) preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
-  autoSave();
-}
-
-// ── generate location prompt ──────────────────────────────────────────────
-async function generateLocPrompt(id) {
-  const row = document.querySelector(`#locations-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-prompt');
-  const loc = locations.find(l => l.id === id);
-  const reference = row.querySelector('.field-ref').value.trim();
-  if (!reference && !loc?.referenceImage) { showToast('Add a reference description or image first.', true); return; }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    const body = { referenceDescription: reference, visualStyle: selectedStyleId, isLocation: true };
-    if (loc?.referenceImage) body.referenceImage = { base64: loc.referenceImage.base64, mediaType: loc.referenceImage.mediaType };
-    const data = await apiFetch('/api/generate-prompt', body);
-    row.querySelector('.field-prompt').value = data.prompt;
-    if (loc) { loc.reference = reference; loc.prompt = data.prompt; }
-    autoSave();
-    showToast('Prompt generated.');
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Prompt'; }
-}
-
-// ── generate location images ──────────────────────────────────────────────
-async function generateLocImages(id) {
-  const row = document.querySelector(`#locations-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-images');
-  const prompt = row.querySelector('.field-prompt').value.trim();
-  if (!prompt) { showToast('Generate a prompt first.', true); return; }
-  const loc = locations.find(l => l.id === id);
-  const grid = document.getElementById(`loc-imgs-${id}`);
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  grid.innerHTML = loadingSlots(2);
-  const fullLocPrompt = [prompt, getStylePrompt()].filter(Boolean).join('\n\n');
-  try {
-    let data;
-    if (loc?.referenceImage) {
-      const uploaded = await apiFetch('/api/upload-reference', { base64: loc.referenceImage.base64, mediaType: loc.referenceImage.mediaType });
-      data = await apiFetch('/api/generate-shot-images', { prompt: fullLocPrompt, referenceImageUrls: [uploaded.url], stylePrompt: '' });
-    } else {
-      data = await apiFetch('/api/generate-images', { prompt: fullLocPrompt, stylePrompt: '' });
-    }
-    if (loc) loc.images = data.images;
-    grid.innerHTML = imageSlots(data.images, 2);
-    autoSave();
-    showToast(`${data.images.length} image${data.images.length !== 1 ? 's' : ''} generated.`);
-  } catch(e) { grid.innerHTML = emptySlots(2); showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Images'; }
-}
-
-// ── generate character prompt ─────────────────────────────────────────────
-async function generateCharPrompt(id) {
-  const row = document.querySelector(`#characters-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-prompt');
-  const char = characters.find(c => c.id === id);
-  const reference = row.querySelector('.field-ref').value.trim();
-  if (!reference && !char?.referenceImage) { showToast('Add a reference description or image first.', true); return; }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    const body = { referenceDescription: reference, visualStyle: selectedStyleId };
-    if (char?.referenceImage) body.referenceImage = { base64: char.referenceImage.base64, mediaType: char.referenceImage.mediaType };
-    const data = await apiFetch('/api/generate-prompt', body);
-    row.querySelector('.field-prompt').value = data.prompt;
-    if (char) { char.reference = reference; char.prompt = data.prompt; }
-    autoSave();
-    showToast('Prompt generated.');
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Prompt'; }
-}
-
-// ── generate character images ─────────────────────────────────────────────
-function proxyUrl(url) {
-  return `/api/proxy-image?url=${encodeURIComponent(url)}`;
-}
-
-function mirrorImageUrl(srcUrl) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
-      ctx.drawImage(img, 0, 0);
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
-    };
-    img.onerror = reject;
-    img.src = proxyUrl(srcUrl);
-  });
-}
-
-function buildAnglePrompt(char, angle) {
-  const desc = ANGLE_DESC[angle] || angle;
-  const name = char.name ? `${char.name}, ` : '';
-  return `${name}${desc}`;
-}
-
-function toggleCharAngles(id) {
-  const angleRow = document.getElementById(`char-angles-${id}`);
-  const btn = document.querySelector(`#characters-body tr[data-id="${id}"] .btn-toggle-angles`);
-  if (!angleRow) return;
-  const hidden = angleRow.style.display === 'none' || angleRow.style.display === '';
-  angleRow.style.display = hidden ? 'table-row' : 'none';
-  if (btn) btn.textContent = hidden ? '▼ Angles' : '▶ Angles';
-}
-
-async function generateCharFrontProfile(id) {
-  syncFromDOM();
-  const row = document.querySelector(`#characters-body tr[data-id="${id}"]`);
-  const btns = row.querySelectorAll('.btn-gen-images');
-  const btn = btns[0];
-  const charDesc = row.querySelector('.field-prompt').value.trim();
-  if (!charDesc) { showToast('Add a character description first.', true); return; }
-  const char = characters.find(c => c.id === id);
-  if (!char.angles) char.angles = {};
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  const frontSlot = document.getElementById(`char-front-${id}`);
-  if (frontSlot) frontSlot.innerHTML = '<span class="spinner"></span>';
-  try {
-    const fullPrompt = getCharFullPrompt(charDesc);
-    const frontData = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
-    const frontUrl = frontData.images?.[0] || null;
-    char.images = frontUrl ? [frontUrl] : [];
-    char.prompt = charDesc;
-    if (frontSlot) frontSlot.innerHTML = frontUrl ? `<img src="${esc(frontUrl)}" alt="Front">` : '<span class="placeholder">·</span>';
-    autoSave();
-    showToast('Front profile generated.');
-  } catch(e) {
-    if (frontSlot) frontSlot.innerHTML = '<span class="placeholder">·</span>';
-    showToast('Error: ' + e.message, true);
-  }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Front Profile'; }
-}
-
-async function generateCharAngles(id) {
-  syncFromDOM();
-  const row = document.querySelector(`#characters-body tr[data-id="${id}"]`);
-  const btns = row.querySelectorAll('.btn-gen-images');
-  const btn = btns[1];
-  const char = characters.find(c => c.id === id);
-  if (!char.angles) char.angles = {};
-  const refUrl = char.referenceImage?.dataUrl || char.images?.[0] || null;
-  if (!refUrl) { showToast('Generate a front profile first (or upload a reference image).', true); return; }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  // Open angles panel so spinners are visible
-  const angleRow = document.getElementById(`char-angles-${id}`);
-  if (angleRow && (angleRow.style.display === 'none' || !angleRow.style.display)) {
-    toggleCharAngles(id);
-  }
-  CHAR_ANGLES.forEach(angle => {
-    const slotEl = document.getElementById(`angle-img-${id}-${angle.replace(/\W/g, '_')}`);
-    if (slotEl) slotEl.innerHTML = '<span class="spinner"></span>';
-  });
-  try {
-    await Promise.all(CHAR_ANGLES_AI.map(async angle => {
-      const angleKey = angle.replace(/\W/g, '_');
-      const slotEl = document.getElementById(`angle-img-${id}-${angleKey}`);
-      const anglePromptField = document.querySelector(`#char-angles-${id} .angle-prompt-field[data-angle="${angle}"]`);
-      const existingPrompt = anglePromptField?.value.trim();
-      const anglePrompt = existingPrompt || buildAnglePrompt(char, angle);
-      if (anglePromptField && !existingPrompt) anglePromptField.value = anglePrompt;
-      try {
-        const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl] });
-        const url = varData.url || null;
-        if (!char.angles[angle]) char.angles[angle] = {};
-        char.angles[angle].prompt = anglePrompt;
-        char.angles[angle].image = url;
-        if (slotEl) slotEl.innerHTML = url ? `<img src="${esc(url)}" alt="${esc(angle)}">` : '<span class="placeholder">·</span>';
-        const mirrorAngle = Object.keys(MIRROR_PAIRS).find(k => MIRROR_PAIRS[k] === angle);
-        if (mirrorAngle && url) {
-          const mirrorSlot = document.getElementById(`angle-img-${id}-${mirrorAngle.replace(/\W/g, '_')}`);
-          try {
-            const mirroredDataUrl = await mirrorImageUrl(url);
-            if (!char.angles[mirrorAngle]) char.angles[mirrorAngle] = {};
-            char.angles[mirrorAngle].image = mirroredDataUrl;
-            if (mirrorSlot) mirrorSlot.innerHTML = `<img src="${esc(mirroredDataUrl)}" alt="${esc(mirrorAngle)}">`;
-          } catch { if (mirrorSlot) mirrorSlot.innerHTML = '<span class="placeholder">·</span>'; }
-        }
-      } catch(e) {
-        if (slotEl) slotEl.innerHTML = '<span class="placeholder">✕</span>';
-      }
-    }));
-    autoSave();
-    showToast('Angle images generated.');
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Angles'; }
-}
-
-async function generateMissingCharPrompts() {
-  const btn = document.getElementById('btn-gen-missing-prompts');
-  const missing = characters.filter(c => !c.prompt?.trim());
-  if (!missing.length) { showToast('All characters already have prompts.'); return; }
-  btn.disabled = true; btn.textContent = `Generating 0/${missing.length}…`;
-  let done = 0;
-  for (const char of missing) {
-    const reference = char.reference?.trim();
-    if (!reference && !char.referenceImage) { done++; continue; }
-    try {
-      const body = { referenceDescription: reference, visualStyle: selectedStyleId };
-      if (char.referenceImage) body.referenceImage = { base64: char.referenceImage.base64, mediaType: char.referenceImage.mediaType };
-      const data = await apiFetch('/api/generate-prompt', body);
-      char.prompt = data.prompt;
-      const row = document.querySelector(`#characters-body tr[data-id="${char.id}"]`);
-      if (row) row.querySelector('.field-prompt').value = data.prompt;
-    } catch(e) { console.error('prompt gen failed for', char.name, e); }
-    done++;
-    btn.textContent = `Generating ${done}/${missing.length}…`;
-  }
-  autoSave();
-  showToast(`Done — prompts generated for ${done} character(s).`);
-  btn.disabled = false; btn.textContent = 'Generate Missing Prompts';
-}
-
-async function generateMissingCharImages() {
-  const btn = document.getElementById('btn-gen-missing-images');
-  const missing = characters.filter(c => !c.images?.length);
-  if (!missing.length) { showToast('All characters already have images.'); return; }
-  btn.disabled = true; btn.textContent = `Generating 0/${missing.length}…`;
-  let done = 0;
-  for (const char of missing) {
-    const charDesc = char.prompt?.trim();
-    if (!charDesc) { done++; continue; }
-    const frontSlot = document.getElementById(`char-front-${char.id}`);
-    if (frontSlot) frontSlot.innerHTML = '<span class="spinner"></span>';
-    try {
-      const fullPrompt = getCharFullPrompt(charDesc);
-      const frontData = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
-      const frontUrl = frontData.images?.[0] || null;
-      char.images = frontUrl ? [frontUrl] : [];
-      if (frontSlot) frontSlot.innerHTML = frontUrl ? `<img src="${esc(frontUrl)}" alt="Front">` : '<span class="placeholder">·</span>';
-    } catch(e) {
-      console.error('image gen failed for', char.name, e);
-      if (frontSlot) frontSlot.innerHTML = '<span class="placeholder">·</span>';
-    }
-    done++;
-    btn.textContent = `Generating ${done}/${missing.length}…`;
-  }
-  autoSave();
-  showToast(`Done — images generated for ${done} character(s).`);
-  btn.disabled = false; btn.textContent = 'Generate Missing Images';
-}
-
-async function applyCharExpression(id) {
-  const char = characters.find(c => c.id === id);
-  const frontSlot = document.getElementById(`char-front-${id}`);
-  const select = document.getElementById(`expr-${id}`);
-  const expression = select?.value || 'neutral';
-
-  const imageUrl = char?.images?.[0] || null;
-  if (!imageUrl) { showToast('Generate an image first.', true); select.value = 'neutral'; return; }
-
-  if (expression === 'neutral') {
-    frontSlot.innerHTML = `<img src="${esc(imageUrl)}" alt="Front">`;
-    return;
-  }
-
-  select.disabled = true;
-  frontSlot.innerHTML = '<span class="spinner"></span>';
-  try {
-    const data = await apiFetch('/api/apply-expression', { imageUrl, expression });
-    if (data.imageUrl) {
-      frontSlot.innerHTML = `<img src="${esc(data.imageUrl)}" alt="Front">`;
-    } else {
-      frontSlot.innerHTML = `<img src="${esc(imageUrl)}" alt="Front">`;
-      showToast('Expression could not be applied.', true);
-    }
-  } catch(e) {
-    frontSlot.innerHTML = `<img src="${esc(imageUrl)}" alt="Front">`;
-    showToast('Error: ' + e.message, true);
-  } finally {
-    select.disabled = false;
-  }
-}
-
-async function regenerateCharAngle(id, angle) {
-  syncFromDOM();
-  const char = characters.find(c => c.id === id);
-  if (!char) return;
-
-  // If this is a mirrored (right-side) angle, regenerate the source left angle instead
-  const sourceAngle = MIRROR_PAIRS[angle];
-  if (sourceAngle) { await regenerateCharAngle(id, sourceAngle); return; }
-
-  const angleKey = angle.replace(/\W/g, '_');
-  const slotEl = document.getElementById(`angle-img-${id}-${angleKey}`);
-  const anglePromptField = document.querySelector(`#char-angles-${id} .angle-prompt-field[data-angle="${angle}"]`);
-  const anglePrompt = anglePromptField?.value.trim() || buildAnglePrompt(char, angle);
-  if (anglePromptField && !anglePromptField.value.trim()) anglePromptField.value = anglePrompt;
-
-  const refUrl = char.images?.[0] || char.referenceImage?.dataUrl || null;
-  if (!refUrl) { showToast('Generate the front image first.', true); return; }
-
-  const btn = slotEl?.closest('tr')?.querySelector('.btn-regen');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
-  if (slotEl) slotEl.innerHTML = '<span class="spinner"></span>';
-
-  // Spin the mirror slot too
-  const mirrorAngle = Object.keys(MIRROR_PAIRS).find(k => MIRROR_PAIRS[k] === angle);
-  const mirrorSlot = mirrorAngle ? document.getElementById(`angle-img-${id}-${mirrorAngle.replace(/\W/g, '_')}`) : null;
-  if (mirrorSlot) mirrorSlot.innerHTML = '<span class="spinner"></span>';
-
-  try {
-    const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl] });
-    const url = varData.url || null;
-    if (!char.angles) char.angles = {};
-    if (!char.angles[angle]) char.angles[angle] = {};
-    char.angles[angle].prompt = anglePrompt;
-    char.angles[angle].image = url;
-    if (slotEl) slotEl.innerHTML = url ? `<img src="${esc(url)}" alt="${esc(angle)}">` : '<span class="placeholder">·</span>';
-
-    // Re-mirror the right counterpart
-    if (mirrorAngle && url) {
-      try {
-        const mirroredDataUrl = await mirrorImageUrl(url);
-        if (!char.angles[mirrorAngle]) char.angles[mirrorAngle] = {};
-        char.angles[mirrorAngle].image = mirroredDataUrl;
-        if (mirrorSlot) mirrorSlot.innerHTML = `<img src="${esc(mirroredDataUrl)}" alt="${esc(mirrorAngle)}">`;
-      } catch { if (mirrorSlot) mirrorSlot.innerHTML = '<span class="placeholder">·</span>'; }
-    }
-
-    autoSave();
-    showToast(`${angle} regenerated.`);
-  } catch(e) {
-    if (slotEl) slotEl.innerHTML = '<span class="placeholder">✕</span>';
-    if (mirrorSlot) mirrorSlot.innerHTML = '<span class="placeholder">·</span>';
-    showToast('Error: ' + e.message, true);
-  }
-  finally { if (btn) { btn.disabled = false; btn.innerHTML = '↺ Regenerate'; } }
-}
-
-// ── generate shot prompts ─────────────────────────────────────────────────
-async function generateShotPrompts(id) {
-  const row = document.querySelector(`#shots-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-prompt');
-  const lyric = row.querySelector('.field-lyric').value.trim();
-  const description = row.querySelector('.field-desc').value.trim();
-  if (!lyric && !description) { showToast('Add lyric/action or description first.', true); return; }
-  const shot = shots.find(s => s.id === id);
-  const shotSize = row.querySelector('.field-size').value;
-  const shotAngle = shot?.shotAngle || '';
-  const shotMovement = row.querySelector('.field-movement').value;
-  const position = '';
-  const selectedCharIds = [...row.querySelectorAll('.char-cb:checked')].map(cb => cb.value);
-  const selectedChars = characters.filter(c => selectedCharIds.includes(c.id)).map(c => ({
-    name: c.name, description: c.reference,
-    referenceImage: c.referenceImage ? { base64: c.referenceImage.base64, mediaType: c.referenceImage.mediaType } : null
-  }));
-  const locationId = row.querySelector('.field-loc-select')?.value || shot?.locationId || '';
-  const selectedLocs = locations.filter(l => l.id === locationId).map(l => ({ name: l.name, description: l.reference }));
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  try {
-    const data = await apiFetch('/api/generate-shot-prompts', { lyric, description, shotSize, shotAngle, shotMovement, position, characters: selectedChars, locations: selectedLocs, visualStyle });
-    row.querySelector('.field-imgprompt').value = data.imagePrompt || '';
-    row.querySelector('.field-vidprompt').value = data.videoPrompt || '';
-    if (shot) { shot.imagePrompt = data.imagePrompt || ''; shot.videoPrompt = data.videoPrompt || ''; }
-    if (shot) { shot.imagePrompt = data.imagePrompt || ''; shot.videoPrompt = data.videoPrompt || ''; }
-    autoSave();
-    showToast('Prompts generated.');
-  } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Prompts'; }
-}
-
-// ── generate shot images ──────────────────────────────────────────────────
-async function generateShotImages(id) {
-  const row = document.querySelector(`#shots-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-images');
-  const imagePrompt = row.querySelector('.field-imgprompt').value.trim();
-  if (!imagePrompt) { showToast('Generate prompts first.', true); return; }
-
-  const shot = shots.find(s => s.id === id);
-  const selectedCharIds = [...row.querySelectorAll('.char-cb:checked')].map(cb => cb.value);
-  const charImageUrls = characters.filter(c => selectedCharIds.includes(c.id) && c.images?.length).map(c => c.images[0]);
-  const locationId2 = row.querySelector('.field-loc-select')?.value || shot?.locationId || '';
-  const locImageUrls = locations.filter(l => l.id === locationId2 && l.images?.length).map(l => l.images[0]);
-  const referenceImageUrls = [...charImageUrls, ...locImageUrls];
-
-  const grid = document.getElementById(`shot-imgs-${id}`);
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  grid.innerHTML = loadingSlots(2);
-  try {
-    const data = await apiFetch('/api/generate-shot-images', { prompt: imagePrompt, referenceImageUrls, stylePrompt: getStylePrompt() });
-    if (shot) shot.images = data.images;
-    grid.innerHTML = imageSlots(data.images, 2);
-    autoSave();
-    showToast(`${data.images.length} image${data.images.length !== 1 ? 's' : ''} generated.`);
-  } catch(e) { grid.innerHTML = emptySlots(2); showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Images'; }
-}
-
-async function generateShotVideo(id) {
-  const row = document.querySelector(`#shots-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-video');
-  const videoPrompt = row.querySelector('.field-vidprompt').value.trim();
-  if (!videoPrompt) { showToast('Generate prompts first.', true); return; }
-
-  const selectedIds = [...row.querySelectorAll('.char-cb:checked')].map(cb => cb.value);
-  const selectedChars = characters.filter(c => selectedIds.includes(c.id));
-  const refChar = selectedChars.find(c => c.images && c.images.length > 0);
-  const referenceImageUrl = refChar ? refChar.images[0] : null;
-
-  const cell = document.getElementById(`shot-vid-${id}`);
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
-  cell.innerHTML = '<span class="spinner" style="border-top-color:#4ade80"></span>';
-  try {
-    const data = await apiFetch('/api/generate-shot-video', { prompt: videoPrompt, referenceImageUrl });
-    const shot = shots.find(s => s.id === id);
-    if (shot) shot.videoUrl = data.url;
-    autoSave();
-    cell.innerHTML = data.url ? `<video src="${data.url}" controls style="width:100%;border-radius:6px"></video>` : '<span class="placeholder">·</span>';
-    showToast(data.url ? 'Video generated.' : 'No video returned.', !data.url);
-  } catch(e) { cell.innerHTML = '<span class="placeholder">·</span>'; showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Video'; }
-}
-
-// ── shot detail sub-row ───────────────────────────────────────────────────
-function buildCharDetPrompt(facingDir, expression, eyeDir) {
-  const faceMap = {
-    'Front': 'facing forward, front view, face visible',
-    '3/4 Left': 'turned slightly to the left, 3/4 view, face partially visible',
-    '3/4 Right': 'turned slightly to the right, 3/4 view, face partially visible',
-    'Profile Left': 'side profile facing left, full side view of outfit',
-    'Profile Right': 'side profile facing right, full side view of outfit',
-    '3/4 Back Left': 'turned mostly away, 3/4 rear view angled slightly to the left, back of outfit visible',
-    '3/4 Back Right': 'turned mostly away, 3/4 rear view angled slightly to the right, back of outfit visible',
-    'Back': 'turned around, rear view showing the back of their outfit and hair',
-  };
-  const parts = [faceMap[facingDir] || 'facing forward, face visible'];
-  if (expression) parts.push(`${expression} expression`);
-  if (eyeDir && eyeDir !== 'Forward') parts.push(`eyes looking ${eyeDir.toLowerCase()}`);
-  return parts.join(', ');
-}
-
-function updateCharDetPrompt(shotId, charId) {
-  // kept for compatibility — no longer used for expression-only flow
-}
-
-function updateCharDetRef(shotId, charId) {
-  const detRow = document.querySelector(`#shot-detail-${shotId} tr[data-char-id="${charId}"]`);
-  if (!detRow) return;
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-  const facingDir = detRow.querySelector('.det-facing').value;
-  const refImg = getCharAngleImage(char, facingDir);
-  const refEl = document.getElementById(`char-det-ref-${shotId}-${charId}`);
-  if (refEl) refEl.innerHTML = refImg
-    ? `<img src="${esc(refImg)}" class="char-det-img" style="max-width:80px;opacity:0.7">`
-    : `<span class="placeholder" style="font-size:10px;color:#333">No image</span>`;
-}
-
-const DET_FACING =['Front','3/4 Left','3/4 Right','Profile Left','Profile Right','3/4 Back Left','3/4 Back Right','Back'];
-const DET_EYE    = ['Forward','Left','Right','Up','Down','Up-Left','Up-Right','Down-Left','Down-Right'];
-
-function getCharAngleImage(char, facingDir) {
-  if (!facingDir || facingDir === 'Front') return char.images?.[0] || null;
-  return char.angles?.[facingDir]?.image || char.images?.[0] || null;
-}
-
-function shotDetailRowHTML(s) {
-  const selectedChars = characters.filter(c => (s.characterIds||[]).includes(c.id));
-  const inner = selectedChars.length
-    ? `<table class="char-det-table">
-        <colgroup><col class="cdt-name"><col class="cdt-facing"><col class="cdt-expr"><col class="cdt-act"><col class="cdt-ref"><col class="cdt-result"></colgroup>
-        <thead><tr><th>Character</th><th>Angle</th><th>Expression</th><th></th><th>Reference</th><th>Result</th></tr></thead>
-        <tbody>${selectedChars.map(c => {
-          const d = (s.characterDetails||{})[c.id] || {};
-          const facingDir = d.facingDir || 'Front';
-          const facingOpts = DET_FACING.map(v=>`<option${facingDir===v?' selected':''}>${esc(v)}</option>`).join('');
-          const refImg = getCharAngleImage(c, facingDir);
-          const refHTML = refImg
-            ? `<img src="${esc(refImg)}" class="char-det-img" style="max-width:80px;opacity:0.7">`
-            : `<span class="placeholder" style="font-size:10px;color:#333">No image</span>`;
-          const resultHTML = d.variantImage
-            ? `<img src="${esc(d.variantImage)}" class="char-det-img">`
-            : `<span class="placeholder">·</span>`;
-          return `<tr data-char-id="${c.id}">
-            <td class="char-det-name">${esc(c.name||'Unnamed')}</td>
-            <td><select class="det-facing" onchange="updateCharDetRef('${s.id}','${c.id}');autoSave()">${facingOpts}</select></td>
-            <td><input type="text" class="det-expression" placeholder="e.g. smiling, worried…" value="${esc(d.expression||'')}" oninput="debouncedSave()"></td>
-            <td><button class="btn btn-gen-images" style="padding:6px 8px;font-size:11px" onclick="generateCharVariant('${s.id}','${c.id}')">Generate</button></td>
-            <td><div class="char-det-ref" id="char-det-ref-${s.id}-${c.id}">${refHTML}</div></td>
-            <td><div class="char-det-result" id="char-det-result-${s.id}-${c.id}">${resultHTML}</div></td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>`
-    : `<p class="shot-detail-empty">No characters selected for this shot.</p>`;
-  return `<tr class="shot-detail-row" id="shot-detail-${s.id}" style="display:none"><td colspan="14"><div class="shot-detail-inner">${inner}</div></td></tr>`;
-}
-
-function toggleShotDetail(id) {
-  const row = document.getElementById(`shot-detail-${id}`);
-  const btn = document.querySelector(`#shots-body tr[data-id="${id}"] .btn-detail-toggle`);
-  if (!row) return;
-  const opening = row.style.display === 'none';
-  row.style.display = opening ? '' : 'none';
-  if (btn) btn.textContent = opening ? '▼' : '▶';
-}
-
-function refreshShotDetailIfOpen(shotId) {
-  const row = document.getElementById(`shot-detail-${shotId}`);
-  if (!row || row.style.display === 'none') return;
-  syncFromDOM();
-  const shot = shots.find(s => s.id === shotId);
-  if (!shot) return;
-  const temp = document.createElement('tbody');
-  temp.innerHTML = shotDetailRowHTML(shot);
-  const newRow = temp.querySelector('.shot-detail-row');
-  if (newRow) { newRow.style.display = ''; row.innerHTML = newRow.innerHTML; }
-}
-
-async function generateCharVariant(shotId, charId) {
-  const shot = shots.find(s => s.id === shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!shot || !char) return;
-  const detRow = document.querySelector(`#shot-detail-${shotId} tr[data-char-id="${charId}"]`);
-  if (!detRow) return;
-
-  const expression = detRow.querySelector('.det-expression').value.trim();
-  const facingDir  = detRow.querySelector('.det-facing').value;
-
-  // Use the character's angle image for this facing direction as the reference
-  const refImg = getCharAngleImage(char, facingDir);
-  if (!refImg) { showToast('Generate character images first.', true); return; }
-
-  // Prompt is expression-only — the reference image provides the pose/angle
-  const prompt = expression
-    ? `Keep everything identical. Change only the facial expression to: ${expression}.`
-    : `Keep the character with a neutral expression. Do not change anything else.`;
-
-  const btn      = detRow.querySelector('.btn-gen-images');
-  const resultEl = document.getElementById(`char-det-result-${shotId}-${charId}`);
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-  resultEl.innerHTML = '<span class="spinner" style="border-top-color:#4ade80"></span>';
-
-  try {
-    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg] });
-    const url = data.url || null;
-    if (!shot.characterDetails) shot.characterDetails = {};
-    shot.characterDetails[charId] = { expression, facingDir, prompt, variantImage: url };
-    // Cache the expression variant on the character for reuse
-    if (url) {
-      if (!char.expressionCache) char.expressionCache = {};
-      if (!char.expressionCache[facingDir]) char.expressionCache[facingDir] = {};
-      char.expressionCache[facingDir][expression || 'neutral'] = url;
-    }
-
-    resultEl.innerHTML = url
-      ? `<img src="${esc(url)}" class="char-det-img">`
-      : '<span class="placeholder">·</span>';
-    autoSave();
-    showToast('Variant generated.');
-  } catch(e) {
-    resultEl.innerHTML = '<span class="placeholder">·</span>';
-    showToast('Error: ' + e.message, true);
-  } finally {
-    btn.disabled = false; btn.innerHTML = 'Generate';
-  }
-}
-
-// ── utilities ─────────────────────────────────────────────────────────────
-async function apiFetch(url, body) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { throw new Error(text || `HTTP ${res.status}`); }
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
-function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function loadingSlots(n) { return Array.from({length:n},()=>`<div class="img-slot"><span class="spinner" style="border-top-color:#4ade80"></span></div>`).join(''); }
-function emptySlots(n) { return Array.from({length:n},()=>`<div class="img-slot"><span class="placeholder">·</span></div>`).join(''); }
-function imageSlots(images, n) { return Array.from({length:n},(_,i)=>{const url=images[i];return`<div class="img-slot">${url?`<img src="${esc(url)}" alt="">`:`<span class="placeholder">·</span>`}</div>`;}).join(''); }
-
-function showToast(msg, isError=false) {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.className = 'toast show'+(isError?' error':'');
-  clearTimeout(t._timer);
-  if (!isError) t._timer = setTimeout(()=>{t.className='toast';}, 4000);
-}
-document.getElementById('toast').addEventListener('click', function(){ this.className='toast'; });
-
-loadData();
-
-// ── compose shot ──────────────────────────────────────────────────────────
-const COMPOSE_W = 1280, COMPOSE_H = 720;
-let _compose = null;   // { shotId, layers[], selectedIdx, dragging }
-let _composeDrag = null; // { layerIdx, startCx, startCy, startMx, startMy }
-
-// Rule-of-thirds positions by label
-const COMPOSE_POSITIONS = {
-  'Top Left':     { cx: COMPOSE_W * 1/3, cy: COMPOSE_H * 1/3 },
-  'Top Right':    { cx: COMPOSE_W * 2/3, cy: COMPOSE_H * 1/3 },
-  'Bottom Left':  { cx: COMPOSE_W * 1/3, cy: COMPOSE_H * 2/3 },
-  'Bottom Right': { cx: COMPOSE_W * 2/3, cy: COMPOSE_H * 2/3 },
-};
-
-function loadComposeBackground(url) {
-  _compose.bgUrl = url || null;
-  if (!url) { _compose.bgImg = null; renderCompose(); return; }
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => { _compose.bgImg = img; renderCompose(); };
-  img.onerror = () => { _compose.bgImg = null; renderCompose(); };
-  img.src = proxyUrl(url);
-}
-
-function markComposeBgSelected(key) {
-  document.querySelectorAll('#compose-loc-thumbs .compose-thumb').forEach(el => {
-    el.classList.toggle('selected', el.dataset.bgKey === key);
-  });
-}
-
-function selectComposeBg(key, url, locationId) {
-  if (!_compose) return;
-  _compose.bgKey = key;
-  markComposeBgSelected(key);
-  // If it's a location, also sync the row dropdowns
-  if (locationId) syncComposeLocationToRow(locationId);
-  loadComposeBackground(url || null);
-  saveComposeLayers();
-}
-
-function syncComposeLocationToRow(locationId) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  if (!shot) return;
-  shot.locationId = locationId;
-  const row = document.querySelector(`#shots-body tr[data-id="${_compose.shotId}"]`);
-  if (row) { const s = row.querySelector('.field-loc-select'); if (s) s.value = locationId; }
-  const finalCell = document.getElementById(`final-img-${_compose.shotId}`);
-  if (finalCell) {
-    const finalSel = finalCell.querySelector('.final-loc-select');
-    if (finalSel) finalSel.value = locationId;
-    const loc = locations.find(l => l.id === locationId);
-    const locImg = loc?.images?.[0] || null;
-    const preview = finalCell.querySelector('.final-image-loc-preview');
-    if (preview) {
-      let img = preview.querySelector('.final-image-preview');
-      const empty = preview.querySelector('.final-image-loc-empty');
-      if (locImg) {
-        if (img) img.src = locImg;
-        else { if (empty) empty.remove(); img = document.createElement('img'); img.className = 'final-image-preview'; img.src = locImg; preview.insertBefore(img, preview.firstChild); }
-      } else {
-        if (img && !shot.finalImage) img.remove();
-        if (!empty) { const d = document.createElement('div'); d.className = 'final-image-loc-empty'; d.innerHTML = '<span>No location</span>'; preview.insertBefore(d, preview.firstChild); }
-      }
-    }
-  }
-}
-
-function selectComposeLocation(locationId) {
-  if (!_compose) return;
-  selectComposeBg(`loc-${locationId}`, locations.find(l => l.id === locationId)?.images?.[0] || '', locationId);
-  autoSave();
-}
-
-function openCompose(shotId) {
-  const shot = shots.find(s => s.id === shotId);
-  if (!shot) return;
-
-  _compose = { shotId, layers: [], selectedIdx: -1, globalLighting: shot.composeMeta?.globalLighting || 'none', globalLightingDir: shot.composeMeta?.globalLightingDir || 'none', bgSeparation: shot.composeMeta?.bgSeparation ?? 0, bgKey: null, bgUrl: null, bgMask: null, bgMaskUrl: shot.composeMeta?.bgMaskUrl || null };
-  const canvas = document.getElementById('compose-canvas');
-  canvas.width = COMPOSE_W; canvas.height = COMPOSE_H;
-
-  // Background = selected location's image
-  const bgLoc = locations.find(l => l.id === shot.locationId && l.images?.length);
-  loadComposeBackground(bgLoc?.images?.[0] || shot.images?.[0] || null);
-
-  // Restore previously saved layers
-  if (shot.composeLayers?.length) restoreComposeLayers(shot.composeLayers);
-
-  // Restore subject mask if previously detected
-  if (_compose.bgMaskUrl) {
-    const maskImg = new Image();
-    maskImg.crossOrigin = 'anonymous';
-    maskImg.onload = () => { _compose.bgMask = maskImg; renderCompose(); };
-    maskImg.src = '/api/proxy-image?url=' + encodeURIComponent(_compose.bgMaskUrl);
-  }
-
-  // Build character cards (all characters) + AI generated images as draggable layers
-  renderComposeCharCards();
-
-  // Background thumbnails: locations only
-  const locThumbs = locations.map(l => {
-    const img = l.images?.[0];
-    const key = `loc-${l.id}`;
-    return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(img || '')}','${esc(l.id)}')">
-      ${img ? `<img src="${esc(proxyUrl(img))}" crossorigin="anonymous">` : '<span style="width:40px;height:40px;background:#1a1a1a;border-radius:4px;display:block"></span>'}
-      <span class="compose-thumb-name">${esc(l.name || 'Unnamed')}</span>
-      <span class="compose-thumb-add">↺</span>
-    </div>`;
-  }).join('');
-  const thumbContainer = document.getElementById('compose-loc-thumbs');
-  thumbContainer.innerHTML = locThumbs || `<span class="compose-empty">No locations</span>`;
-
-  // Mark initial selected bg (locations only)
-  const initBgKey = shot.locationId ? `loc-${shot.locationId}` : null;
-  if (initBgKey) { _compose.bgKey = initBgKey; markComposeBgSelected(initBgKey); }
-
-  updateComposeLayerPanel();
-  const glSel = document.getElementById('compose-global-lighting');
-  if (glSel) glSel.value = _compose.globalLighting || 'none';
-  const glDirSel = document.getElementById('compose-lighting-dir');
-  if (glDirSel) glDirSel.value = _compose.globalLightingDir || 'none';
-  const aiBtn = document.getElementById('btn-ai-relight');
-  if (aiBtn) aiBtn.style.display = (_compose.globalLightingDir && _compose.globalLightingDir !== 'none') ? 'block' : 'none';
-  const sepSlider = document.getElementById('compose-separation-slider');
-  const sepVal = document.getElementById('compose-separation-val');
-  const sepPct = Math.round((_compose.bgSeparation ?? 0) * 100);
-  if (sepSlider) sepSlider.value = sepPct;
-  if (sepVal) sepVal.textContent = sepPct + '%';
-  document.getElementById('compose-modal').classList.add('open');
-}
-
-// ── compositor character cards ─────────────────────────────────────────────
-
-const ALL_ANGLES = ['Front', ...CHAR_ANGLES];
-
-function getCompCharImage(char, angle, expression) {
-  const expr = (expression || '').trim().toLowerCase();
-  if (expr && char.expressionCache?.[angle]?.[expr]) return char.expressionCache[angle][expr];
-  if (!expr || expr === 'neutral') return getCharAngleImage(char, angle);
-  return getCharAngleImage(char, angle); // base angle image as fallback
-}
-
-function compCharExistingExprs(char, angle) {
-  const cache = char.expressionCache?.[angle] || {};
-  return Object.keys(cache);
-}
-
-function renderComposeCharCards() {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const container = document.getElementById('compose-char-cards');
-  if (!container) return;
-  const charHTML = characters.length
-    ? `<div class="compose-thumb-group-label">Characters</div>` + characters.map(c => compCharCardHTML(c, shot)).join('')
-    : '';
-  const shotImgs = shot?.images || [];
-  const shotImgHTML = shotImgs.length
-    ? `<div class="compose-thumb-group-label" style="margin-top:10px">AI Generated Images</div>` +
-      shotImgs.map((url, idx) => compShotImgCardHTML(url, idx)).join('')
-    : '';
-  container.innerHTML = charHTML + shotImgHTML;
-}
-
-function compCharCardHTML(char, shot) {
-  const det = (shot?.characterDetails || {})[char.id] || {};
-  const angle = det.facingDir || 'Front';
-  const expr = det.expression || '';
-  const onStage = _compose?.layers.some(l => l.charId === char.id);
-  const imgUrl = getCompCharImage(char, angle, expr);
-  const existingExprs = compCharExistingExprs(char, angle);
-  const angleOpts = ALL_ANGLES.map(a => `<option${a === angle ? ' selected' : ''}>${esc(a)}</option>`).join('');
-
-  return `<div class="comp-char-card${onStage ? ' on-stage' : ''}" id="comp-card-${esc(char.id)}">
-    <div class="comp-char-header">
-      <span class="comp-char-name">${esc(char.name || 'Unnamed')}</span>
-    </div>
-    <div class="comp-char-controls">
-      <select onchange="onCompAngleChange('${esc(char.id)}',this.value)">${angleOpts}</select>
-      <input type="text" placeholder="New expression…"
-        value="${esc(expr)}" onchange="onCompExprChange('${esc(char.id)}',this.value)"
-        onblur="onCompExprChange('${esc(char.id)}',this.value)">
-      ${existingExprs.length ? `<select class="comp-saved-exprs" onchange="onCompSavedExprSelect('${esc(char.id)}',this.value)">
-        <option value="">— Saved versions —</option>
-        ${existingExprs.map(e => `<option value="${esc(e)}"${e === (expr||'').toLowerCase() ? ' selected' : ''}>${esc(e)}</option>`).join('')}
-      </select>` : ''}
-    </div>
-    <div class="comp-char-preview" id="comp-preview-${esc(char.id)}"
-      draggable="true"
-      ondragstart="onCompCharDragStart(event,'${esc(char.id)}')"
-      ondragend="onCompCharDragEnd(event)">
-      ${imgUrl
-        ? `<img src="${esc(imgUrl)}" alt="${esc(char.name)}">`
-        : `<span class="placeholder">·</span>`}
-      <span class="comp-char-preview-label">Drag to canvas</span>
-    </div>
-    <div class="comp-char-footer">
-      <button class="btn-comp-add" onclick="compAddCharToStage('${esc(char.id)}')">+ Add to canvas</button>
-      <button class="btn-comp-gen" onclick="compGenerateExpr('${esc(char.id)}')">Generate</button>
-    </div>
-  </div>`;
-}
-
-function compShotImgCardHTML(url, idx) {
-  return `<div class="comp-char-card" id="comp-shot-img-${idx}">
-    <div class="comp-char-header">
-      <span class="comp-char-name">Generated Image ${idx + 1}</span>
-    </div>
-    <div class="comp-char-preview"
-      draggable="true"
-      ondragstart="onCompShotImgDragStart(event,${idx})"
-      ondragend="onCompCharDragEnd(event)">
-      <img src="${esc(proxyUrl(url))}" alt="Generated Image ${idx + 1}" crossorigin="anonymous">
-      <span class="comp-char-preview-label">Drag to canvas</span>
-    </div>
-    <div class="comp-char-footer">
-      <button class="btn-comp-add" onclick="compAddShotImgToStage(${idx})">+ Add to canvas</button>
-    </div>
-  </div>`;
-}
-
-function refreshCompCharCard(charId) {
-  const el = document.getElementById(`comp-card-${charId}`);
-  if (!el || !_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-  const temp = document.createElement('div');
-  temp.innerHTML = compCharCardHTML(char, shot);
-  el.replaceWith(temp.firstElementChild);
-}
-
-function onCompSavedExprSelect(charId, expr) {
-  if (!expr || !_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  const det = shot.characterDetails[charId];
-  det.expression = expr;
-  const char = characters.find(c => c.id === charId);
-  const angle = det.facingDir || 'Front';
-  const cached = char?.expressionCache?.[angle]?.[expr.toLowerCase()];
-  if (cached) det.variantImage = cached;
-  refreshCompCharCard(charId);
-  autoSave();
-}
-
-function onCompAngleChange(charId, angle) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  shot.characterDetails[charId].facingDir = angle;
-  delete shot.characterDetails[charId].variantImage;
-  refreshCompCharCard(charId);
-  refreshShotDetailIfOpen(_compose.shotId);
-  autoSave();
-}
-
-function onCompExprChange(charId, expr) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  const det = shot.characterDetails[charId];
-  if (det.expression === expr) return;
-  det.expression = expr;
-  // If this exact angle+expr combo is already cached, just refresh the card
-  const char = characters.find(c => c.id === charId);
-  const angle = det.facingDir || 'Front';
-  const cached = expr && char?.expressionCache?.[angle]?.[expr.toLowerCase()];
-  if (cached) { det.variantImage = cached; refreshCompCharCard(charId); autoSave(); return; }
-  refreshCompCharCard(charId);
-  autoSave();
-}
-
-async function compGenerateExpr(charId) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  const det = shot.characterDetails[charId];
-  const angle = det.facingDir || 'Front';
-  const expr = (det.expression || '').trim();
-
-  const refImg = getCharAngleImage(char, angle);
-  if (!refImg) { showToast('Generate character images first.', true); return; }
-
-  const previewEl = document.getElementById(`comp-preview-${charId}`);
-  if (previewEl) previewEl.innerHTML = '<span class="spinner" style="border-top-color:#818cf8"></span>';
-
-  const prompt = expr
-    ? `Keep everything identical. Change only the facial expression to: ${expr}.`
-    : `Keep the character with a neutral expression. Do not change anything else.`;
-
-  try {
-    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg] });
-    const url = data.url || null;
-    if (url) {
-      if (!char.expressionCache) char.expressionCache = {};
-      if (!char.expressionCache[angle]) char.expressionCache[angle] = {};
-      char.expressionCache[angle][expr.toLowerCase() || 'neutral'] = url;
-      det.variantImage = url;
-      // Ensure char is in shot's characterIds
-      if (!shot.characterIds.includes(charId)) {
-        shot.characterIds.push(charId);
-        syncCharCheckbox(_compose.shotId, charId, true);
-      }
-    }
-    refreshCompCharCard(charId);
-    refreshShotDetailIfOpen(_compose.shotId);
-    autoSave();
-    showToast('Generated.');
-  } catch(e) {
-    if (previewEl) previewEl.innerHTML = '<span class="placeholder">✕</span>';
-    showToast('Error: ' + e.message, true);
-  }
-}
-
-async function compAddCharToStage(charId) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  const det = shot.characterDetails[charId];
-  const angle = det.facingDir || 'Front';
-  const expr = (det.expression || '').trim();
-  const imgUrl = getCompCharImage(char, angle, expr);
-  if (!imgUrl) { showToast('No image for this character. Generate one first.', true); return; }
-
-  // Ensure char is in shot's characterIds
-  if (!shot.characterIds.includes(charId)) {
-    shot.characterIds.push(charId);
-    syncCharCheckbox(_compose.shotId, charId, true);
-  }
-
-  await addComposeLayerUrl(imgUrl, char.name || 'Unnamed', charId);
-  refreshCompCharCard(charId);
-}
-
-function syncCharCheckbox(shotId, charId, checked) {
-  const row = document.querySelector(`#shots-body tr[data-id="${shotId}"]`);
-  if (!row) return;
-  const cb = row.querySelector(`.char-cb[value="${charId}"]`);
-  if (cb) cb.checked = checked;
-}
-
-let _compDragCharId = null;
-
-function onCompCharDragStart(event, charId) {
-  _compDragCharId = charId;
-  event.dataTransfer.effectAllowed = 'copy';
-}
-function onCompCharDragEnd() { _compDragCharId = null; _compDragShotIdx = null; }
-
-let _compDragShotIdx = null;
-function onCompShotImgDragStart(event, idx) {
-  _compDragShotIdx = idx;
-  event.dataTransfer.effectAllowed = 'copy';
-}
-
-async function compAddShotImgToStage(idx) {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const url = shot?.images?.[idx];
-  if (!url) return;
-  await addComposeLayerUrl(url, `Generated Image ${idx + 1}`, null);
-}
-
-async function addComposeLayerUrl(url, label, charId = null, dropPos = null) {
-  if (!_compose) return;
-  const pos = dropPos || { cx: COMPOSE_W / 2, cy: COMPOSE_H * 0.65 };
-
-  const placeholderIdx = _compose.layers.length;
-  _compose.layers.push({ imgEl: null, label, charId, cx: pos.cx, cy: pos.cy, scale: 0.40, w: 0, h: 0, opacity: 1, loading: true });
-  _compose.selectedIdx = placeholderIdx;
-  showToast('Removing background…');
-
-  try {
-    const data = await apiFetch('/api/remove-background', { imageUrl: url });
-    const bgRemovedUrl = data.url || url;
-
-    const imgEl = new Image();
-    imgEl.crossOrigin = 'anonymous';
-    imgEl.onload = () => {
-      const scale = 0.40;
-      const h = COMPOSE_H * scale;
-      const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
-      _compose.layers[placeholderIdx] = { imgEl, imgUrl: bgRemovedUrl, label, charId, cx: pos.cx, cy: pos.cy, scale, w, h, opacity: 1 };
-      _compose.selectedIdx = placeholderIdx;
-      updateComposeLayerPanel();
-      renderCompose();
-      saveComposeLayers();
-      if (charId) refreshCompCharCard(charId);
-    };
-    imgEl.src = proxyUrl(bgRemovedUrl);
-  } catch(e) {
-    _compose.layers.splice(placeholderIdx, 1);
-    showToast('Background removal failed, adding original.', true);
-    const imgEl = new Image();
-    imgEl.crossOrigin = 'anonymous';
-    imgEl.onload = () => {
-      const scale = 0.40;
-      const h = COMPOSE_H * scale;
-      const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
-      _compose.layers.push({ imgEl, imgUrl: url, label, charId, cx: pos.cx, cy: pos.cy, scale, w, h, opacity: 1 });
-      _compose.selectedIdx = _compose.layers.length - 1;
-      updateComposeLayerPanel();
-      renderCompose();
-      saveComposeLayers();
-      if (charId) refreshCompCharCard(charId);
-    };
-    imgEl.src = proxyUrl(url);
-  }
-}
-
-function saveComposeLayers() {
-  if (!_compose) return;
-  const shot = shots.find(s => s.id === _compose.shotId);
-  if (!shot) return;
-  shot.composeLayers = _compose.layers
-    .filter(l => l.imgUrl && !l.loading)
-    .map(l => ({
-      imgUrl: l.imgUrl,
-      label: l.label,
-      charId: l.charId || null,
-      cx: l.cx, cy: l.cy,
-      scale: l.scale, w: l.w, h: l.h,
-      opacity: l.opacity ?? 1,
-      lighting: l.lighting || 'none',
-      lightingIntensity: l.lightingIntensity ?? 0.6,
-    }));
-  if (!shot.composeMeta) shot.composeMeta = {};
-  shot.composeMeta.globalLighting = _compose.globalLighting || 'none';
-  shot.composeMeta.globalLightingDir = _compose.globalLightingDir || 'none';
-  shot.composeMeta.bgSeparation = _compose.bgSeparation ?? 0;
-  shot.composeMeta.bgMaskUrl = _compose.bgMaskUrl || null;
-  autoSave();
-}
-
-function setComposeBgSeparation(val) {
-  if (!_compose) return;
-  _compose.bgSeparation = val / 100;
-  document.getElementById('compose-separation-val').textContent = val + '%';
-  renderCompose();
-  saveComposeLayers();
-}
-
-async function detectBgSubjects() {
-  if (!_compose) return;
-  const bgUrl = _compose.bgUrl;
-  if (!bgUrl) { alert('No background image selected.'); return; }
-  const btn = document.getElementById('btn-detect-subjects');
-  const status = document.getElementById('detect-subjects-status');
-  btn.disabled = true;
-  btn.textContent = '⏳ Detecting…';
-  status.style.color = '#555';
-  status.textContent = 'Running subject detection…';
-  try {
-    const resp = await fetch('/api/segment-subjects', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl: bgUrl })
-    });
-    const data = await resp.json();
-    if (!data.url) throw new Error(data.error || 'No mask returned');
-    const maskImg = new Image();
-    maskImg.crossOrigin = 'anonymous';
-    maskImg.src = '/api/proxy-image?url=' + encodeURIComponent(data.url);
-    await new Promise((res, rej) => { maskImg.onload = res; maskImg.onerror = rej; });
-    _compose.bgMask = maskImg;
-    _compose.bgMaskUrl = data.url;
-    const shot = shots.find(s => s.id === _compose.shotId);
-    if (shot) { if (!shot.composeMeta) shot.composeMeta = {}; shot.composeMeta.bgMaskUrl = data.url; }
-    autoSave();
-    status.style.color = '#4ade80';
-    status.textContent = 'Subjects detected! Separation will now protect human figures.';
-    renderCompose();
-    showMaskPreview();
-  } catch(e) {
-    status.style.color = '#f87171';
-    status.textContent = 'Detection failed: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '✦ Detect Human Subjects';
-  }
-}
-
-function showMaskPreview() {
-  if (!_compose?.bgMask) return;
-  const canvas = document.getElementById('compose-canvas');
-  const ctx = canvas.getContext('2d');
-  // Flash a green tint over detected subjects for 1.5s
-  const flash = () => {
-    renderCompose();
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-atop';
-    // Draw mask: white=subject. Tint green over subject areas by drawing the mask
-    // then multiplying with green using a trick: draw mask desaturated, recolor
-    const tmp = document.createElement('canvas');
-    tmp.width = COMPOSE_W; tmp.height = COMPOSE_H;
-    const tCtx = tmp.getContext('2d');
-    tCtx.drawImage(_compose.bgMask, 0, 0, COMPOSE_W, COMPOSE_H);
-    // Convert white pixels to green semi-transparent
-    try {
-      const px = tCtx.getImageData(0, 0, COMPOSE_W, COMPOSE_H);
-      for (let i = 0; i < px.data.length; i += 4) {
-        const b = px.data[i];
-        px.data[0] = 0; px.data[1] = 200; px.data[2] = 80;
-        px.data[3] = Math.round(b * 0.55); // subject brightness → green alpha
-      }
-      tCtx.putImageData(px, 0, 0);
-      ctx.drawImage(tmp, 0, 0);
-    } catch(e) { console.error('mask preview error:', e); }
-    ctx.restore();
-  };
-  flash();
-  setTimeout(renderCompose, 1500);
-}
-
-function setComposeGlobalLighting(val) {
-  if (!_compose) return;
-  _compose.globalLighting = val;
-  renderCompose();
-  saveComposeLayers();
-}
-
-function setComposeGlobalLightingDir(val) {
-  if (!_compose) return;
-  _compose.globalLightingDir = val;
-  const btn = document.getElementById('btn-ai-relight');
-  if (btn) btn.style.display = (val && val !== 'none') ? 'block' : 'none';
-  renderCompose();
-  saveComposeLayers();
-}
-
-const RELIGHT_PRESETS = {
-  'front':               { initialLatent: 'None',   prompt: 'soft frontal studio lighting, even fill light from camera direction, gentle shadows, cinematic look' },
-  'three-quarter-left':  { initialLatent: 'Left',   prompt: 'warm three-quarter key light from the front-left, natural shadow on the right side, cinematic portrait lighting' },
-  'left':                { initialLatent: 'Left',   prompt: 'dramatic side lighting from the left, deep Rembrandt shadows on the right, high contrast' },
-  'three-quarter-right': { initialLatent: 'Right',  prompt: 'warm three-quarter key light from the front-right, natural shadow on the left, cinematic portrait lighting' },
-  'right':               { initialLatent: 'Right',  prompt: 'dramatic side lighting from the right, deep shadows on the left, high contrast' },
-  'backlight':           { initialLatent: 'None',   prompt: 'strong backlight from behind, dramatic rim lighting, glowing halo around subjects, silhouette effect' },
-  'top':                 { initialLatent: 'Top',    prompt: 'harsh overhead downward lighting from directly above, deep shadows under brows and chin, film noir style' },
-  'under':               { initialLatent: 'Bottom', prompt: 'dramatic underlighting from below, upward shadows on faces, eerie spooky upward light source' },
-};
-
-async function applyAIRelight() {
-  const dir = _compose?.globalLightingDir;
-  if (!dir || dir === 'none') return;
-  const preset = RELIGHT_PRESETS[dir];
-  if (!preset) return;
-
-  const btn = document.getElementById('btn-ai-relight');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Relighting…'; }
-
-  try {
-    // Temporarily disable overlays so we send clean content to iclight
-    const savedLightingDir = _compose.globalLightingDir;
-    const savedLighting = _compose.globalLighting;
-    _compose.globalLightingDir = 'none';
-    _compose.globalLighting = 'none';
-    renderCompose();
-
-    // Flatten current canvas to base64
-    const canvas = document.getElementById('compose-canvas');
-    const imageBase64 = canvas.toDataURL('image/jpeg', 0.92);
-
-    // Restore overlays for display
-    _compose.globalLightingDir = savedLightingDir;
-    _compose.globalLighting = savedLighting;
-    renderCompose();
-
-    showToast('Sending to ICLight v2…');
-    const data = await apiFetch('/api/relight-image', {
-      imageBase64,
-      prompt: preset.prompt,
-      initialLatent: preset.initialLatent,
-    });
-
-    if (!data.url) throw new Error('No image returned');
-
-    // Load the relit image and set as compositor background
-    // (clear canvas overlays since iclight baked the lighting in)
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      _compose.bgImg = img;
-      _compose.globalLightingDir = 'none';
-      _compose.globalLighting = 'none';
-      const glSel = document.getElementById('compose-global-lighting');
-      const glDirSel = document.getElementById('compose-lighting-dir');
-      if (glSel) glSel.value = 'none';
-      if (glDirSel) glDirSel.value = 'none';
-      if (btn) btn.style.display = 'none';
-      renderCompose();
-      saveComposeLayers();
-      showToast('AI lighting applied. Canvas overlays reset — lighting is baked into the background.');
-    };
-    img.onerror = () => { throw new Error('Failed to load relit image'); };
-    img.src = proxyUrl(data.url);
-
-  } catch(e) {
-    showToast('Relight failed: ' + e.message, true);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '✦ Apply AI Lighting'; }
-  }
-}
-
-async function restoreComposeLayers(savedLayers) {
-  if (!savedLayers?.length || !_compose) return;
-  for (const saved of savedLayers) {
-    if (!saved.imgUrl) continue;
-    const idx = _compose.layers.length;
-    _compose.layers.push({ imgEl: null, imgUrl: saved.imgUrl, label: saved.label, charId: saved.charId, cx: saved.cx, cy: saved.cy, scale: saved.scale, w: saved.w, h: saved.h, opacity: saved.opacity ?? 1, lighting: saved.lighting || 'none', lightingIntensity: saved.lightingIntensity ?? 0.6, loading: true });
-    const imgEl = new Image();
-    imgEl.crossOrigin = 'anonymous';
-    imgEl.onload = () => {
-      if (!_compose) return;
-      _compose.layers[idx] = { ...(_compose.layers[idx]), imgEl, loading: false };
-      renderCompose();
-      updateComposeLayerPanel();
-    };
-    imgEl.src = proxyUrl(saved.imgUrl);
-  }
-}
-
-function closeCompose() {
-  saveComposeLayers();
-  document.getElementById('compose-modal').classList.remove('open');
-  _compose = null;
-  _composeDrag = null;
-}
-
-function addComposeLayer(type, id) {
-  if (!_compose) return;
-  const item = type === 'char' ? characters.find(c => c.id === id) : locations.find(l => l.id === id);
-  if (!item || !item.images?.length) return;
-  addComposeLayerUrl(item.images[0], item.name || '');
-}
-
-function removeComposeLayer() {
-  if (!_compose || _compose.selectedIdx < 0) return;
-  _compose.layers.splice(_compose.selectedIdx, 1);
-  _compose.selectedIdx = Math.min(_compose.selectedIdx, _compose.layers.length - 1);
-  updateComposeLayerPanel();
-  renderCompose();
-  saveComposeLayers();
-}
-
-function setComposeLayerScale(val) {
-  document.getElementById('compose-scale-val').textContent = val + '%';
-  if (!_compose || _compose.selectedIdx < 0) return;
-  const layer = _compose.layers[_compose.selectedIdx];
-  layer.scale = val / 100;
-  layer.h = COMPOSE_H * layer.scale;
-  layer.w = layer.h * (layer.imgEl.naturalWidth / layer.imgEl.naturalHeight);
-  renderCompose();
-  saveComposeLayers();
-}
-
-function setComposeLayerOpacity(val) {
-  document.getElementById('compose-opacity-val').textContent = val + '%';
-  if (!_compose || _compose.selectedIdx < 0) return;
-  _compose.layers[_compose.selectedIdx].opacity = val / 100;
-  renderCompose();
-  saveComposeLayers();
-}
-
-function setComposeLayerLighting(val) {
-  if (!_compose || _compose.selectedIdx < 0) return;
-  _compose.layers[_compose.selectedIdx].lighting = val;
-  const intensityRow = document.getElementById('compose-lighting-intensity-row');
-  intensityRow.style.display = val === 'none' ? 'none' : 'flex';
-  renderCompose();
-  saveComposeLayers();
-}
-
-function setComposeLayerLightingIntensity(val) {
-  document.getElementById('compose-lighting-val').textContent = val + '%';
-  if (!_compose || _compose.selectedIdx < 0) return;
-  _compose.layers[_compose.selectedIdx].lightingIntensity = val / 100;
-  renderCompose();
-  saveComposeLayers();
-}
-
-function buildLitLayer(layer) {
-  const w = Math.round(layer.w), h = Math.round(layer.h);
-  const off = document.createElement('canvas');
-  off.width = w; off.height = h;
-  const oc = off.getContext('2d');
-
-  // Draw character
-  oc.drawImage(layer.imgEl, 0, 0, w, h);
-
-  // Clip lighting gradient to character's own pixels only
-  oc.globalCompositeOperation = 'source-atop';
-  const s = layer.lightingIntensity ?? 0.6;
-  let grad;
-
-  switch (layer.lighting) {
-    case 'front':
-      grad = oc.createRadialGradient(w * 0.5, h * 0.38, 0, w * 0.5, h * 0.38, Math.max(w, h) * 0.72);
-      grad.addColorStop(0,   `rgba(255,255,255,${s * 0.28})`);
-      grad.addColorStop(0.45, 'rgba(128,128,128,0)');
-      grad.addColorStop(1,   `rgba(0,0,0,${s * 0.38})`);
-      break;
-    case 'left':
-      grad = oc.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0,    `rgba(255,255,255,${s * 0.40})`);
-      grad.addColorStop(0.32, 'rgba(200,200,200,0)');
-      grad.addColorStop(0.62, 'rgba(0,0,0,0)');
-      grad.addColorStop(1,    `rgba(0,0,0,${s * 0.58})`);
-      break;
-    case 'right':
-      grad = oc.createLinearGradient(w, 0, 0, 0);
-      grad.addColorStop(0,    `rgba(255,255,255,${s * 0.40})`);
-      grad.addColorStop(0.32, 'rgba(200,200,200,0)');
-      grad.addColorStop(0.62, 'rgba(0,0,0,0)');
-      grad.addColorStop(1,    `rgba(0,0,0,${s * 0.58})`);
-      break;
-    case 'top':
-      grad = oc.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0,    `rgba(255,255,255,${s * 0.35})`);
-      grad.addColorStop(0.28, 'rgba(200,200,200,0)');
-      grad.addColorStop(0.65, 'rgba(0,0,0,0)');
-      grad.addColorStop(1,    `rgba(0,0,0,${s * 0.50})`);
-      break;
-    case 'bottom':
-      grad = oc.createLinearGradient(0, h, 0, 0);
-      grad.addColorStop(0,    `rgba(255,255,255,${s * 0.35})`);
-      grad.addColorStop(0.28, 'rgba(200,200,200,0)');
-      grad.addColorStop(0.65, 'rgba(0,0,0,0)');
-      grad.addColorStop(1,    `rgba(0,0,0,${s * 0.50})`);
-      break;
-    case 'backlit':
-      // Dark body, warm rim light at edges
-      grad = oc.createRadialGradient(w * 0.5, h * 0.45, Math.min(w, h) * 0.1, w * 0.5, h * 0.45, Math.max(w, h) * 0.68);
-      grad.addColorStop(0,    `rgba(0,0,0,${s * 0.72})`);
-      grad.addColorStop(0.65, `rgba(0,0,0,${s * 0.35})`);
-      grad.addColorStop(0.82, 'rgba(30,20,0,0)');
-      grad.addColorStop(1,    `rgba(255,210,120,${s * 0.50})`);
-      break;
-  }
-
-  if (grad) { oc.fillStyle = grad; oc.fillRect(0, 0, w, h); }
-  return off;
-}
-
-function updateComposeLayerPanel() {
-  const panel = document.getElementById('compose-layer-panel');
-  if (!_compose || _compose.selectedIdx < 0 || _compose.selectedIdx >= _compose.layers.length) {
-    panel.classList.remove('visible');
-    return;
-  }
-  panel.classList.add('visible');
-  const layer = _compose.layers[_compose.selectedIdx];
-  const scaleVal = Math.round(layer.scale * 100);
-  document.getElementById('compose-scale-slider').value = scaleVal;
-  document.getElementById('compose-scale-val').textContent = scaleVal + '%';
-  document.getElementById('compose-opacity-slider').value = Math.round(layer.opacity * 100);
-  document.getElementById('compose-opacity-val').textContent = Math.round(layer.opacity * 100) + '%';
-  const lighting = layer.lighting || 'none';
-  document.getElementById('compose-lighting-select').value = lighting;
-  const intensity = Math.round((layer.lightingIntensity ?? 0.6) * 100);
-  document.getElementById('compose-lighting-slider').value = intensity;
-  document.getElementById('compose-lighting-val').textContent = intensity + '%';
-  document.getElementById('compose-lighting-intensity-row').style.display = lighting === 'none' ? 'none' : 'flex';
-}
-
-function renderCompose() {
-  const canvas = document.getElementById('compose-canvas');
-  if (!canvas || !_compose) return;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, COMPOSE_W, COMPOSE_H);
-
-  // Background
-  ctx.fillStyle = '#111';
-  ctx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
-  if (_compose.bgImg) ctx.drawImage(_compose.bgImg, 0, 0, COMPOSE_W, COMPOSE_H);
-
-  // Rule-of-thirds overlay (subtle)
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-  ctx.lineWidth = 1;
-  [COMPOSE_W/3, COMPOSE_W*2/3].forEach(x => { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, COMPOSE_H); ctx.stroke(); });
-  [COMPOSE_H/3, COMPOSE_H*2/3].forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(COMPOSE_W, y); ctx.stroke(); });
-
-  // Subject separation — desaturate + darken background before drawing characters
-  const sep = _compose.bgSeparation ?? 0;
-  if (sep > 0) {
-    if (_compose.bgMask) {
-      try {
-        // Build the darkening overlay, then zero out alpha where mask says "subject"
-        const offDark = document.createElement('canvas');
-        offDark.width = COMPOSE_W; offDark.height = COMPOSE_H;
-        const dCtx = offDark.getContext('2d');
-        dCtx.fillStyle = `rgba(0,0,0,${sep})`;
-        dCtx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
-        const darkPx = dCtx.getImageData(0, 0, COMPOSE_W, COMPOSE_H);
-
-        // Read mask pixels (white=subject, black=background)
-        const offMask = document.createElement('canvas');
-        offMask.width = COMPOSE_W; offMask.height = COMPOSE_H;
-        const mCtx = offMask.getContext('2d');
-        mCtx.drawImage(_compose.bgMask, 0, 0, COMPOSE_W, COMPOSE_H);
-        const maskPx = mCtx.getImageData(0, 0, COMPOSE_W, COMPOSE_H);
-
-        // Suppress overlay alpha proportional to subject brightness
-        for (let i = 0; i < darkPx.data.length; i += 4) {
-          const subjectness = maskPx.data[i] / 255; // 1=subject, 0=background
-          darkPx.data[3] = Math.round(darkPx.data[3] * (1 - subjectness));
-        }
-        dCtx.putImageData(darkPx, 0, 0);
-        ctx.drawImage(offDark, 0, 0);
-      } catch(e) {
-        console.error('mask separation error:', e);
-        ctx.fillStyle = `rgba(0,0,0,${sep})`;
-        ctx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
-      }
-    } else {
-      ctx.fillStyle = `rgba(0,0,0,${sep})`;
-      ctx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
-    }
-  }
-
-  // Layers
-  _compose.layers.forEach((layer, i) => {
-    if (layer.loading || !layer.imgEl) return;
-    ctx.save();
-    ctx.globalAlpha = layer.opacity;
-    const src = (layer.lighting && layer.lighting !== 'none') ? buildLitLayer(layer) : layer.imgEl;
-    ctx.drawImage(src, layer.cx - layer.w/2, layer.cy - layer.h/2, layer.w, layer.h);
-    ctx.restore();
-    // Selection outline + corner handles
-    if (i === _compose.selectedIdx) {
-      ctx.strokeStyle = '#818cf8';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(layer.cx - layer.w/2, layer.cy - layer.h/2, layer.w, layer.h);
-      const hs = 10;
-      ctx.fillStyle = '#818cf8';
-      [[layer.cx-layer.w/2, layer.cy-layer.h/2],[layer.cx+layer.w/2, layer.cy-layer.h/2],
-       [layer.cx-layer.w/2, layer.cy+layer.h/2],[layer.cx+layer.w/2, layer.cy+layer.h/2]].forEach(([hx,hy]) => {
-        ctx.fillRect(hx-hs/2, hy-hs/2, hs, hs);
-      });
-    }
-  });
-
-  // Global scene lighting overlay
-  applyGlobalLightingOverlay(ctx);
-}
-
-function applyGlobalLightingOverlay(ctx) {
-  const W = COMPOSE_W, H = COMPOSE_H;
-  ctx.save();
-
-  // ── Color / Temperature ───────────────────────────────────────────────────
-  const gl = _compose?.globalLighting;
-  if (gl && gl !== 'none') {
-    switch (gl) {
-      case 'warm':
-        ctx.fillStyle = 'rgba(255,155,50,0.18)';
-        ctx.fillRect(0, 0, W, H);
-        break;
-      case 'golden': {
-        const g = ctx.createLinearGradient(0, H, W, 0);
-        g.addColorStop(0, 'rgba(210,70,0,0.30)');
-        g.addColorStop(1, 'rgba(255,195,70,0.18)');
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
-        break;
-      }
-      case 'cool':
-        ctx.fillStyle = 'rgba(75,115,220,0.18)';
-        ctx.fillRect(0, 0, W, H);
-        break;
-      case 'night':
-        ctx.fillStyle = 'rgba(8,12,65,0.50)';
-        ctx.fillRect(0, 0, W, H);
-        break;
-      case 'overcast':
-        ctx.fillStyle = 'rgba(155,162,178,0.22)';
-        ctx.fillRect(0, 0, W, H);
-        break;
-      case 'dramatic': {
-        const v = ctx.createRadialGradient(W/2, H/2, H*0.18, W/2, H/2, W*0.82);
-        v.addColorStop(0, 'rgba(0,0,0,0)');
-        v.addColorStop(1, 'rgba(0,0,0,0.58)');
-        ctx.fillStyle = v;
-        ctx.fillRect(0, 0, W, H);
-        break;
-      }
-    }
-  }
-
-  // ── Lighting Direction ────────────────────────────────────────────────────
-  // Each preset draws two passes:
-  //   1. shadow — dark semi-transparent gradient from the shadow side
-  //   2. highlight — subtle warm/bright gradient from the light side
-  const dir = _compose?.globalLightingDir;
-  if (dir && dir !== 'none') {
-    // Helper: linear shadow gradient from one side
-    const linShadow = (x1, y1, x2, y2, alpha) => {
-      const s = ctx.createLinearGradient(x1, y1, x2, y2);
-      s.addColorStop(0, `rgba(0,0,0,0)`);
-      s.addColorStop(1, `rgba(0,0,0,${alpha})`);
-      ctx.fillStyle = s;
-      ctx.fillRect(0, 0, W, H);
-    };
-    const linHighlight = (x1, y1, x2, y2, r, g, b, alpha) => {
-      const h = ctx.createLinearGradient(x1, y1, x2, y2);
-      h.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
-      h.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx.fillStyle = h;
-      ctx.fillRect(0, 0, W, H);
-    };
-
-    switch (dir) {
-      case 'front': {
-        // Soft vignette: slightly darker at edges, neutral centre
-        const fr = ctx.createRadialGradient(W/2, H*0.45, H*0.1, W/2, H*0.45, W*0.75);
-        fr.addColorStop(0, 'rgba(0,0,0,0)');
-        fr.addColorStop(1, 'rgba(0,0,0,0.28)');
-        ctx.fillStyle = fr;
-        ctx.fillRect(0, 0, W, H);
-        // Subtle bright centre
-        const fc = ctx.createRadialGradient(W/2, H*0.4, 0, W/2, H*0.4, W*0.45);
-        fc.addColorStop(0, 'rgba(255,250,230,0.10)');
-        fc.addColorStop(1, 'rgba(255,250,230,0)');
-        ctx.fillStyle = fc;
-        ctx.fillRect(0, 0, W, H);
-        break;
-      }
-      case 'three-quarter-left': {
-        // Light from top-left; shadow on bottom-right
-        linShadow(0, 0, W, H, 0.45);
-        linHighlight(0, 0, W*0.6, H*0.6, 255, 245, 220, 0.18);
-        break;
-      }
-      case 'left': {
-        // Light from the left; strong shadow on right
-        linShadow(0, 0, W, 0, 0.55);
-        linHighlight(0, 0, W*0.55, 0, 255, 245, 215, 0.20);
-        break;
-      }
-      case 'three-quarter-right': {
-        // Light from top-right; shadow on bottom-left
-        linShadow(W, 0, 0, H, 0.45);
-        linHighlight(W, 0, W*0.4, H*0.6, 255, 245, 220, 0.18);
-        break;
-      }
-      case 'right': {
-        // Light from the right; strong shadow on left
-        linShadow(W, 0, 0, 0, 0.55);
-        linHighlight(W, 0, W*0.45, 0, 255, 245, 215, 0.20);
-        break;
-      }
-      case 'backlight': {
-        // Dark fill overall; bright rim glow at edges
-        ctx.fillStyle = 'rgba(0,0,0,0.38)';
-        ctx.fillRect(0, 0, W, H);
-        // Rim: bright at all edges, dark in centre
-        const rim = ctx.createRadialGradient(W/2, H/2, H*0.22, W/2, H/2, W*0.72);
-        rim.addColorStop(0, 'rgba(0,0,0,0)');
-        rim.addColorStop(0.7, 'rgba(0,0,0,0)');
-        rim.addColorStop(1, 'rgba(200,220,255,0.30)');
-        ctx.fillStyle = rim;
-        ctx.fillRect(0, 0, W, H);
-        break;
-      }
-      case 'top': {
-        // Light from above; shadow at bottom
-        linShadow(0, H, 0, 0, 0.52);
-        linHighlight(0, 0, 0, H*0.5, 255, 250, 230, 0.18);
-        break;
-      }
-      case 'under': {
-        // Light from below; shadow at top
-        linShadow(0, 0, 0, H, 0.52);
-        linHighlight(0, H, 0, H*0.5, 255, 240, 200, 0.22);
-        break;
-      }
-    }
-  }
-
-  ctx.restore();
-}
-
-// ── canvas mouse events ───────────────────────────────────────────────────
-function composeCanvasCoords(e) {
-  const canvas = document.getElementById('compose-canvas');
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: (e.clientX - rect.left) * (COMPOSE_W / rect.width),
-    y: (e.clientY - rect.top) * (COMPOSE_H / rect.height)
-  };
-}
-
-let _composeResize = null; // { layerIdx, anchorX, anchorY, origW, origH, origCx, origCy, origDiag }
-
-function getCornerHit(layer, x, y) {
-  const HIT = 12;
-  const corners = [
-    { name: 'tl', hx: layer.cx - layer.w/2, hy: layer.cy - layer.h/2 },
-    { name: 'tr', hx: layer.cx + layer.w/2, hy: layer.cy - layer.h/2 },
-    { name: 'bl', hx: layer.cx - layer.w/2, hy: layer.cy + layer.h/2 },
-    { name: 'br', hx: layer.cx + layer.w/2, hy: layer.cy + layer.h/2 },
-  ];
-  for (const c of corners) {
-    if (Math.abs(x - c.hx) <= HIT && Math.abs(y - c.hy) <= HIT) return c;
-  }
-  return null;
-}
-
-document.getElementById('compose-canvas').addEventListener('mousedown', e => {
-  if (!_compose) return;
-  const { x, y } = composeCanvasCoords(e);
-  // Check corner handles on selected layer first
-  if (_compose.selectedIdx >= 0) {
-    const sel = _compose.layers[_compose.selectedIdx];
-    if (sel && !sel.loading) {
-      const corner = getCornerHit(sel, x, y);
-      if (corner) {
-        // Anchor = opposite corner
-        const anchorX = corner.name.includes('l') ? sel.cx + sel.w/2 : sel.cx - sel.w/2;
-        const anchorY = corner.name.includes('t') ? sel.cy + sel.h/2 : sel.cy - sel.h/2;
-        const origDiag = Math.sqrt(sel.w * sel.w + sel.h * sel.h);
-        _composeResize = { layerIdx: _compose.selectedIdx, anchorX, anchorY, origW: sel.w, origH: sel.h, origDiag };
-        return;
-      }
-    }
-  }
-  // Hit test layers from top (reverse order)
-  for (let i = _compose.layers.length - 1; i >= 0; i--) {
-    const l = _compose.layers[i];
-    if (l.loading) continue;
-    if (x >= l.cx - l.w/2 && x <= l.cx + l.w/2 && y >= l.cy - l.h/2 && y <= l.cy + l.h/2) {
-      _compose.selectedIdx = i;
-      _composeDrag = { layerIdx: i, startCx: l.cx, startCy: l.cy, startMx: x, startMy: y };
-      updateComposeLayerPanel();
-      renderCompose();
-      return;
-    }
-  }
-  // Clicked empty space — deselect
-  _compose.selectedIdx = -1;
-  updateComposeLayerPanel();
-  renderCompose();
-});
-
-document.addEventListener('mousemove', e => {
-  if (!_compose) return;
-  const { x, y } = composeCanvasCoords(e);
-  if (_composeResize) {
-    const layer = _compose.layers[_composeResize.layerIdx];
-    if (!layer) return;
-    const dx = x - _composeResize.anchorX;
-    const dy = y - _composeResize.anchorY;
-    const newDiag = Math.sqrt(dx * dx + dy * dy);
-    const scale = Math.max(0.05, newDiag / _composeResize.origDiag);
-    layer.w = _composeResize.origW * scale;
-    layer.h = _composeResize.origH * scale;
-    layer.cx = _composeResize.anchorX + (x > _composeResize.anchorX ? layer.w/2 : -layer.w/2);
-    layer.cy = _composeResize.anchorY + (y > _composeResize.anchorY ? layer.h/2 : -layer.h/2);
-    // Recompute scale for the slider
-    layer.scale = layer.h / COMPOSE_H;
-    const scaleSlider = document.getElementById('compose-scale-slider');
-    const scaleVal = document.getElementById('compose-scale-val');
-    if (scaleSlider) scaleSlider.value = Math.round(layer.scale * 100);
-    if (scaleVal) scaleVal.textContent = Math.round(layer.scale * 100) + '%';
-    renderCompose();
-    return;
-  }
-  if (_composeDrag) {
-    const layer = _compose.layers[_composeDrag.layerIdx];
-    if (!layer) return;
-    layer.cx = _composeDrag.startCx + (x - _composeDrag.startMx);
-    layer.cy = _composeDrag.startCy + (y - _composeDrag.startMy);
-    renderCompose();
-  }
-});
-
-document.addEventListener('mouseup', () => {
-  if (_composeDrag || _composeResize) saveComposeLayers();
-  _composeDrag = null;
-  _composeResize = null;
-});
-
-document.addEventListener('keydown', e => {
-  if (!document.getElementById('compose-modal').classList.contains('open')) return;
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    e.preventDefault();
-    removeComposeLayer();
-  }
-});
-
-// ── canvas drag-and-drop from character cards ─────────────────────────────
-const _compCanvas = document.getElementById('compose-canvas');
-
-// Cursor feedback for corner handles
-_compCanvas.addEventListener('mousemove', e => {
-  if (!_compose || _composeDrag || _composeResize) return;
-  const { x, y } = composeCanvasCoords(e);
-  if (_compose.selectedIdx >= 0) {
-    const sel = _compose.layers[_compose.selectedIdx];
-    if (sel && !sel.loading) {
-      const corner = getCornerHit(sel, x, y);
-      if (corner) {
-        const cursors = { tl: 'nwse-resize', tr: 'nesw-resize', bl: 'nesw-resize', br: 'nwse-resize' };
-        _compCanvas.style.cursor = cursors[corner.name];
-        return;
-      }
-    }
-  }
-  // Check if over any layer body
-  for (let i = _compose.layers.length - 1; i >= 0; i--) {
-    const l = _compose.layers[i];
-    if (!l.loading && x >= l.cx-l.w/2 && x <= l.cx+l.w/2 && y >= l.cy-l.h/2 && y <= l.cy+l.h/2) {
-      _compCanvas.style.cursor = 'move';
-      return;
-    }
-  }
-  _compCanvas.style.cursor = 'default';
-});
-_compCanvas.addEventListener('mouseleave', () => { _compCanvas.style.cursor = 'default'; });
-
-_compCanvas.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-_compCanvas.addEventListener('drop', async e => {
-  e.preventDefault();
-  if (!_compose) return;
-
-  const rect = _compCanvas.getBoundingClientRect();
-  const dropPos = {
-    cx: (e.clientX - rect.left) * (COMPOSE_W / rect.width),
-    cy: (e.clientY - rect.top) * (COMPOSE_H / rect.height)
-  };
-
-  if (_compDragShotIdx !== null) {
-    const idx = _compDragShotIdx;
-    _compDragShotIdx = null;
-    const shot = shots.find(s => s.id === _compose.shotId);
-    const url = shot?.images?.[idx];
-    if (!url) return;
-    await addComposeLayerUrl(url, `Generated Image ${idx + 1}`, null, dropPos);
-    return;
-  }
-
-  if (!_compDragCharId) return;
-  const charId = _compDragCharId;
-  _compDragCharId = null;
-
-  const shot = shots.find(s => s.id === _compose.shotId);
-  const char = characters.find(c => c.id === charId);
-  if (!char) return;
-
-  if (!shot.characterIds.includes(charId)) {
-    shot.characterIds.push(charId);
-    syncCharCheckbox(_compose.shotId, charId, true);
-  }
-  if (!shot.characterDetails) shot.characterDetails = {};
-  if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
-  const det = shot.characterDetails[charId];
-  const angle = det.facingDir || 'Front';
-  const expr = (det.expression || '').trim();
-  const imgUrl = getCompCharImage(char, angle, expr);
-  if (!imgUrl) { showToast('No image — generate one first.', true); return; }
-
-  await addComposeLayerUrl(imgUrl, char.name || 'Unnamed', charId, dropPos);
-});
-
-// ── save composite ────────────────────────────────────────────────────────
-async function saveCompose() {
-  if (!_compose) return;
-  const canvas = document.getElementById('compose-canvas');
-  const saveBtn = document.querySelector('#compose-modal .btn-save-compose');
-  saveBtn.disabled = true;
-  saveBtn.innerHTML = '<span class="spinner"></span>Saving…';
-
-  // Render without selection outline for clean save
-  const savedIdx = _compose.selectedIdx;
-  _compose.selectedIdx = -1;
-  renderCompose();
-
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  const base64 = dataUrl.split(',')[1];
-
-  _compose.selectedIdx = savedIdx;
-  renderCompose();
-
-  try {
-    const data = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg' });
-    const url = data.url;
-    const shot = shots.find(s => s.id === _compose.shotId);
-    if (shot) {
-      shot.finalImage = url;
-      const cell = document.getElementById(`final-img-${shot.id}`);
-      if (cell) {
-        const badge = cell.querySelector('.final-image-badge');
-        if (badge) badge.remove();
-        const locPreview = cell.querySelector('.final-image-loc-preview');
-        if (locPreview) {
-          const badgeEl = document.createElement('div');
-          badgeEl.className = 'final-image-badge';
-          badgeEl.textContent = '✎ Final';
-          locPreview.appendChild(badgeEl);
-          // Show final image as the preview
-          let img = locPreview.querySelector('.final-image-preview');
-          if (!img) { img = document.createElement('img'); img.className = 'final-image-preview'; locPreview.insertBefore(img, locPreview.firstChild); }
-          img.src = url;
-          const empty = locPreview.querySelector('.final-image-loc-empty');
-          if (empty) empty.remove();
-        }
-      }
-      autoSave();
-    }
-    showToast('Final image saved.');
-    closeCompose();
-  } catch(e) {
-    showToast('Save failed: ' + e.message, true);
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.innerHTML = 'Save as Final Image';
-  }
-}
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

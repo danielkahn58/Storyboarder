@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reference Images — Storyboard Generator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; min-height: 100vh; }
+
+  header { padding: 20px 32px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+  .back-link { color: #818cf8; font-size: 13px; text-decoration: none; font-weight: 500; padding: 7px 14px; border: 1px solid #2e2e50; border-radius: 6px; background: #1a1a2e; transition: background 0.15s; }
+  .back-link:hover { background: #22223a; }
+
+  .content { max-width: 960px; margin: 0 auto; padding: 32px; }
+  .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #555; margin-bottom: 16px; }
+  .grid-section { margin-bottom: 48px; }
+  .grid-wrap { background: #fff; border-radius: 8px; overflow: hidden; }
+
+  .ref-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .ref-card { background: #161616; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
+  .ref-card-header { padding: 12px 16px; border-bottom: 1px solid #1e1e1e; display: flex; align-items: center; justify-content: space-between; }
+  .ref-card-title { font-size: 13px; font-weight: 600; color: #ccc; }
+  .ref-card-status { font-size: 11px; color: #555; }
+  .ref-card-status.uploading { color: #7ab3f0; }
+  .ref-card-status.done { color: #4ade80; }
+  .ref-card-status.error { color: #f87171; }
+  .ref-img-wrap { width: 100%; aspect-ratio: 16/9; background: #fff; overflow: hidden; }
+  .ref-img-wrap svg { display: block; width: 100%; }
+
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 4px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Reference Images</h1>
+  <a href="/" class="back-link">← Storyboard Generator</a>
+</header>
+
+<div class="content">
+
+  <!-- Rule of thirds -->
+  <div class="grid-section">
+    <div class="section-title">Rule of Thirds</div>
+    <div class="grid-wrap">
+      <svg viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%">
+        <rect width="1080" height="720" fill="white"/>
+        <line x1="360" y1="0" x2="360" y2="720" stroke="black" stroke-width="3"/>
+        <line x1="720" y1="0" x2="720" y2="720" stroke="black" stroke-width="3"/>
+        <line x1="0" y1="240" x2="1080" y2="240" stroke="black" stroke-width="3"/>
+        <line x1="0" y1="480" x2="1080" y2="480" stroke="black" stroke-width="3"/>
+        <circle cx="360" cy="240" r="38" fill="none" stroke="#e00" stroke-width="4"/>
+        <circle cx="720" cy="240" r="38" fill="none" stroke="#e00" stroke-width="4"/>
+        <circle cx="360" cy="480" r="38" fill="none" stroke="#e00" stroke-width="4"/>
+        <circle cx="720" cy="480" r="38" fill="none" stroke="#e00" stroke-width="4"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Position references -->
+  <div class="section-title">Position References</div>
+  <div class="ref-grid">
+
+    <div class="ref-card">
+      <div class="ref-card-header">
+        <span class="ref-card-title">Top Left</span>
+        <span class="ref-card-status" id="status-top-left"></span>
+      </div>
+      <div class="ref-img-wrap">
+        <svg id="svg-top-left" viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg">
+          <rect width="1080" height="720" fill="white"/>
+          <line x1="360" y1="0" x2="360" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="720" y1="0" x2="720" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="240" x2="1080" y2="240" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="480" x2="1080" y2="480" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <circle cx="360" cy="155" r="28" fill="none" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="183" x2="360" y2="290" stroke="#111" stroke-width="6"/>
+          <line x1="290" y1="220" x2="430" y2="220" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="290" x2="310" y2="370" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="290" x2="410" y2="370" stroke="#111" stroke-width="6"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="ref-card">
+      <div class="ref-card-header">
+        <span class="ref-card-title">Top Right</span>
+        <span class="ref-card-status" id="status-top-right"></span>
+      </div>
+      <div class="ref-img-wrap">
+        <svg id="svg-top-right" viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg">
+          <rect width="1080" height="720" fill="white"/>
+          <line x1="360" y1="0" x2="360" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="720" y1="0" x2="720" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="240" x2="1080" y2="240" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="480" x2="1080" y2="480" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <circle cx="720" cy="155" r="28" fill="none" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="183" x2="720" y2="290" stroke="#111" stroke-width="6"/>
+          <line x1="650" y1="220" x2="790" y2="220" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="290" x2="670" y2="370" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="290" x2="770" y2="370" stroke="#111" stroke-width="6"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="ref-card">
+      <div class="ref-card-header">
+        <span class="ref-card-title">Bottom Left</span>
+        <span class="ref-card-status" id="status-bottom-left"></span>
+      </div>
+      <div class="ref-img-wrap">
+        <svg id="svg-bottom-left" viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg">
+          <rect width="1080" height="720" fill="white"/>
+          <line x1="360" y1="0" x2="360" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="720" y1="0" x2="720" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="240" x2="1080" y2="240" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="480" x2="1080" y2="480" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <circle cx="360" cy="395" r="28" fill="none" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="423" x2="360" y2="530" stroke="#111" stroke-width="6"/>
+          <line x1="290" y1="460" x2="430" y2="460" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="530" x2="310" y2="610" stroke="#111" stroke-width="6"/>
+          <line x1="360" y1="530" x2="410" y2="610" stroke="#111" stroke-width="6"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="ref-card">
+      <div class="ref-card-header">
+        <span class="ref-card-title">Bottom Right</span>
+        <span class="ref-card-status" id="status-bottom-right"></span>
+      </div>
+      <div class="ref-img-wrap">
+        <svg id="svg-bottom-right" viewBox="0 0 1080 720" xmlns="http://www.w3.org/2000/svg">
+          <rect width="1080" height="720" fill="white"/>
+          <line x1="360" y1="0" x2="360" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="720" y1="0" x2="720" y2="720" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="240" x2="1080" y2="240" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <line x1="0" y1="480" x2="1080" y2="480" stroke="#ddd" stroke-width="2" stroke-dasharray="6,4"/>
+          <circle cx="720" cy="395" r="28" fill="none" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="423" x2="720" y2="530" stroke="#111" stroke-width="6"/>
+          <line x1="650" y1="460" x2="790" y2="460" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="530" x2="670" y2="610" stroke="#111" stroke-width="6"/>
+          <line x1="720" y1="530" x2="770" y2="610" stroke="#111" stroke-width="6"/>
+        </svg>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const POSITIONS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+const LS_KEY = 'position-ref-urls';
+
+function setStatus(pos, text, cls) {
+  const el = document.getElementById(`status-${pos}`);
+  el.className = `ref-card-status${cls ? ' ' + cls : ''}`;
+  el.innerHTML = text;
+}
+
+function svgToDataUrl(svgEl) {
+  return new Promise(resolve => {
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const objUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1080; canvas.height = 720;
+      canvas.getContext('2d').drawImage(img, 0, 0, 1080, 720);
+      URL.revokeObjectURL(objUrl);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.src = objUrl;
+  });
+}
+
+async function uploadPosition(pos) {
+  setStatus(pos, '<span class="spinner"></span>Uploading…', 'uploading');
+  const svgEl = document.getElementById(`svg-${pos}`);
+  const dataUrl = await svgToDataUrl(svgEl);
+  const base64 = dataUrl.split(',')[1];
+  const res = await fetch('/api/upload-reference', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64, mediaType: 'image/jpeg' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data.url;
+}
+
+async function initPositions() {
+  let cached = {};
+  try { cached = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch {}
+
+  await Promise.all(POSITIONS.map(async pos => {
+    if (cached[pos]) {
+      setStatus(pos, '✓ Ready', 'done');
+      return;
+    }
+    try {
+      const url = await uploadPosition(pos);
+      cached[pos] = url;
+      localStorage.setItem(LS_KEY, JSON.stringify(cached));
+      setStatus(pos, '✓ Ready', 'done');
+    } catch(e) {
+      setStatus(pos, 'Upload failed', 'error');
+    }
+  }));
+}
+
+window.addEventListener('load', initPositions);
+</script>
+</body>
+</html>
