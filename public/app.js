@@ -272,11 +272,11 @@ function extractImages(data) {
   });
   const locs = (data.locations || []).map(l => {
     imgs.locs[l.id] = { images: l.images, referenceImage: l.referenceImage,
-      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { image: v.image }])) : {},
-      customViews: (l.customViews || []).map(cv => ({ image: cv.image })) };
+      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {},
+      customViews: (l.customViews || []).map(cv => ({ image: cv.image, refImage: cv.refImage || null })) };
     return { ...l, images: [], referenceImage: null,
       shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : {},
-      customViews: (l.customViews || []).map(cv => ({ ...cv, image: null })) };
+      customViews: (l.customViews || []).map(cv => ({ ...cv, image: null, refImage: null })) };
   });
   const shots = (data.shots || []).map(s => {
     imgs.shots[s.id] = { images: s.images, finalImage: s.finalImage, refImage: s.refImage, videoUrl: s.videoUrl };
@@ -301,9 +301,9 @@ function mergeImages(data, imgs) {
     const li = imgs.locs?.[l.id] || {};
     const shotAngles = { ...l.shotAngles };
     for (const [k, v] of Object.entries(li.shotAngles || {})) {
-      shotAngles[k] = { ...(shotAngles[k] || {}), image: v.image };
+      shotAngles[k] = { ...(shotAngles[k] || {}), image: v.image, refImage: v.refImage || null };
     }
-    const customViews = (l.customViews || []).map((cv, i) => ({ ...cv, image: li.customViews?.[i]?.image || null }));
+    const customViews = (l.customViews || []).map((cv, i) => ({ ...cv, image: li.customViews?.[i]?.image || null, refImage: li.customViews?.[i]?.refImage || null }));
     return { ...l, images: li.images || [], referenceImage: li.referenceImage || null, shotAngles, customViews };
   });
   const shots = (data.shots || []).map(s => {
@@ -1110,6 +1110,10 @@ function deleteCharacter(id) {
 // ── location helpers ──────────────────────────────────────────────────────
 function newLocation() { return { id: genId(), name: '', aliases: [], reference: '', referenceImage: null, prompt: '', images: [], shotAngles: {}, customViews: [], possibleDuplicate: false }; }
 function locDisplayName(l) { return l.name || 'Unnamed'; }
+function locDefaultImage(l) {
+  if (!l) return null;
+  return l.useRefAsDefault ? (l.referenceImage?.dataUrl || null) : (l.selectedImage || l.images?.[0] || null);
+}
 
 function deleteAllCharacters() {
   if (!confirm('Delete all characters?')) return;
@@ -1176,7 +1180,7 @@ function onShotLocationChange(shotId, locationId) {
     if (finalSel) finalSel.value = locationId;
     // Update location preview image
     const loc = locations.find(l => l.id === locationId);
-    const locImg = loc?.images?.[0] || null;
+    const locImg = locDefaultImage(loc);
     const preview = finalCell.querySelector('.final-image-loc-preview');
     if (preview) {
       const existing = preview.querySelector('.final-image-preview');
@@ -1193,7 +1197,7 @@ function onShotLocationChange(shotId, locationId) {
   // If compositor is open for this shot, update the background
   if (_compose && _compose.shotId === shotId) {
     const loc = locations.find(l => l.id === locationId);
-    loadComposeBackground(loc?.images?.[0] || null);
+    loadComposeBackground(locDefaultImage(loc));
   }
 }
 
@@ -1229,24 +1233,36 @@ function locAngleRowHTML(l) {
     const key = angle.replace(/\s+/g, '-');
     const entry = l.shotAngles?.[angle] || {};
     const img = entry.image;
+    const refImg = entry.refImage;
     const imgHtml = img
       ? `<img src="${esc(img)}" alt="${esc(angle)}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
+    const refHtml = refImg
+      ? `<img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer" onclick="removeLocAngleRefImage('${l.id}','${angle}')">
+         <div style="font-size:9px;color:#555;margin-top:2px">click to remove</div>`
+      : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocAngleRefUpload('${l.id}','${angle}',this)"></label>`;
     return `<tr>
       <td class="loc-shot-label">${esc(angle)}</td>
       <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocAnglePromptChange('${l.id}','${angle}',this.value)">${esc(entry.prompt || '')}</textarea></td>
+      <td style="width:52px">${refHtml}</td>
       <td class="loc-shot-img-slot" id="loc-angle-img-${l.id}-${key}">${imgHtml}</td>
       <td><button class="btn-regen-angle" onclick="generateLocAngleSingle('${l.id}','${angle}')">Regenerate</button></td>
     </tr>`;
   }).join('');
   const customRows = l.customViews.map((cv, i) => {
     const img = cv.image;
+    const refImg = cv.refImage;
     const imgHtml = img
       ? `<img src="${esc(img)}" alt="${esc(cv.name || '')}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
+    const refHtml = refImg
+      ? `<img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer" onclick="removeLocCustomRefImage('${l.id}',${i})">
+         <div style="font-size:9px;color:#555;margin-top:2px">click to remove</div>`
+      : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocCustomRefUpload('${l.id}',${i},this)"></label>`;
     return `<tr>
       <td class="loc-shot-label"><input type="text" value="${esc(cv.name)}" placeholder="View name…" style="width:100%;background:#111;border:1px solid #222;border-radius:3px;color:#ccc;font-size:11px;padding:3px 5px" oninput="onLocCustomViewNameChange('${l.id}',${i},this.value)"></td>
       <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocCustomViewPromptChange('${l.id}',${i},this.value)">${esc(cv.prompt || '')}</textarea></td>
+      <td style="width:52px">${refHtml}</td>
       <td class="loc-shot-img-slot" id="loc-custom-img-${l.id}-${i}">${imgHtml}</td>
       <td>
         <button class="btn-regen-angle" onclick="generateLocCustomView('${l.id}',${i})">Generate</button>
@@ -1258,7 +1274,7 @@ function locAngleRowHTML(l) {
     <td colspan="6">
       <div class="loc-shot-inner">
         <table class="loc-shot-table">
-          <thead><tr><th>Variation</th><th>Prompt</th><th>Image</th><th></th></tr></thead>
+          <thead><tr><th>Variation</th><th>Prompt</th><th>Ref Image</th><th>Image</th><th></th></tr></thead>
           <tbody>${stdRows}${customRows}</tbody>
         </table>
         <button onclick="addLocCustomView('${l.id}')" style="margin-top:8px;background:none;border:1px dashed #2a2a2a;border-radius:4px;color:#555;font-size:11px;padding:4px 12px;cursor:pointer">+ Add Custom View</button>
@@ -1341,7 +1357,7 @@ function renderAvScript() {
     const charNames = (s.characterIds || []).map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join(', ');
     const loc = locations.find(l => l.id === s.locationId);
     const metaParts = [s.shotSize, s.shotMovement, loc ? locDisplayName(loc) : null].filter(Boolean);
-    const finalImg = s.finalImage || s.images?.[0] || loc?.images?.[0] || null;
+    const finalImg = s.finalImage || s.images?.[0] || locDefaultImage(loc);
     const locOptions = `<option value="">— None —</option>` + locations.map(l => `<option value="${esc(l.id)}"${s.locationId === l.id ? ' selected' : ''}>${esc(locDisplayName(l))}</option>`).join('');
     return `<div class="av-shot-row">
       <div class="av-shot-num">
@@ -1508,7 +1524,7 @@ function exportAvScriptPdf() {
     const charNames = (s.characterIds || []).map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join(', ');
     const loc = locations.find(l => l.id === s.locationId);
     const metaParts = [s.shotSize, s.shotMovement, loc ? locDisplayName(loc) : null].filter(Boolean);
-    const finalImg = s.finalImage || s.images?.[0] || loc?.images?.[0] || null;
+    const finalImg = s.finalImage || s.images?.[0] || locDefaultImage(loc);
     return `<tr>
       <td class="col-num">${i + 1}${s.timestamp ? `<br><span class="ts">${s.timestamp}</span>` : ''}</td>
       <td class="col-audio">
@@ -1776,7 +1792,8 @@ function locRowHTML(l) {
     <td>
       <div class="actions">
         <button class="btn btn-gen-prompt" onclick="generateLocPrompt('${l.id}')">Generate Prompt</button>
-        <button class="btn btn-gen-images" onclick="generateLocImages('${l.id}')">Generate Default View</button>
+        <button class="btn btn-gen-images" onclick="generateLocImages('${l.id}')">Generate Default View (AI)</button>
+        ${l.referenceImage ? `<button onclick="toggleLocUseRef('${l.id}')" style="background:${l.useRefAsDefault ? '#1a2a1a' : 'none'};border:1px solid ${l.useRefAsDefault ? '#4ade80' : '#2a2a2a'};border-radius:4px;color:${l.useRefAsDefault ? '#4ade80' : '#666'};font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap">${l.useRefAsDefault ? '📷 Using Ref as Default' : '📷 Use Ref as Default View'}</button>` : ''}
         <button class="btn-gen-shot-angles" onclick="generateLocAltViews('${l.id}')">Generate Variations</button>
         <button class="btn btn-delete" onclick="deleteLocation('${l.id}')">Remove</button>
       </div>
@@ -1833,7 +1850,7 @@ function shotRowHTML(s, idx) {
       <div class="final-image-cell" id="final-img-${s.id}">
         ${(() => {
           const loc = locations.find(l => l.id === s.locationId);
-          const locImg = loc?.images?.[0] || null;
+          const locImg = locDefaultImage(loc);
           const previewImg = s.finalImage || locImg;
           const shotCharsWithImg = (s.characterIds || [])
             .map(id => characters.find(c => c.id === id))
@@ -2634,8 +2651,6 @@ async function generateLocCustomView(id, idx) {
   const loc = locations.find(l => l.id === id);
   if (!loc || !loc.customViews?.[idx]) return;
   const cv = loc.customViews[idx];
-  const refImageUrl = loc.selectedImage || loc.images?.[0] || null;
-  if (!refImageUrl) { showToast('Generate a default view first.', true); return; }
   const slot = document.getElementById(`loc-custom-img-${id}-${idx}`);
   const row = slot?.closest('tr');
   const btn = row?.querySelector('.btn-regen-angle');
@@ -2644,10 +2659,19 @@ async function generateLocCustomView(id, idx) {
   let prompt = cv.prompt;
   if (!prompt) { showToast('Add a prompt for this view first.', true); if (btn) { btn.disabled = false; btn.textContent = 'Generate'; } return; }
 
+  // Row ref image overrides location default image
+  let refImageUrl;
+  if (cv.refImage) {
+    const uploaded = await apiFetch('/api/upload-reference', { base64: cv.refImage.base64, mediaType: cv.refImage.mediaType });
+    refImageUrl = uploaded.url;
+  } else {
+    refImageUrl = locDefaultImage(loc);
+  }
+
   try {
-    const data = await apiFetch('/api/generate-shot-images', {
-      prompt, referenceImageUrls: [refImageUrl], stylePrompt: getStylePrompt()
-    });
+    const data = refImageUrl
+      ? await apiFetch('/api/generate-shot-images', { prompt, referenceImageUrls: [refImageUrl], stylePrompt: getStylePrompt() })
+      : await apiFetch('/api/generate-images', { prompt, stylePrompt: getStylePrompt() });
     const imgUrl = data.images?.[0];
     if (imgUrl) {
       loc.customViews[idx].image = imgUrl;
@@ -2656,6 +2680,50 @@ async function generateLocCustomView(id, idx) {
     }
   } catch(e) { showToast('Error: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Generate'; } }
+}
+
+function handleLocAngleRefUpload(locId, angle, input) {
+  const file = input.files?.[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    const loc = locations.find(l => l.id === locId);
+    if (!loc) return;
+    if (!loc.shotAngles) loc.shotAngles = {};
+    if (!loc.shotAngles[angle]) loc.shotAngles[angle] = {};
+    loc.shotAngles[angle].refImage = { dataUrl, base64, mediaType: file.type };
+    autoSave(); renderLocations();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeLocAngleRefImage(locId, angle) {
+  const loc = locations.find(l => l.id === locId);
+  if (!loc?.shotAngles?.[angle]) return;
+  delete loc.shotAngles[angle].refImage;
+  autoSave(); renderLocations();
+}
+
+function handleLocCustomRefUpload(locId, idx, input) {
+  const file = input.files?.[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    const loc = locations.find(l => l.id === locId);
+    if (!loc?.customViews?.[idx]) return;
+    loc.customViews[idx].refImage = { dataUrl, base64, mediaType: file.type };
+    autoSave(); renderLocations();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeLocCustomRefImage(locId, idx) {
+  const loc = locations.find(l => l.id === locId);
+  if (!loc?.customViews?.[idx]) return;
+  delete loc.customViews[idx].refImage;
+  autoSave(); renderLocations();
 }
 
 function onLocAnglePromptChange(id, angleName, value) {
@@ -2670,7 +2738,7 @@ function onLocAnglePromptChange(id, angleName, value) {
 async function generateLocAltViews(id) {
   const loc = locations.find(l => l.id === id);
   if (!loc) return;
-  const refImageUrl = loc.selectedImage || loc.images?.[0] || null;
+  const refImageUrl = locDefaultImage(loc);
   if (!refImageUrl) { showToast('Generate a default view first.', true); return; }
   const btn = document.querySelector(`#locations-body tr[data-id="${id}"] .btn-gen-shot-angles`);
   if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
@@ -2739,8 +2807,16 @@ async function generateLocAltViews(id) {
 async function generateLocAngleSingle(id, angleName) {
   const loc = locations.find(l => l.id === id);
   if (!loc) return;
-  const refImageUrl = loc.selectedImage || loc.images?.[0] || null;
-  if (!refImageUrl) { showToast('Generate a location image first.', true); return; }
+  // Row ref image overrides the location default image
+  const rowRefImage = loc.shotAngles?.[angleName]?.refImage;
+  let refImageUrl;
+  if (rowRefImage) {
+    const uploaded = await apiFetch('/api/upload-reference', { base64: rowRefImage.base64, mediaType: rowRefImage.mediaType });
+    refImageUrl = uploaded.url;
+  } else {
+    refImageUrl = locDefaultImage(loc);
+    if (!refImageUrl) { showToast('Generate a default view first, or upload a reference image for this row.', true); return; }
+  }
   if (!loc.shotAngles) loc.shotAngles = {};
   if (!loc.shotAngles[angleName]) loc.shotAngles[angleName] = {};
 
@@ -2809,29 +2885,41 @@ async function generateLocPrompt(id) {
 // ── generate location images ──────────────────────────────────────────────
 async function generateLocImages(id) {
   const row = document.querySelector(`#locations-body tr[data-id="${id}"]`);
-  const btn = row.querySelector('.btn-gen-images');
-  const prompt = row.querySelector('.field-prompt').value.trim();
+  const btn = row?.querySelector('.btn-gen-images');
+  const prompt = row?.querySelector('.field-prompt').value.trim();
   if (!prompt) { showToast('Generate a prompt first.', true); return; }
   const loc = locations.find(l => l.id === id);
   const grid = document.getElementById(`loc-imgs-${id}`);
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…'; }
   grid.innerHTML = loadingSlots(1);
   const fullLocPrompt = [prompt, getStylePrompt()].filter(Boolean).join('\n\n');
   try {
-    let data;
-    if (loc?.referenceImage) {
-      const uploaded = await apiFetch('/api/upload-reference', { base64: loc.referenceImage.base64, mediaType: loc.referenceImage.mediaType });
-      data = await apiFetch('/api/generate-shot-images', { prompt: fullLocPrompt, referenceImageUrls: [uploaded.url], stylePrompt: '' });
-    } else {
-      data = await apiFetch('/api/generate-images', { prompt: fullLocPrompt, stylePrompt: '' });
-    }
+    const data = await apiFetch('/api/generate-images', { prompt: fullLocPrompt, stylePrompt: '' });
     const imgs = data.images.slice(0, 1);
-    if (loc) loc.images = imgs;
+    if (loc) { loc.images = imgs; loc.useRefAsDefault = false; }
     grid.innerHTML = imageSlots(imgs, 1);
     autoSave();
+    renderLocations();
     showToast('Default view generated.');
   } catch(e) { grid.innerHTML = emptySlots(1); showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Default View'; }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = 'Generate Default View (AI)'; } }
+}
+
+function toggleLocUseRef(id) {
+  const loc = locations.find(l => l.id === id);
+  if (!loc || !loc.referenceImage) return;
+  loc.useRefAsDefault = !loc.useRefAsDefault;
+  // Swap what's shown in the images grid
+  const grid = document.getElementById(`loc-imgs-${id}`);
+  if (grid) {
+    if (loc.useRefAsDefault) {
+      grid.innerHTML = imageSlots([loc.referenceImage.dataUrl], 1);
+    } else {
+      grid.innerHTML = loc.images?.length ? imageSlots(loc.images, 1) : emptySlots(1);
+    }
+  }
+  autoSave();
+  renderLocations();
 }
 
 // ── generate character prompt ─────────────────────────────────────────────
@@ -3661,7 +3749,7 @@ function syncComposeLocationToRow(locationId) {
     const finalSel = finalCell.querySelector('.final-loc-select');
     if (finalSel) finalSel.value = locationId;
     const loc = locations.find(l => l.id === locationId);
-    const locImg = loc?.images?.[0] || null;
+    const locImg = locDefaultImage(loc);
     const preview = finalCell.querySelector('.final-image-loc-preview');
     if (preview) {
       let img = preview.querySelector('.final-image-preview');

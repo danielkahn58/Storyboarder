@@ -536,6 +536,45 @@
   .btn-back-projects { background: none; border: none; color: #555; font-size: 12px; cursor: pointer; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
   .btn-back-projects:hover { color: #aaa; background: #1a1a1a; }
   .header-divider { width: 1px; height: 18px; background: #222; }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    .table-wrap { padding: 8px 12px; }
+    .section-nav { overflow-x: auto; flex-wrap: nowrap; padding: 0 12px; gap: 0; }
+    .section-nav-btn { font-size: 11px; padding: 8px 10px; white-space: nowrap; }
+    .section-header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+    .section-header h2 { font-size: 15px; }
+    .bottom-bar { padding: 8px 16px; }
+
+    /* Characters & Locations: hide less critical columns, let key ones show */
+    .char-table col.col-prompt,
+    .char-table col.col-images { display: none; }
+    .char-table .field-prompt,
+    .char-table .col-images { display: none; }
+
+    /* Shot table: show only the most important columns, hide the rest */
+    .shot-table col.col-imgprompt,
+    .shot-table col.col-vidprompt,
+    .shot-table col.col-angle,
+    .shot-table col.col-movement,
+    .shot-table col.col-position { display: none; }
+    .shot-table .field-imgprompt,
+    .shot-table .field-vidprompt,
+    .shot-table .field-angle,
+    .shot-table .field-movement { display: none; }
+    /* hide th/td for hidden cols by nth-child isn't reliable; use overflow scroll instead */
+
+    /* General mobile table approach: just let them scroll horizontally */
+    .char-table, .shot-table { min-width: 600px; }
+    .shot-table { min-width: 900px; }
+
+    /* Stack section header actions */
+    .section-header > div { flex-wrap: wrap; }
+
+    /* Compose / editor */
+    #compose-modal .compose-body { flex-direction: column; }
+    #compose-sidebar { width: 100%; max-height: 200px; overflow-y: auto; border-left: none; border-top: 1px solid #1a1a1a; }
+  }
 </style>
 </head>
 <body>
