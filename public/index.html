@@ -231,16 +231,62 @@
   .compose-modal.open { display: flex; }
   .compose-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); }
   .compose-dialog { position: relative; z-index: 1; background: #141414; border: 1px solid #2a2a2a; border-radius: 10px; display: flex; flex-direction: column; width: min(96vw, 1200px); max-height: 92vh; overflow: hidden; }
-  .compose-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; }
-  .compose-header h3 { font-size: 14px; font-weight: 600; color: #ccc; }
-  .compose-header-right { display: flex; align-items: center; gap: 10px; }
+  .compose-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 18px; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; gap: 12px; }
+  .compose-header h3 { font-size: 14px; font-weight: 600; color: #ccc; white-space: nowrap; }
+  .compose-header-center { display: flex; align-items: center; gap: 6px; }
+  .compose-header-right { display: flex; align-items: center; gap: 8px; }
+  .compose-nav-btn { background: #1a1a1a; border: 1px solid #2a2a2a; color: #888; font-size: 14px; padding: 4px 10px; border-radius: 5px; cursor: pointer; line-height: 1; }
+  .compose-nav-btn:hover:not(:disabled) { color: #ccc; border-color: #444; }
+  .compose-nav-btn:disabled { opacity: 0.3; cursor: default; }
+  .compose-play-btn { background: #162a1e; border: 1px solid #254a31; color: #4ade80; font-size: 13px; padding: 4px 12px; border-radius: 5px; cursor: pointer; }
+  .compose-play-btn:hover:not(:disabled) { background: #1c3526; }
+  .compose-play-btn:disabled { opacity: 0.3; cursor: default; }
+  .compose-shot-label { font-size: 11px; color: #555; white-space: nowrap; }
+  .btn-create-video { background: #1a1030; border: 1px solid #3a2060; color: #a78bfa; font-size: 11px; font-weight: 600; padding: 5px 12px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+  .btn-create-video:hover { background: #221040; }
+  /* Video tab panel */
+  .compose-video-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; flex: 1; padding: 20px; background: #0a0a0a; }
+  .compose-video-panel video { max-width: 100%; max-height: 100%; border-radius: 6px; box-shadow: 0 4px 24px rgba(0,0,0,0.6); }
+  .compose-video-placeholder { width: 100%; aspect-ratio: 16/9; max-height: 60vh; background: #111; border: 1px dashed #2a2a2a; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #333; font-size: 13px; }
+  .btn-create-talking-video { background: #1a1030; border: 1px solid #3a2060; color: #a78bfa; font-size: 12px; font-weight: 600; padding: 8px 16px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 4px; }
+  .btn-create-talking-video:hover:not(:disabled) { background: #221040; }
+  .btn-create-talking-video:disabled { opacity: 0.5; cursor: default; }
   .compose-close { background: transparent; border: none; color: #555; font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px; }
   .compose-close:hover { color: #ccc; }
   .compose-body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
   .compose-canvas-wrap { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; background: #0a0a0a; padding: 16px; }
   #compose-canvas { display: block; max-width: 100%; max-height: 100%; border-radius: 4px; cursor: default; box-shadow: 0 4px 24px rgba(0,0,0,0.6); }
-  .compose-sidebar { width: 220px; flex-shrink: 0; border-left: 1px solid #1e1e1e; display: flex; flex-direction: column; overflow: hidden; }
+  .compose-sidebar { width: 240px; flex-shrink: 0; border-left: 1px solid #1e1e1e; display: flex; flex-direction: column; overflow: hidden; }
   .compose-section { padding: 14px 14px 10px; border-bottom: 1px solid #1a1a1a; }
+  /* ── compose bg panel (stacked sections) ── */
+  .compose-bg-section-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: #444; padding: 8px 10px 4px; }
+  .compose-bg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 0 10px 4px; }
+  .compose-bg-card { background: #111; border: 1px solid #1e1e1e; border-radius: 5px; overflow: hidden; cursor: pointer; transition: border-color 0.15s; }
+  .compose-bg-card:hover { border-color: #444; }
+  .compose-bg-card.selected { border-color: #5865f2; }
+  .compose-bg-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+  .compose-bg-card-empty { width: 100%; aspect-ratio: 16/9; background: #1a1a1a; display: flex; align-items: center; justify-content: center; color: #333; font-size: 18px; }
+  .compose-bg-card-label { font-size: 10px; color: #888; padding: 3px 5px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .compose-loc-card-wrap { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0; }
+  .compose-loc-card-main { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .compose-loc-variations { display: none; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px 0 2px; }
+  .compose-loc-variations.open { display: grid; }
+  .compose-loc-var-thumb { background: #111; border: 1px solid #1e1e1e; border-radius: 4px; overflow: hidden; cursor: pointer; transition: border-color 0.12s; }
+  .compose-loc-var-thumb:hover { border-color: #555; }
+  .compose-loc-var-thumb.selected { border-color: #5865f2; }
+  .compose-loc-var-thumb img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+  .compose-loc-var-thumb-empty { width: 100%; aspect-ratio: 16/9; background: #181818; display: flex; align-items: center; justify-content: center; color: #2a2a2a; font-size: 12px; }
+  .compose-loc-var-label { font-size: 9px; color: #555; padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .compose-color-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; }
+  .compose-color-swatch-lg { width: 100%; aspect-ratio: 16/9; border-radius: 3px; background: #000; border: 1px solid #333; }
+  .compose-layer-bar { padding: 8px 10px; border-bottom: 1px solid #1a1a1a; flex-shrink: 0; }
+  .compose-layer-dropdown { width: 100%; background: #161616; border: 1px solid #2a2a2a; border-radius: 5px; color: #ccc; font-size: 11px; padding: 5px 7px; cursor: pointer; }
+  .compose-layer-add-mode { padding: 8px 10px; display: flex; flex-direction: column; gap: 0; flex: 1; overflow-y: auto; }
+  .compose-layer-edit-mode { padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; }
+  .comp-layer-char-preview { position: relative; width: 100%; aspect-ratio: 3/4; background: #0a0a0a; border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+  .comp-layer-char-preview img { width: 100%; height: 100%; object-fit: contain; }
+  .btn-remove-layer { background: #2a1010; color: #e05555; border: 1px solid #3a1a1a; border-radius: 5px; padding: 5px 8px; font-size: 11px; cursor: pointer; width: 100%; }
+  .btn-remove-layer:hover { background: #3a1515; }
   .compose-section:last-child { border-bottom: none; }
   .compose-section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #555; margin-bottom: 10px; }
   .compose-thumbs { display: flex; flex-direction: column; gap: 6px; }
@@ -261,7 +307,7 @@
   .compose-tab { flex: 1; background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-size: 11px; font-weight: 500; padding: 8px 4px; cursor: pointer; letter-spacing: 0.2px; transition: color 0.12s; white-space: nowrap; }
   .compose-tab:hover { color: #bbb; }
   .compose-tab.active { color: #e8e8e8; border-bottom-color: #5865f2; }
-  .compose-tab-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .compose-tab-panel { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
   /* Background mode picker */
   .compose-bg-mode-bar { display: flex; gap: 0; padding: 8px 10px 0; flex-shrink: 0; }
   .compose-bg-mode-btn { flex: 1; background: none; border: 1px solid #252525; color: #555; font-size: 10px; padding: 5px 2px; cursor: pointer; transition: color 0.12s, background 0.12s; white-space: nowrap; }
@@ -299,6 +345,7 @@
   .final-image-loc-empty { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
   .final-image-loc-empty span { font-size: 10px; color: #333; }
   .final-image-badge { position: absolute; top: 4px; right: 4px; background: rgba(129,140,248,0.85); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 3px; }
+  .final-preview-char-overlay { position: absolute; bottom: 0; height: 80%; width: auto; object-fit: contain; pointer-events: none; }
   .final-image-compose-hint { position: absolute; inset: 0; background: rgba(0,0,0,0.5); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s; pointer-events: none; }
   .final-image-loc-row { padding: 4px 5px; border-top: 1px solid #1a1a1a; }
   .final-loc-select { width: 100%; font-size: 10px; background: #111; color: #888; border: 1px solid #1e1e1e; border-radius: 3px; padding: 2px 4px; }
@@ -343,6 +390,11 @@
   .btn-comp-add:hover { background: #1c3526; }
   .btn-comp-gen { background: #1a1a2e; color: #818cf8; border: 1px solid #2e2e50; }
   .btn-comp-gen:hover { background: #20203a; }
+  .btn-comp-gen-inline { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: #1a1a2e; color: #818cf8; border: 1px solid #2e2e50; border-radius: 4px; width: 26px; height: 26px; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .btn-comp-gen-inline:hover { background: #20203a; }
+  .comp-thumb-delete { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(30,10,10,0.85); border: 1px solid #5a2020; border-radius: 3px; color: #e05050; font-size: 9px; line-height: 1; cursor: pointer; display: none; align-items: center; justify-content: center; padding: 0; z-index: 2; }
+  .comp-angle-thumb:hover .comp-thumb-delete,
+  .compose-loc-var-thumb:hover .comp-thumb-delete { display: flex; }
 
   /* rich reference field (contenteditable) */
   .ref-rich { background: #161616; border: 1px solid #252525; border-radius: 5px; color: #e8e8e8; font-size: 12px; padding: 7px 9px; min-height: 72px; line-height: 1.6; font-family: inherit; cursor: text; }
@@ -385,6 +437,62 @@
 
   /* redundancy warning */
   .loc-dup-flag { display: inline-block; background: #2a1a00; border: 1px solid #5a3a00; color: #f59e0b; font-size: 10px; border-radius: 4px; padding: 2px 6px; margin-top: 4px; cursor: help; }
+  .missing-from-script-flag { display: inline-block; background: #2a0a0a; border: 1px solid #5a1a1a; color: #f87171; font-size: 10px; border-radius: 4px; padding: 2px 6px; margin-top: 4px; }
+  .shot-suggestion-flag { background: #1a1a0a; border: 1px solid #4a4a1a; border-radius: 4px; padding: 6px 8px; margin-top: 5px; font-size: 10px; }
+  .suggestion-label { color: #777; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; font-size: 9px; display: block; margin-bottom: 3px; }
+  .suggestion-text { color: #c9c07a; line-height: 1.4; display: block; margin-bottom: 5px; white-space: pre-wrap; }
+  .suggestion-actions { display: flex; gap: 5px; }
+  .suggestion-accept { background: #1a2a1a; border: 1px solid #2a4a2a; color: #6aba6a; font-size: 10px; border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+  .suggestion-accept:hover { background: #223a22; }
+  .suggestion-dismiss { background: none; border: 1px solid #2a2a2a; color: #555; font-size: 10px; border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+  .suggestion-dismiss:hover { color: #f87171; border-color: #4a1a1a; }
+
+  /* ── Shots / AV Script tabs ── */
+  .shots-tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-size: 14px; font-weight: 600; padding: 8px 18px 10px; cursor: pointer; transition: color 0.15s; }
+  .shots-tab-btn:hover { color: #aaa; }
+  .shots-tab-btn.active { color: #c7d2fe; border-bottom-color: #5865f2; }
+
+  /* ── AV Script ── */
+  .av-script-wrap { padding: 32px; max-width: 860px; margin: 0 auto; }
+  .av-script-title { font-size: 22px; font-weight: 700; color: #e5e7eb; margin-bottom: 4px; letter-spacing: 0.3px; }
+  .av-script-subtitle { font-size: 12px; color: #555; margin-bottom: 36px; }
+  .av-shot-row { display: grid; grid-template-columns: 56px 140px 1fr 1fr; gap: 0; border-top: 1px solid #1e1e1e; padding: 18px 0; }
+  .av-shot-row:last-child { border-bottom: 1px solid #1e1e1e; }
+  .av-shot-num { font-size: 11px; font-weight: 700; color: #4a4a5a; letter-spacing: 1px; padding-top: 2px; }
+  .av-shot-ts { font-size: 10px; color: #555; font-family: monospace; margin-top: 4px; }
+  .av-col-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #3a3a4a; margin-bottom: 6px; }
+  .av-col-loc { border-right: 1px solid #1a1a1a; padding-right: 16px; }
+  .av-col-visual { border-right: 1px solid #1a1a1a; padding-right: 20px; padding-left: 20px; }
+  .av-col-audio { padding-left: 20px; }
+  .av-col-loc .av-col-label { color: #3a4a3a; }
+  .av-col-visual .av-col-label { color: #3a4a6a; }
+  .av-col-audio .av-col-label { color: #3a5a3a; }
+  .av-loc-select { background: #0e0e0e; border: 1px solid #222; color: #9ca3af; border-radius: 4px; font-size: 11px; padding: 4px 6px; width: 100%; cursor: pointer; }
+  .av-loc-select:focus { outline: none; border-color: #444; }
+  .av-shot-image { width: 100%; border-radius: 4px; margin-bottom: 8px; display: block; }
+  .av-shot-desc { font-size: 12px; color: #9ca3af; line-height: 1.6; margin-bottom: 6px; }
+  .av-shot-meta { font-size: 10px; color: #444; }
+  .av-shot-lyric { font-size: 13px; color: #d1d5db; line-height: 1.65; font-style: italic; }
+  .av-shot-chars { font-size: 10px; color: #555; margin-top: 8px; }
+  .av-script-empty { color: #444; font-size: 13px; padding: 40px 0; text-align: center; }
+  .av-editable { outline: none; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; cursor: text; min-height: 1em; transition: background 0.15s; white-space: pre-wrap; }
+  .av-editable:hover { background: rgba(255,255,255,0.03); }
+  .av-editable:focus { background: rgba(255,255,255,0.06); box-shadow: 0 0 0 1px #333; }
+
+  /* ── audio import ── */
+  .audio-import-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a1a1a; }
+  .btn-play-shot { background: none; border: none; color: #444; font-size: 12px; cursor: pointer; padding: 2px 4px; line-height: 1; border-radius: 3px; display: block; margin: 3px auto 0; }
+  .btn-play-shot:hover { color: #4ade80; }
+  /* ── pinned audio bar ── */
+  #pinned-audio-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 300; background: #0d0d0d; border-top: 1px solid #222; display: flex; align-items: center; gap: 10px; padding: 8px 16px; box-shadow: 0 -4px 20px rgba(0,0,0,0.5); }
+  #pinned-audio-inner { flex: 1; }
+  #pinned-audio-player { width: 100%; height: 32px; }
+  #btn-pinned-toggle { background: none; border: 1px solid #2a2a2a; color: #555; font-size: 11px; border-radius: 4px; padding: 4px 8px; cursor: pointer; flex-shrink: 0; }
+  #btn-pinned-toggle:hover { color: #aaa; border-color: #444; }
+  /* push page content up so pinned bar doesn't overlap bottom rows */
+  body.has-pinned-audio #view-editor { padding-bottom: 60px; }
+  .audio-transcript-box { width: 100%; min-height: 80px; max-height: 160px; background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 4px; color: #555; font-size: 11px; font-family: monospace; padding: 8px 10px; resize: vertical; line-height: 1.7; margin-top: 8px; overflow-y: auto; }
+  .col-timestamp { width: 72px; }
 
   /* ── generation rules ── */
   .gen-rules-section { border-bottom: 1px solid #1a1a1a; }
@@ -446,12 +554,6 @@
 <!-- ── Editor View ── -->
 <div id="view-editor" style="display:none;">
 
-<!-- ── Visual Style ── -->
-<div class="style-section">
-  <span class="style-label">Visual Style</span>
-  <div class="style-options" id="style-options"><!-- rendered by renderVisualStyles() --></div>
-</div>
-
 <!-- ── Debug Panel ── -->
 <div id="debug-panel" style="display:none;padding:10px 32px;border-bottom:1px solid #2a0a0a;background:#0a0505;">
   <div style="display:flex;align-items:flex-start;gap:12px;">
@@ -463,146 +565,202 @@
   </div>
 </div>
 
-<!-- ── Generation Rules ── -->
-<div class="gen-rules-section">
-  <div class="gen-rules-header" onclick="toggleGenRules()">
-    <span class="gen-rules-toggle" id="gen-rules-toggle">▸</span>
-    <span class="gen-rules-title">Generation Rules</span>
+<!-- ── Tab panels (all 6 sections) ── -->
+
+<div id="tab-config" class="main-tab-panel">
+  <div class="section-header" style="margin-top:0"><h2>Configuration</h2></div>
+  <div class="style-section" style="border-top:none">
+    <span class="style-label">Visual Style</span>
+    <div class="style-options" id="style-options"></div>
   </div>
-  <div class="gen-rules-body" id="gen-rules-body">
-    <div class="gen-rules-col">
-      <div class="gen-rules-col-label">Character Prompts</div>
-      <textarea class="gen-rules-textarea" id="char-gen-rules" oninput="onCharRulesChange(this.value)"></textarea>
-      <button class="gen-rules-reset" onclick="resetCharRules()">Reset to default</button>
+  <div class="gen-rules-section">
+    <div class="gen-rules-header" onclick="toggleGenRules()">
+      <span class="gen-rules-toggle" id="gen-rules-toggle">▸</span>
+      <span class="gen-rules-title">Generation Rules</span>
     </div>
-    <div class="gen-rules-col">
-      <div class="gen-rules-col-label">Location Prompts</div>
-      <textarea class="gen-rules-textarea" id="loc-gen-rules" oninput="onLocRulesChange(this.value)"></textarea>
-      <button class="gen-rules-reset" onclick="resetLocRules()">Reset to default</button>
+    <div class="gen-rules-body" id="gen-rules-body">
+      <div class="gen-rules-col">
+        <div class="gen-rules-col-label">Character Prompts</div>
+        <textarea class="gen-rules-textarea" id="char-gen-rules" oninput="onCharRulesChange(this.value)"></textarea>
+        <button class="gen-rules-reset" onclick="resetCharRules()">Reset to default</button>
+      </div>
+      <div class="gen-rules-col">
+        <div class="gen-rules-col-label">Location Prompts</div>
+        <textarea class="gen-rules-textarea" id="loc-gen-rules" oninput="onLocRulesChange(this.value)"></textarea>
+        <button class="gen-rules-reset" onclick="resetLocRules()">Reset to default</button>
+      </div>
+      <div class="gen-rules-col">
+        <div class="gen-rules-col-label">Character Image Framing</div>
+        <textarea class="gen-rules-textarea" id="char-framing-rules" oninput="onBoilerplateChange(this.value)"></textarea>
+        <button class="gen-rules-reset" onclick="resetFramingRules()">Reset to default</button>
+      </div>
     </div>
-    <div class="gen-rules-col">
-      <div class="gen-rules-col-label">Character Image Framing</div>
-      <textarea class="gen-rules-textarea" id="char-framing-rules" oninput="onBoilerplateChange(this.value)"></textarea>
-      <button class="gen-rules-reset" onclick="resetFramingRules()">Reset to default</button>
+  </div>
+
+  <!-- ── Script Upload ── -->
+  <div class="script-section">
+    <div class="script-section-top">
+      <button class="btn-upload" onclick="document.getElementById('script-file').click()">Upload Script</button>
+      <input type="file" id="script-file" class="hidden" accept=".txt,.pdf,.docx" onchange="handleScriptUpload(this)">
+      <span class="upload-status" id="upload-status">Accepts .txt, .pdf, .docx</span>
+    </div>
+    <div class="script-preview" id="script-preview">
+      <div class="script-preview-header">
+        <span class="script-filename" id="script-filename"></span>
+        <button class="btn-remove-script" onclick="removeScript()">✕ Remove script</button>
+      </div>
+      <div class="script-text" id="script-text"></div>
+    </div>
+    <!-- Import Audio -->
+    <div class="audio-import-section">
+      <div class="script-section-top">
+        <button class="btn-upload" onclick="document.getElementById('audio-file').click()">Import Audio</button>
+        <input type="file" id="audio-file" class="hidden" accept="audio/*,video/mp4,video/webm" onchange="handleAudioUpload(this)">
+        <span class="upload-status" id="audio-upload-status">MP3, WAV, M4A, MP4…</span>
+      </div>
+      <textarea id="audio-transcript" class="audio-transcript-box" placeholder="Transcript with timestamps will appear here after import…" readonly style="display:none"></textarea>
     </div>
   </div>
 </div>
 
-<!-- ── Script Upload ── -->
-<div class="script-section">
-  <div class="script-section-top">
-    <button class="btn-upload" onclick="document.getElementById('script-file').click()">Upload Script</button>
-    <input type="file" id="script-file" class="hidden" accept=".txt,.pdf,.docx" onchange="handleScriptUpload(this)">
-    <span class="upload-status" id="upload-status">Accepts .txt, .pdf, .docx</span>
-  </div>
-  <div class="script-preview" id="script-preview">
-    <div class="script-preview-header">
-      <span class="script-filename" id="script-filename"></span>
-      <button class="btn-remove-script" onclick="removeScript()">✕ Remove script</button>
+<div id="tab-characters" class="main-tab-panel" style="display:none">
+  <div class="section-header">
+    <h2>Characters</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn-upload" id="btn-gen-chars" onclick="generateCharactersFromScript()" style="font-size:12px;padding:6px 14px;">Generate Characters</button>
+      <button class="btn-upload" id="btn-gen-missing-prompts" onclick="generateMissingCharPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
+      <button class="btn-upload" id="btn-gen-missing-images" onclick="generateMissingCharImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
+      <button onclick="deleteAllCharacters()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
     </div>
-    <div class="script-text" id="script-text"></div>
+  </div>
+  <div class="table-wrap">
+    <table class="char-table">
+      <colgroup>
+        <col class="col-name"><col class="col-ref"><col class="col-refimg">
+        <col class="col-prompt"><col class="col-images"><col class="col-act">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Character name</th><th>Reference description</th><th>Reference image</th>
+          <th>Prompt</th><th>AI Generated Images</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="characters-body"></tbody>
+    </table>
+  </div>
+  <div class="bottom-bar">
+    <button class="btn-add" onclick="addCharacter()">+ Add character</button>
   </div>
 </div>
 
-<!-- ── Characters ── -->
-<div class="section-header" id="sec-characters">
-  <h2>Characters</h2>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <button class="btn-upload" id="btn-gen-chars" onclick="generateCharactersFromScript()" style="font-size:12px;padding:6px 14px;">Generate Characters</button>
-    <button class="btn-upload" id="btn-gen-missing-prompts" onclick="generateMissingCharPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
-    <button class="btn-upload" id="btn-gen-missing-images" onclick="generateMissingCharImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
-    <button onclick="deleteAllCharacters()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
+<div id="tab-locations" class="main-tab-panel" style="display:none">
+  <div class="section-header">
+    <h2>Locations</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn-upload" id="btn-gen-locs" onclick="generateLocationsFromScript()" style="font-size:12px;padding:6px 14px;">Generate Locations</button>
+      <button class="btn-upload" id="btn-gen-missing-loc-prompts" onclick="generateMissingLocPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
+      <button class="btn-upload" id="btn-gen-missing-loc-images" onclick="generateMissingLocImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
+      <button onclick="deleteAllLocations()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="char-table">
+      <colgroup>
+        <col class="col-name"><col class="col-ref"><col class="col-refimg">
+        <col class="col-prompt"><col class="col-images"><col class="col-act">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Location name</th><th>Reference description</th><th>Reference image</th>
+          <th>Prompt</th><th>AI Generated Images</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="locations-body"></tbody>
+    </table>
+  </div>
+  <div class="bottom-bar">
+    <button class="btn-add" onclick="addLocation()">+ Add location</button>
   </div>
 </div>
-<div class="table-wrap">
-  <table class="char-table">
-    <colgroup>
-      <col class="col-name"><col class="col-ref"><col class="col-refimg">
-      <col class="col-prompt"><col class="col-images"><col class="col-act">
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Character name</th><th>Reference description</th><th>Reference image</th>
-        <th>Prompt</th><th>AI Generated Images</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="characters-body"></tbody>
-  </table>
-</div>
-<div class="bottom-bar">
-  <button class="btn-add" onclick="addCharacter()">+ Add character</button>
-</div>
 
-<div class="divider"></div>
+<div id="tab-shots" class="main-tab-panel" style="display:none">
+  <div class="section-header" id="sec-shots">
+    <span id="shots-section-title" style="font-weight:600;font-size:14px">Shot Sequence</span>
+    <div id="shots-tab-actions" style="display:flex;gap:8px;align-items:center">
+      <button class="btn-upload" id="btn-gen-shots" onclick="generateShotSequence()" style="font-size:12px;padding:6px 14px;">Generate Shot Sequence</button>
+      <button class="btn-upload" id="btn-cleanup-shots" onclick="cleanupShotFields()" style="font-size:12px;padding:6px 14px;background:#161626;border-color:#3a3a6a;color:#a5b4fc" title="Use AI to sort existing shot data into the correct Audio and Visual Description columns">✦ Clean Up Fields</button>
+    </div>
+    <div id="avscript-tab-actions" style="display:none;gap:8px;align-items:center">
+      <button id="btn-avscript-images" class="btn-upload" onclick="toggleAvScriptImages()" style="font-size:12px;padding:6px 14px;">Hide Images</button>
+      <button class="btn-upload" onclick="exportAvScriptPdf()" style="font-size:12px;padding:6px 14px;">Export PDF</button>
+    </div>
+    <div id="animatic-tab-actions" style="display:none;gap:8px;align-items:center">
+      <button class="btn-upload" id="btn-gen-animatic" onclick="generateAnimatic()" style="font-size:12px;padding:6px 14px;">Generate Animatic</button>
+    </div>
+  </div>
 
-<!-- ── Locations ── -->
-<div class="section-header" id="sec-locations">
-  <h2>Locations</h2>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <button class="btn-upload" id="btn-gen-locs" onclick="generateLocationsFromScript()" style="font-size:12px;padding:6px 14px;">Generate Locations</button>
-    <button class="btn-upload" id="btn-gen-missing-loc-prompts" onclick="generateMissingLocPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
-    <button class="btn-upload" id="btn-gen-missing-loc-images" onclick="generateMissingLocImages()" style="font-size:12px;padding:6px 14px;background:#162a1e;color:#4ade80;border-color:#254a31;">Generate Missing Images</button>
-    <button onclick="deleteAllLocations()" style="font-size:12px;padding:6px 14px;background:transparent;color:#555;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer" onmouseover="this.style.color='#f87171';this.style.borderColor='#4a1a1a'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">Delete All</button>
+  <div id="shots-tab-panel">
+    <div class="table-wrap">
+      <table class="shot-table">
+        <colgroup>
+          <col class="col-order"><col class="col-timestamp"><col class="col-lyric"><col class="col-desc">
+          <col class="col-chars"><col class="col-locs"><col class="col-size"><col class="col-angle">
+          <col class="col-movement"><col class="col-position"><col class="col-imgprompt"><col class="col-vidprompt">
+          <col class="col-images"><col class="col-act">
+        </colgroup>
+        <thead>
+          <tr>
+            <th></th><th>Time</th><th>Audio</th><th>Visual Description</th>
+            <th>Character(s)</th><th>Location</th><th>Shot Size</th><th>Shot Movement</th>
+            <th>Image Prompt</th><th>Video Prompt</th>
+            <th>AI Generated Images</th><th>Final Image</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="shots-body"></tbody>
+      </table>
+    </div>
+    <div class="bottom-bar">
+      <button class="btn-add" onclick="addShot()">+ Add shot</button>
+    </div>
+  </div>
+
+  <div id="avscript-tab-panel" style="display:none">
+    <div id="av-script-content" class="av-script-wrap"></div>
+  </div>
+
+  <div id="animatic-tab-panel" style="display:none;padding:20px 0">
+    <div id="animatic-status" style="font-size:13px;color:#666;margin-bottom:12px"></div>
+    <video id="animatic-video" controls style="display:none;width:100%;max-width:900px;border-radius:8px;background:#000"></video>
+    <div id="animatic-empty" style="color:#444;font-size:13px">Generate an animatic to preview your shots with audio. Each shot's final image will play at its assigned timestamp.</div>
   </div>
 </div>
-<div class="table-wrap">
-  <table class="char-table">
-    <colgroup>
-      <col class="col-name"><col class="col-ref"><col class="col-refimg">
-      <col class="col-prompt"><col class="col-images"><col class="col-act">
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Location name</th><th>Reference description</th><th>Reference image</th>
-        <th>Prompt</th><th>AI Generated Images</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="locations-body"></tbody>
-  </table>
-</div>
-<div class="bottom-bar">
-  <button class="btn-add" onclick="addLocation()">+ Add location</button>
-</div>
-
-<div class="divider"></div>
-
-<!-- ── Shot Sequence ── -->
-<div class="section-header" id="sec-shots">
-  <h2>Shot Sequence</h2>
-  <button class="btn-upload" id="btn-gen-shots" onclick="generateShotSequence()" style="font-size:12px;padding:6px 14px;">Generate Shot Sequence</button>
-</div>
-<div class="table-wrap">
-  <table class="shot-table">
-    <colgroup>
-      <col class="col-order"><col class="col-lyric"><col class="col-desc">
-      <col class="col-chars"><col class="col-locs"><col class="col-size"><col class="col-angle">
-      <col class="col-movement"><col class="col-position"><col class="col-imgprompt"><col class="col-vidprompt">
-      <col class="col-images"><col class="col-act">
-    </colgroup>
-    <thead>
-      <tr>
-        <th></th><th>Lyric / Action</th><th>Description</th>
-        <th>Character(s)</th><th>Location</th><th>Shot Size</th><th>Shot Movement</th>
-        <th>Image Prompt</th><th>Video Prompt</th>
-        <th>AI Generated Images</th><th>Final Image</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="shots-body"></tbody>
-  </table>
-</div>
-<div class="bottom-bar">
-  <button class="btn-add" onclick="addShot()">+ Add shot</button>
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ── Pinned Audio Player ── -->
+<div id="pinned-audio-bar" style="display:none">
+  <div id="pinned-audio-inner">
+    <audio id="pinned-audio-player" controls></audio>
+  </div>
+  <button id="btn-pinned-toggle" onclick="togglePinnedPlayer()" title="Hide/show player">▼</button>
+  <button id="btn-pinned-expand" onclick="togglePinnedPlayer()" title="Show player" style="display:none">▲</button>
+</div>
 
 <!-- ── Compose Modal ── -->
 <div class="compose-modal" id="compose-modal">
   <div class="compose-overlay" onclick="closeCompose()"></div>
   <div class="compose-dialog">
     <div class="compose-header">
-      <h3>Compose Shot</h3>
+      <h3 id="compose-shot-title">Compose Shot</h3>
+      <div class="compose-header-center">
+        <button class="compose-nav-btn" id="btn-compose-prev" onclick="composeNavShot(-1)" title="Previous shot">‹</button>
+        <span class="compose-shot-label" id="compose-shot-index"></span>
+        <button class="compose-nav-btn" id="btn-compose-next" onclick="composeNavShot(1)" title="Next shot">›</button>
+        <button class="compose-play-btn" id="btn-compose-play" onclick="composePlayAudio()" title="Play audio at this shot's timestamp" disabled>▶ Play</button>
+      </div>
       <div class="compose-header-right">
+        <button class="btn-create-video" onclick="openVideoTab()">🎬 Create Video</button>
         <button id="btn-compose-undo" onclick="undo()" disabled title="Nothing to undo" style="padding:5px 12px;font-size:11px;background:#1a1a1a;color:#555;border:1px solid #2a2a2a;border-radius:5px;cursor:pointer">↩ Undo</button>
         <button class="btn btn-save-compose" onclick="saveCompose()">Save as Final Image</button>
         <button class="compose-close" onclick="closeCompose()">✕</button>
@@ -613,60 +771,63 @@
         <canvas id="compose-canvas"></canvas>
       </div>
       <div class="compose-sidebar">
-        <!-- Characters: always pinned above tabs -->
-        <div class="compose-pinned-section">
-          <div class="compose-section-title">Characters</div>
-          <div id="compose-char-cards"></div>
-        </div>
-        <!-- Character detail panel: shown when a tile is selected -->
-        <div id="compose-char-detail-wrap" class="compose-char-detail-wrap"></div>
-
         <!-- Tab bar -->
         <div class="compose-tab-bar">
           <button class="compose-tab active" data-tab="bg" onclick="switchComposeTab('bg')">Background</button>
-          <button class="compose-tab" data-tab="adjust" onclick="switchComposeTab('adjust')">Adjust</button>
           <button class="compose-tab" data-tab="layer" id="compose-tab-layer" onclick="switchComposeTab('layer')">Layer</button>
+          <button class="compose-tab" data-tab="adjust" onclick="switchComposeTab('adjust')">Global</button>
+          <button class="compose-tab" data-tab="video" id="compose-tab-video" onclick="switchComposeTab('video')" style="color:#a78bfa">Video</button>
         </div>
 
         <!-- ── Background tab ── -->
         <div class="compose-tab-panel" id="compose-tabpanel-bg">
-          <!-- Mode picker -->
-          <div class="compose-bg-mode-bar">
-            <button class="compose-bg-mode-btn active" data-mode="location" onclick="setComposeBgMode('location')">Location</button>
-            <button class="compose-bg-mode-btn" data-mode="shot" onclick="setComposeBgMode('shot')">Shot</button>
-            <button class="compose-bg-mode-btn" data-mode="color" onclick="setComposeBgMode('color')">Color</button>
-            <button class="compose-bg-mode-btn" data-mode="other" onclick="setComposeBgMode('other')">Other Shot</button>
-          </div>
 
-          <!-- Location panel -->
-          <div class="compose-bg-panel" id="compose-bgpanel-location">
-            <div id="compose-loc-thumbs"></div>
-          </div>
+          <!-- Locations -->
+          <div class="compose-bg-section-label">Locations</div>
+          <div id="compose-loc-thumbs" class="compose-bg-grid"></div>
 
-          <!-- Shot images panel -->
-          <div class="compose-bg-panel" id="compose-bgpanel-shot" style="display:none">
-            <div id="compose-shot-bg-section">
-              <div class="compose-thumbs" id="compose-shot-bg-thumbs"></div>
-              <p class="compose-empty" id="compose-shot-bg-empty" style="display:none">No AI images for this shot yet.</p>
-            </div>
-          </div>
+          <!-- AI Generated Backgrounds (shot images) -->
+          <div class="compose-bg-section-label">AI Generated Backgrounds</div>
+          <div class="compose-bg-grid" id="compose-shot-bg-thumbs"></div>
+          <p class="compose-empty" id="compose-shot-bg-empty" style="display:none;padding:0 10px 6px">No AI images for this shot yet.</p>
 
-          <!-- Color panel -->
-          <div class="compose-bg-panel" id="compose-bgpanel-color" style="display:none">
-            <div class="compose-color-thumb" onclick="document.getElementById('compose-bg-color-picker').click()" title="Use solid color as background">
-              <div class="compose-color-swatch" id="compose-color-swatch" style="background:#000000"></div>
-              <span class="compose-thumb-name">Pick color…</span>
+          <!-- Color -->
+          <div class="compose-bg-section-label">Color</div>
+          <div class="compose-bg-grid" style="padding-bottom:6px">
+            <div class="compose-bg-card compose-color-card" onclick="document.getElementById('compose-bg-color-picker').click()" title="Solid color background">
+              <div class="compose-color-swatch-lg" id="compose-color-swatch"></div>
+              <span class="compose-bg-card-label">Pick color…</span>
             </div>
             <input type="color" id="compose-bg-color-picker" style="display:none" value="#000000" onmousedown="captureUndoState()" oninput="setComposeSolidColor(this.value)">
           </div>
 
-          <!-- Other shot panel -->
-          <div class="compose-bg-panel" id="compose-bgpanel-other" style="display:none">
-            <div id="compose-shot-bg-picker" style="max-height:200px;overflow-y:auto"></div>
-          </div>
+          <!-- Other Shot -->
+          <div class="compose-bg-section-label">Other Shot</div>
+          <div id="compose-shot-bg-picker" class="compose-bg-grid" style="padding-bottom:8px"></div>
 
           <!-- Tools: Alter Background + Save as Location View -->
           <div class="compose-bg-tools">
+            <div class="compose-bg-tool-row">
+              <button class="compose-bg-tool-toggle open" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.classList.toggle('open')">Position &amp; Scale ▸</button>
+              <div style="margin-top:6px">
+                <div class="compose-slider-row">
+                  <span class="compose-slider-label">Pan X</span>
+                  <input type="range" id="bg-pan-x" min="-500" max="500" value="0" oninput="_compose&&(_compose.bgOffsetX=+this.value,document.getElementById('bg-pan-x-val').textContent=this.value,renderCompose(),saveComposeLayers())">
+                  <span class="compose-slider-val" id="bg-pan-x-val">0</span>
+                </div>
+                <div class="compose-slider-row">
+                  <span class="compose-slider-label">Pan Y</span>
+                  <input type="range" id="bg-pan-y" min="-500" max="500" value="0" oninput="_compose&&(_compose.bgOffsetY=+this.value,document.getElementById('bg-pan-y-val').textContent=this.value,renderCompose(),saveComposeLayers())">
+                  <span class="compose-slider-val" id="bg-pan-y-val">0</span>
+                </div>
+                <div class="compose-slider-row">
+                  <span class="compose-slider-label">Zoom</span>
+                  <input type="range" id="bg-zoom" min="10" max="500" value="100" oninput="_compose&&(_compose.bgScale=this.value/100,document.getElementById('bg-zoom-val').textContent=this.value+'%',renderCompose(),saveComposeLayers())">
+                  <span class="compose-slider-val" id="bg-zoom-val">100%</span>
+                </div>
+                <button onclick="if(_compose){_compose.bgScale=1;_compose.bgOffsetX=0;_compose.bgOffsetY=0;syncBgPanZoomSliders();renderCompose();saveComposeLayers();}" style="width:100%;margin-top:4px;padding:4px 8px;background:#1a1a1a;color:#aaa;border:1px solid #333;border-radius:4px;font-size:10px;cursor:pointer">Reset Position</button>
+              </div>
+            </div>
             <div class="compose-bg-tool-row">
               <button class="compose-bg-tool-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.classList.toggle('open')">Alter Background ▸</button>
               <div style="display:none;margin-top:6px">
@@ -756,58 +917,33 @@
 
         <!-- ── Layer tab ── -->
         <div class="compose-tab-panel" id="compose-tabpanel-layer" style="display:none">
-          <div class="compose-section" id="compose-layer-panel">
-            <div class="compose-section-title">Selected Layer</div>
-            <div id="compose-layer-no-selection" style="color:#444;font-size:11px;font-style:italic">Click a character on the canvas to select a layer.</div>
-            <div id="compose-layer-controls-inner" style="display:none">
-              <div class="compose-slider-row">
-                <span class="compose-slider-label">Size</span>
-                <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
-                <span class="compose-slider-val" id="compose-scale-val">30%</span>
-              </div>
-              <div class="compose-slider-row">
-                <span class="compose-slider-label">Opacity</span>
-                <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)" onmousedown="captureUndoState()">
-                <span class="compose-slider-val" id="compose-opacity-val">100%</span>
-              </div>
-              <div class="compose-slider-row" style="flex-direction:column;align-items:stretch;gap:6px">
-                <span class="compose-slider-label">Lighting</span>
-                <select id="compose-lighting-select" onchange="setComposeLayerLighting(this.value)" style="font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;width:100%">
-                  <option value="none">None</option>
-                  <option value="front">Front (soft)</option>
-                  <option value="left">Side — Left</option>
-                  <option value="right">Side — Right</option>
-                  <option value="top">Top down</option>
-                  <option value="bottom">Bottom up</option>
-                  <option value="backlit">Backlit / Rim</option>
-                </select>
-              </div>
-              <div class="compose-slider-row" id="compose-lighting-intensity-row" style="display:none">
-                <span class="compose-slider-label">Intensity</span>
-                <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)" onmousedown="captureUndoState()">
-                <span class="compose-slider-val" id="compose-lighting-val">60%</span>
-              </div>
-              <div class="compose-slider-row">
-                <span class="compose-slider-label">Contrast</span>
-                <input type="range" id="compose-layer-contrast" min="50" max="200" value="100" oninput="setComposeLayerContrast(this.value)" onmousedown="captureUndoState()">
-                <span class="compose-slider-val" id="compose-layer-contrast-val">100%</span>
-              </div>
-              <div class="compose-slider-row">
-                <span class="compose-slider-label">Saturation</span>
-                <input type="range" id="compose-layer-saturation" min="0" max="200" value="100" oninput="setComposeLayerSaturation(this.value)" onmousedown="captureUndoState()">
-                <span class="compose-slider-val" id="compose-layer-saturation-val">100%</span>
-              </div>
-              <button onclick="flipComposeLayerH()" style="width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">⇔ Flip Horizontal</button>
-              <textarea id="compose-layer-prompt" placeholder="Prompt to alter this layer…" class="compose-tool-textarea" style="margin-top:6px"></textarea>
-              <button id="btn-apply-layer-prompt" onclick="applyLayerPrompt()" class="compose-tool-btn-purple" style="margin-top:4px">Apply Prompt to Layer</button>
-              <button class="btn btn-remove-layer" style="width:100%;margin-top:4px" onclick="removeComposeLayer()">Remove Layer</button>
-            </div>
+          <!-- Layer dropdown -->
+          <div class="compose-layer-bar">
+            <select id="compose-layer-select" class="compose-layer-dropdown" onchange="onLayerDropdownChange(this.value)">
+              <option value="__add__">+ Add Character</option>
+            </select>
           </div>
-          <div class="compose-section">
-            <p class="compose-hint-text">Drag corners to resize. Delete key removes selected layer.</p>
+          <!-- Dynamic content: Add Character mode OR layer edit mode -->
+          <div id="compose-layer-content" style="flex:1;overflow-y:auto;display:flex;flex-direction:column"></div>
+        </div>
+
+        <!-- ── Video tab ── -->
+        <div class="compose-tab-panel" id="compose-tabpanel-video" style="display:none;padding:12px 10px;gap:8px">
+          <div class="compose-section-title">Talking Video</div>
+          <p style="font-size:11px;color:#555;line-height:1.5;margin:0">Generates a talking video using the current composed image and the audio clip at this shot's timestamp.</p>
+          <button class="btn-create-talking-video" id="btn-talking-video" onclick="createTalkingVideo()">✦ Create Talking Video</button>
+          <div style="font-size:10px;color:#444;margin-top:2px" id="talking-video-status"></div>
+          <div style="margin-top:8px" id="compose-video-result" style="display:none">
+            <video id="compose-video-player" controls style="width:100%;border-radius:6px;display:none"></video>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Video view: replaces canvas when video is ready and tab is selected -->
+    <div id="compose-video-view" style="display:none;flex:1;min-width:0;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0a;padding:20px;gap:12px">
+      <video id="compose-video-main" controls style="max-width:100%;max-height:100%;border-radius:6px;box-shadow:0 4px 24px rgba(0,0,0,0.6)"></video>
+      <button onclick="switchComposeView('image')" style="background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;padding:5px 14px;border-radius:5px;cursor:pointer">← Back to Image Editor</button>
     </div>
   </div>
 </div>

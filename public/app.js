@@ -230,6 +230,90 @@ const SHOT_MOVEMENTS = ['Static','Pan Left','Pan Right','Tilt Up','Tilt Down','S
 
 function genId() { return Math.random().toString(36).slice(2, 9); }
 
+// ── IndexedDB image store ─────────────────────────────────────────────────
+// Images are large (base64 / CDN URLs); we keep them out of localStorage
+// (5 MB quota) and store them here instead.
+let _idb = null;
+function openIDB() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('sg-images', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('images');
+    req.onsuccess = e => { _idb = e.target.result; res(_idb); };
+    req.onerror  = () => rej(req.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('images', 'readwrite');
+    tx.objectStore('images').put(val, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('images', 'readonly');
+    const req = tx.objectStore('images').get(key);
+    req.onsuccess = () => res(req.result ?? null);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+// Extract all image data into a separate object, return stripped copy.
+function extractImages(data) {
+  const imgs = { chars: {}, locs: {}, shots: {} };
+  const chars = (data.characters || []).map(c => {
+    imgs.chars[c.id] = { images: c.images, referenceImage: c.referenceImage, expressionCache: c.expressionCache,
+      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { image: v.image }])) : {} };
+    return { ...c, images: [], referenceImage: null, expressionCache: {},
+      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt }])) : {} };
+  });
+  const locs = (data.locations || []).map(l => {
+    imgs.locs[l.id] = { images: l.images, referenceImage: l.referenceImage,
+      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { image: v.image }])) : {},
+      customViews: (l.customViews || []).map(cv => ({ image: cv.image })) };
+    return { ...l, images: [], referenceImage: null,
+      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : {},
+      customViews: (l.customViews || []).map(cv => ({ ...cv, image: null })) };
+  });
+  const shots = (data.shots || []).map(s => {
+    imgs.shots[s.id] = { images: s.images, finalImage: s.finalImage, refImage: s.refImage, videoUrl: s.videoUrl };
+    return { ...s, images: [], finalImage: null, refImage: null, videoUrl: '' };
+  });
+  return { stripped: { ...data, characters: chars, locations: locs, shots }, imgs };
+}
+
+// Merge images back into loaded data.
+function mergeImages(data, imgs) {
+  if (!imgs) return data;
+  const characters = (data.characters || []).map(c => {
+    const ci = imgs.chars?.[c.id] || {};
+    const angles = { ...c.angles };
+    for (const [k, v] of Object.entries(ci.angles || {})) {
+      angles[k] = { ...(angles[k] || {}), image: v.image };
+    }
+    return { ...c, images: ci.images || [], referenceImage: ci.referenceImage || null,
+      expressionCache: ci.expressionCache || {}, angles };
+  });
+  const locations = (data.locations || []).map(l => {
+    const li = imgs.locs?.[l.id] || {};
+    const shotAngles = { ...l.shotAngles };
+    for (const [k, v] of Object.entries(li.shotAngles || {})) {
+      shotAngles[k] = { ...(shotAngles[k] || {}), image: v.image };
+    }
+    const customViews = (l.customViews || []).map((cv, i) => ({ ...cv, image: li.customViews?.[i]?.image || null }));
+    return { ...l, images: li.images || [], referenceImage: li.referenceImage || null, shotAngles, customViews };
+  });
+  const shots = (data.shots || []).map(s => {
+    const si = imgs.shots?.[s.id] || {};
+    return { ...s, images: si.images || [], finalImage: si.finalImage || null,
+      refImage: si.refImage || null, videoUrl: si.videoUrl || '' };
+  });
+  return { ...data, characters, locations, shots };
+}
+
 // ── persistence ───────────────────────────────────────────────────────────
 // ── project management ────────────────────────────────────────────────────
 function projectDataKey(id)     { return `sg-data-${id}`; }
@@ -295,12 +379,46 @@ function openProject(id) {
 }
 
 function backToProjects() {
+  clearTimeout(_saveTimer); // prevent debounced save firing after project is cleared
   autoSave();
   currentProjectId = null;
   document.getElementById('view-editor').style.display = 'none';
   document.getElementById('view-projects').style.display = 'block';
   renderHeader();
   renderProjectsView();
+}
+
+async function duplicateProject(id) {
+  const src = projects.find(p => p.id === id);
+  if (!src) return;
+  // Determine unique name: append #2, #3, etc.
+  const baseName = src.name.replace(/ #\d+$/, '');
+  let suffix = 2;
+  while (projects.find(p => p.name === `${baseName} #${suffix}`)) suffix++;
+  const newName = `${baseName} #${suffix}`;
+  const newId = genId();
+  const now = Date.now();
+  // Copy localStorage text data
+  const srcData = localStorage.getItem(projectDataKey(id));
+  if (srcData) localStorage.setItem(projectDataKey(newId), srcData);
+  // Copy IDB image data
+  try {
+    const imgs = await idbGet(projectDataKey(id));
+    if (imgs) await idbSet(projectDataKey(newId), imgs);
+  } catch(e) { console.warn('IDB duplicate failed:', e); }
+  // Copy audio file and transcript
+  try {
+    const audioFile = await idbGet(`audio-${id}-file`);
+    if (audioFile) await idbSet(`audio-${newId}-file`, audioFile);
+    const audioTranscript = await idbGet(`audio-${id}-transcript`);
+    if (audioTranscript) await idbSet(`audio-${newId}-transcript`, audioTranscript);
+  } catch(e) { console.warn('Audio duplicate failed:', e); }
+  // Start fresh versions (v1 from current data)
+  // No versions copied — duplicated project starts clean
+  projects.push({ id: newId, name: newName, createdAt: now, updatedAt: now });
+  saveProjects();
+  renderProjectsView();
+  showToast(`Duplicated as "${newName}"`);
 }
 
 function deleteProject(id) {
@@ -360,6 +478,7 @@ function renderProjectsView() {
           <div class="project-card-footer">
             <button class="btn-open-project" onclick="event.stopPropagation();openProject('${p.id}')">Open →</button>
             <div style="display:flex;gap:4px;">
+              <button class="btn-delete-project" onclick="event.stopPropagation();duplicateProject('${p.id}')" title="Duplicate" style="font-size:13px">⧉</button>
               <button class="btn-delete-project" onclick="event.stopPropagation();startRenameProject('${p.id}',event)" title="Rename">✏️</button>
               <button class="btn-delete-project" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Delete">✕</button>
             </div>
@@ -395,9 +514,12 @@ function renderHeader() {
       </div>
     </div>
     <nav class="section-nav">
-      <button class="section-nav-btn" onclick="scrollToSection('sec-characters')">Characters</button>
-      <button class="section-nav-btn" onclick="scrollToSection('sec-locations')">Locations</button>
-      <button class="section-nav-btn" onclick="scrollToSection('sec-shots')">Shot Sequence</button>
+      <button class="section-nav-btn active" id="nav-btn-config" onclick="switchMainTab('config')">Configuration</button>
+      <button class="section-nav-btn" id="nav-btn-characters" onclick="switchMainTab('characters')">Characters</button>
+      <button class="section-nav-btn" id="nav-btn-locations" onclick="switchMainTab('locations')">Locations</button>
+      <button class="section-nav-btn" id="nav-btn-shots" onclick="switchMainTab('shots')">Shot Sequence</button>
+      <button class="section-nav-btn" id="nav-btn-avscript" onclick="switchMainTab('avscript')">AV Script</button>
+      <button class="section-nav-btn" id="nav-btn-animatic" onclick="switchMainTab('animatic')">Animatic</button>
     </nav>
   `;
   renderVersionUI();
@@ -416,21 +538,10 @@ function scrollToSection(id) {
   window.scrollTo({ top: y, behavior: 'smooth' });
 }
 
-let _sectionObserver = null;
 function initSectionNav() {
-  if (_sectionObserver) _sectionObserver.disconnect();
-  const headerH = document.getElementById('main-header')?.offsetHeight || 60;
-  _sectionObserver = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      const id = entry.target.id;
-      const btn = document.querySelector(`.section-nav-btn[onclick*="${id}"]`);
-      if (btn) btn.classList.toggle('active', entry.isIntersecting);
-    });
-  }, { rootMargin: `-${headerH}px 0px -60% 0px`, threshold: 0 });
-  ['sec-characters', 'sec-locations', 'sec-shots'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) _sectionObserver.observe(el);
-  });
+  // Tabs are now click-driven; no scroll observer needed.
+  // Default to Configuration tab on project open.
+  switchMainTab('config');
 }
 
 function promptRenameCurrentProject() {
@@ -446,13 +557,15 @@ function initApp() {
   renderProjectsView();
 }
 
-function loadData() {
+async function loadData() {
   loadVersions();
   try {
     const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
     const saved = localStorage.getItem(key);
     if (saved) {
-      const d = JSON.parse(saved);
+      let d = JSON.parse(saved);
+      // Merge images from IDB back in
+      try { const imgs = await idbGet(key); if (imgs) d = mergeImages(d, imgs); } catch {}
       characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
       if (d.visualStyles) {
         const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
@@ -473,29 +586,77 @@ function loadData() {
       if (d.charGenRules) charGenRules = d.charGenRules;
       if (d.locationGenRules) locationGenRules = d.locationGenRules;
       if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
+      if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
     }
   } catch {}
   if (!characters.length) characters = [newCharacter()];
   if (!locations.length) locations = [newLocation()];
-  try {
-    const savedScript = localStorage.getItem('character-generator-script');
-    if (savedScript) { const s = JSON.parse(savedScript); lastScriptText = s.text; lastScriptName = s.name; }
-  } catch {}
+  // Remove legacy global script key
+  localStorage.removeItem('character-generator-script');
   applyStyleUI();
   renderScriptPreview();
   renderCharacters();
   renderLocations();
   renderShots();
   renderVersionUI();
+  restoreAudio();
+  prefetchCharBgRemovals();
+}
+
+async function prefetchCharBgRemovals() {
+  const pending = characters.filter(c => c.images?.length && !c.bgRemovedImage);
+  for (const c of pending) {
+    try {
+      const data = await apiFetch('/api/remove-background', { imageUrl: c.images[0] });
+      const bgRemovedUrl = data.url;
+      if (bgRemovedUrl && bgRemovedUrl !== c.images[0]) {
+        c.bgRemovedImage = bgRemovedUrl;
+        autoSave();
+        renderShots(); // refresh previews as each one completes
+      }
+    } catch(e) { /* silently skip if removal fails */ }
+  }
+}
+
+function _buildPayload() {
+  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null };
+}
+
+async function _persistData(key) {
+  const { stripped, imgs } = extractImages(_buildPayload());
+  try {
+    localStorage.setItem(key, JSON.stringify(stripped));
+  } catch(e) {
+    // If even stripped data exceeds quota, clear old keys and retry
+    console.warn('localStorage quota hit even after stripping:', e.message);
+    try {
+      // Remove keys from other projects to free space
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sg-data-') && k !== key) { localStorage.removeItem(k); break; }
+      }
+      localStorage.setItem(key, JSON.stringify(stripped));
+    } catch(e2) { console.error('localStorage save failed:', e2.message); }
+  }
+  try { await idbSet(key, imgs); } catch(e) { console.warn('IDB save failed:', e.message); }
 }
 
 function saveData() {
   syncFromDOM();
   const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  localStorage.setItem(key, JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE }));
+  _persistData(key);
   if (currentProjectId) {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
+  }
+  // Update the snapshot stored in the current version so switching away and back shows latest saved state
+  if (currentVersionLabel) {
+    const v = versions.find(v => v.label === currentVersionLabel);
+    if (v) {
+      v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+      v.timestamp = Date.now();
+      saveVersionMeta();
+    }
   }
   const btn = document.querySelector('.save-btn');
   if (btn) { btn.textContent = 'Saved!'; btn.classList.add('saved'); setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800); }
@@ -504,7 +665,7 @@ function saveData() {
 function autoSave() {
   syncFromDOM();
   const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  localStorage.setItem(key, JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE }));
+  _persistData(key);
   if (currentProjectId) {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
@@ -559,7 +720,7 @@ function stripImagesForVersion(data) {
   // Remove all image data before storing in a version snapshot.
   // Images are large and fal CDN URLs expire anyway — only text/prompts matter for versioning.
   const stripChar = c => ({ id: c.id, name: c.name, reference: c.reference, prompt: c.prompt, attributes: c.attributes, angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt }])) : undefined });
-  const stripLoc  = l => ({ id: l.id, name: l.name, reference: l.reference, prompt: l.prompt, possibleDuplicate: l.possibleDuplicate, shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : undefined });
+  const stripLoc  = l => ({ id: l.id, name: l.name, aliases: l.aliases || [], reference: l.reference, prompt: l.prompt, possibleDuplicate: l.possibleDuplicate, shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : undefined });
   const stripShot = s => ({ id: s.id, lyric: s.lyric, description: s.description, imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt, shotSize: s.shotSize, shotAngle: s.shotAngle, shotMovement: s.shotMovement, characterIds: s.characterIds, locationId: s.locationId, characterDetails: s.characterDetails });
   return {
     characters: (data.characters || []).map(stripChar),
@@ -624,6 +785,17 @@ function loadVersion(label) {
   if (!label) return;
   const v = versions.find(v => v.label === label);
   if (!v) return;
+  // Save current state into the current version snapshot before switching
+  if (currentVersionLabel) {
+    const cur = versions.find(v => v.label === currentVersionLabel);
+    if (cur) {
+      syncFromDOM();
+      cur.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+      cur.timestamp = Date.now();
+      const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
+      _persistData(key);
+    }
+  }
   const d = v.data;
   // Restore text/prompt data from the version, but preserve current images
   // (version snapshots intentionally strip images to save space).
@@ -664,7 +836,7 @@ function loadVersion(label) {
   currentVersionLabel = label;
   editsSinceVersion = 0;
   const _lk = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  localStorage.setItem(_lk, JSON.stringify({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE }));
+  _persistData(_lk);
   saveVersionMeta();
   applyStyleUI();
   renderVisualStyles();
@@ -731,6 +903,7 @@ function syncFromDOM() {
   document.querySelectorAll('#shots-body tr[data-id]').forEach(row => {
     const shot = shots.find(s => s.id === row.dataset.id);
     if (!shot) return;
+    shot.timestamp = row.querySelector('.field-timestamp')?.value || shot.timestamp || '';
     shot.lyric = row.querySelector('.field-lyric').value;
     shot.description = row.querySelector('.field-desc').value;
     shot.imagePrompt = row.querySelector('.field-imgprompt').value;
@@ -935,7 +1108,8 @@ function deleteCharacter(id) {
 }
 
 // ── location helpers ──────────────────────────────────────────────────────
-function newLocation() { return { id: genId(), name: '', reference: '', referenceImage: null, prompt: '', images: [], shotAngles: {}, customViews: [], possibleDuplicate: false }; }
+function newLocation() { return { id: genId(), name: '', aliases: [], reference: '', referenceImage: null, prompt: '', images: [], shotAngles: {}, customViews: [], possibleDuplicate: false }; }
+function locDisplayName(l) { return l.name || 'Unnamed'; }
 
 function deleteAllCharacters() {
   if (!confirm('Delete all characters?')) return;
@@ -964,7 +1138,7 @@ function deleteLocation(id) {
 }
 
 // ── shot helpers ──────────────────────────────────────────────────────────
-function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null }; }
+function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null, timestamp: '' }; }
 
 function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); autoSave(); }
 function addShotAfter(id) {
@@ -1109,6 +1283,336 @@ function renderLocations() {
     }
   });
 }
+let _avScriptShowImages = true;
+
+function toggleAvScriptImages() {
+  _avScriptShowImages = !_avScriptShowImages;
+  const btn = document.getElementById('btn-avscript-images');
+  if (btn) btn.textContent = _avScriptShowImages ? 'Hide Images' : 'Show Images';
+  renderAvScript();
+}
+
+const MAIN_TABS = ['config', 'characters', 'locations', 'shots', 'avscript', 'animatic'];
+
+function switchMainTab(tab) {
+  // shots / avscript / animatic all live inside tab-shots
+  const panelKey = ['shots','avscript','animatic'].includes(tab) ? 'shots' : tab;
+  MAIN_TABS.forEach(t => {
+    const panelId = ['shots','avscript','animatic'].includes(t) ? 'tab-shots' : `tab-${t}`;
+    const panel = document.getElementById(panelId);
+    if (panel) panel.style.display = (panelId === `tab-${panelKey}`) ? '' : 'none';
+  });
+  // active nav button
+  MAIN_TABS.forEach(t => {
+    const btn = document.getElementById(`nav-btn-${t}`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  // if it's one of the shots sub-tabs, switch that inner panel too
+  if (['shots','avscript','animatic'].includes(tab)) switchShotsTab(tab);
+  window.scrollTo(0, 0);
+}
+
+function switchShotsTab(tab) {
+  const isAv = tab === 'avscript';
+  const isAnimatic = tab === 'animatic';
+  const isShots = !isAv && !isAnimatic;
+  document.getElementById('shots-tab-panel').style.display = isShots ? '' : 'none';
+  document.getElementById('avscript-tab-panel').style.display = isAv ? '' : 'none';
+  document.getElementById('animatic-tab-panel').style.display = isAnimatic ? '' : 'none';
+  document.getElementById('shots-tab-actions').style.display = isShots ? 'flex' : 'none';
+  document.getElementById('avscript-tab-actions').style.display = isAv ? 'flex' : 'none';
+  document.getElementById('animatic-tab-actions').style.display = isAnimatic ? 'flex' : 'none';
+  const titleEl = document.getElementById('shots-section-title');
+  if (titleEl) titleEl.textContent = isAv ? 'AV Script' : isAnimatic ? 'Animatic' : 'Shot Sequence';
+  if (isAv) renderAvScript();
+}
+
+function renderAvScript() {
+  syncFromDOM();
+  const wrap = document.getElementById('av-script-content');
+  if (!wrap) return;
+  const proj = projects.find(p => p.id === currentProjectId);
+  const title = proj?.name || 'Untitled Project';
+  if (!shots.length) {
+    wrap.innerHTML = `<div class="av-script-title">${esc(title)}</div><div class="av-script-empty">No shots yet — generate or add shots in the Shot Sequence tab.</div>`;
+    return;
+  }
+  const rows = shots.map((s, i) => {
+    const charNames = (s.characterIds || []).map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join(', ');
+    const loc = locations.find(l => l.id === s.locationId);
+    const metaParts = [s.shotSize, s.shotMovement, loc ? locDisplayName(loc) : null].filter(Boolean);
+    const finalImg = s.finalImage || s.images?.[0] || loc?.images?.[0] || null;
+    const locOptions = `<option value="">— None —</option>` + locations.map(l => `<option value="${esc(l.id)}"${s.locationId === l.id ? ' selected' : ''}>${esc(locDisplayName(l))}</option>`).join('');
+    return `<div class="av-shot-row">
+      <div class="av-shot-num">
+        <div>${i + 1}</div>
+        ${s.timestamp ? `<div class="av-shot-ts">${esc(s.timestamp)}</div>` : ''}
+      </div>
+      <div class="av-col-loc">
+        <div class="av-col-label">Location</div>
+        <select class="av-loc-select" onchange="onAvScriptLocChange('${esc(s.id)}', this.value)">${locOptions}</select>
+      </div>
+      <div class="av-col-audio">
+        <div class="av-col-label">Audio / Action</div>
+        <div class="av-shot-lyric av-editable" contenteditable="true" data-shot-id="${esc(s.id)}" data-field="lyric" oninput="onAvScriptEdit(this)">${esc(s.lyric || '')}</div>
+        ${charNames ? `<div class="av-shot-chars">Characters: ${esc(charNames)}</div>` : ''}
+      </div>
+      <div class="av-col-visual">
+        <div class="av-col-label">Visual</div>
+        ${finalImg && _avScriptShowImages ? `<img class="av-shot-image" src="${esc(finalImg)}" alt="Shot ${i + 1}">` : ''}
+        <div class="av-shot-desc av-editable" contenteditable="true" data-shot-id="${esc(s.id)}" data-field="description" oninput="onAvScriptEdit(this)">${esc(s.description || '')}</div>
+        ${metaParts.length ? `<div class="av-shot-meta">${esc(metaParts.join(' · '))}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML = `
+    <div class="av-script-title">${esc(title)}</div>
+    <div class="av-script-subtitle">AV Script · ${shots.length} shot${shots.length !== 1 ? 's' : ''}</div>
+    ${rows}`;
+}
+
+async function cleanupShotFields() {
+  syncFromDOM();
+  const relevant = shots.filter(s => s.lyric?.trim() || s.description?.trim());
+  if (!relevant.length) { showToast('No shot data to clean up.', true); return; }
+  const btn = document.getElementById('btn-cleanup-shots');
+  if (btn) { btn.disabled = true; btn.textContent = '✦ Cleaning…'; }
+  try {
+    const payload = relevant.map(s => {
+      const loc = locations.find(l => l.id === s.locationId);
+      const charNames = (s.characterIds || []).map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join(', ');
+      return { id: s.id, lyric: s.lyric || '', description: s.description || '', locationName: loc ? locDisplayName(loc) : '', characterNames: charNames };
+    });
+    const data = await apiFetch('/api/cleanup-shot-fields', {
+      shots: payload,
+      locations: locations.map(l => ({ id: l.id, name: locDisplayName(l) })),
+      characters: characters.map(c => ({ id: c.id, name: c.name })),
+      scriptText: lastScriptText || ''
+    });
+    let flagCount = 0, autoFillCount = 0;
+    for (const r of (data.shots || [])) {
+      const shot = shots.find(s => s.id === r.id);
+      if (!shot) continue;
+      // Suggest lyric/description changes as flags — never auto-apply
+      shot._suggestions = shot._suggestions || {};
+      if (r.lyric !== undefined && r.lyric.trim() !== (shot.lyric || '').trim()) {
+        shot._suggestions.lyric = r.lyric; flagCount++;
+      }
+      if (r.description !== undefined && r.description.trim() !== (shot.description || '').trim()) {
+        shot._suggestions.description = r.description; flagCount++;
+      }
+      // Auto-fill missing location from AI suggestion
+      if (r.suggestedLocationId && !shot.locationId) {
+        shot.locationId = r.suggestedLocationId; autoFillCount++;
+      }
+      // Auto-fill missing characters
+      if (r.suggestedCharacterIds?.length && !(shot.characterIds?.length)) {
+        shot.characterIds = r.suggestedCharacterIds; autoFillCount++;
+      }
+    }
+    // Second pass: carry the last known location forward to any shot still missing one
+    let lastLocId = null;
+    for (const shot of shots) {
+      if (shot.locationId) { lastLocId = shot.locationId; }
+      else if (lastLocId) { shot.locationId = lastLocId; autoFillCount++; }
+    }
+    renderShots();
+    autoSave();
+    const parts = [];
+    if (flagCount) parts.push(`${flagCount} suggestion${flagCount !== 1 ? 's' : ''} flagged`);
+    if (autoFillCount) parts.push(`${autoFillCount} location/character${autoFillCount !== 1 ? 's' : ''} filled`);
+    showToast(parts.length ? parts.join(', ') + '.' : 'No changes needed.');
+  } catch(e) {
+    showToast('Cleanup failed: ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Clean Up Fields'; }
+  }
+}
+
+function acceptShotSuggestion(shotId, field) {
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot?._suggestions?.[field]) return;
+  shot[field] = shot._suggestions[field];
+  delete shot._suggestions[field];
+  // Update textarea in DOM directly
+  const row = document.querySelector(`#shots-body tr[data-id="${shotId}"]`);
+  if (row) {
+    const sel = field === 'lyric' ? '.field-lyric' : '.field-desc';
+    const ta = row.querySelector(sel);
+    if (ta) ta.value = shot[field];
+  }
+  renderShotSuggestionFlags(shotId);
+  autoSave();
+}
+
+function dismissShotSuggestion(shotId, field) {
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot?._suggestions) return;
+  delete shot._suggestions[field];
+  renderShotSuggestionFlags(shotId);
+  autoSave();
+}
+
+function renderShotSuggestionFlags(shotId) {
+  const shot = shots.find(s => s.id === shotId);
+  const row = document.querySelector(`#shots-body tr[data-id="${shotId}"]`);
+  if (!row || !shot) return;
+  ['lyric', 'description'].forEach(field => {
+    const flagId = `suggestion-flag-${shotId}-${field}`;
+    const existing = document.getElementById(flagId);
+    const suggestion = shot._suggestions?.[field];
+    if (!suggestion) { if (existing) existing.remove(); return; }
+    if (existing) { existing.querySelector('.suggestion-text').textContent = suggestion; return; }
+    const ta = row.querySelector(field === 'lyric' ? '.field-lyric' : '.field-desc');
+    if (!ta) return;
+    const flag = document.createElement('div');
+    flag.id = flagId;
+    flag.className = 'shot-suggestion-flag';
+    flag.innerHTML = `<span class="suggestion-label">Script suggests:</span><span class="suggestion-text">${esc(suggestion)}</span><div class="suggestion-actions"><button onclick="acceptShotSuggestion('${shotId}','${field}')" class="suggestion-accept">✓ Use</button><button onclick="dismissShotSuggestion('${shotId}','${field}')" class="suggestion-dismiss">✕</button></div>`;
+    ta.parentNode.insertBefore(flag, ta.nextSibling);
+  });
+}
+
+function onAvScriptLocChange(shotId, locId) {
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return;
+  shot.locationId = locId || null;
+  // Mirror to the shot sequence row select
+  const row = document.querySelector(`#shots-body tr[data-id="${shotId}"]`);
+  if (row) {
+    const sel = row.querySelector('.field-loc-select');
+    if (sel) sel.value = locId || '';
+  }
+  autoSave();
+}
+
+function onAvScriptEdit(el) {
+  const shotId = el.dataset.shotId;
+  const field = el.dataset.field;
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return;
+  shot[field] = el.innerText;
+  // Mirror change into shot sequence textarea without re-rendering
+  const selector = field === 'lyric' ? '.field-lyric' : '.field-desc';
+  const row = document.querySelector(`#shots-body tr[data-id="${shotId}"]`);
+  if (row) { const ta = row.querySelector(selector); if (ta) ta.value = shot[field]; }
+  debouncedSave();
+}
+
+function exportAvScriptPdf() {
+  syncFromDOM();
+  const proj = projects.find(p => p.id === currentProjectId);
+  const title = proj?.name || 'AV Script';
+  // Build a self-contained printable HTML document
+  const rows = shots.map((s, i) => {
+    const charNames = (s.characterIds || []).map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join(', ');
+    const loc = locations.find(l => l.id === s.locationId);
+    const metaParts = [s.shotSize, s.shotMovement, loc ? locDisplayName(loc) : null].filter(Boolean);
+    const finalImg = s.finalImage || s.images?.[0] || loc?.images?.[0] || null;
+    return `<tr>
+      <td class="col-num">${i + 1}${s.timestamp ? `<br><span class="ts">${s.timestamp}</span>` : ''}</td>
+      <td class="col-audio">
+        ${s.lyric ? `<p class="lyric">${s.lyric.replace(/\n/g,'<br>')}</p>` : ''}
+        ${charNames ? `<p class="meta">Characters: ${charNames}</p>` : ''}
+      </td>
+      <td class="col-visual">
+        ${finalImg && _avScriptShowImages ? `<img src="${finalImg}" style="width:100%;border-radius:3px;margin-bottom:6px;display:block">` : ''}
+        ${s.description ? `<p class="desc">${s.description.replace(/\n/g,'<br>')}</p>` : ''}
+        ${metaParts.length ? `<p class="meta">${metaParts.join(' · ')}</p>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>${title} – AV Script</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #111; background: #fff; padding: 28px 36px; }
+  h1 { font-size: 20pt; margin-bottom: 4px; }
+  .subtitle { font-size: 9pt; color: #777; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  tr { border-top: 1px solid #ccc; page-break-inside: avoid; }
+  tr:last-child { border-bottom: 1px solid #ccc; }
+  td { padding: 12px 10px; vertical-align: top; }
+  .col-num { width: 44px; font-size: 9pt; font-weight: 700; color: #888; white-space: nowrap; }
+  .ts { font-size: 8pt; color: #aaa; font-family: monospace; }
+  .col-visual { width: 50%; border-left: 1px solid #e5e5e5; border-right: 1px solid #e5e5e5; padding-left: 14px; padding-right: 14px; }
+  .col-audio { width: calc(50% - 44px); }
+  .col-label { font-size: 7pt; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #aaa; margin-bottom: 6px; }
+  .desc { font-size: 10pt; color: #333; line-height: 1.5; margin-bottom: 4px; }
+  .lyric { font-size: 11pt; font-style: italic; color: #111; line-height: 1.6; margin-bottom: 6px; }
+  .meta { font-size: 8pt; color: #888; }
+  @media print { body { padding: 16px 24px; } }
+</style></head><body>
+<h1>${title}</h1>
+<div class="subtitle">AV Script · ${shots.length} shot${shots.length !== 1 ? 's' : ''} · ${new Date().toLocaleDateString()}</div>
+<table>
+  <thead><tr>
+    <th class="col-num col-label">#</th>
+    <th class="col-audio col-label" style="text-align:left">Audio / Action</th>
+    <th class="col-visual col-label" style="text-align:left;padding-left:14px">Visual</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`;
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 600);
+}
+
+async function generateAnimatic() {
+  syncFromDOM();
+  const btn = document.getElementById('btn-gen-animatic');
+  const status = document.getElementById('animatic-status');
+  const video = document.getElementById('animatic-video');
+  const empty = document.getElementById('animatic-empty');
+
+  // Collect shots that have a final image and a timestamp
+  const shotFrames = shots
+    .filter(s => s.finalImage && s.timestamp)
+    .map(s => ({ imageUrl: s.finalImage, timestamp: s.timestamp }));
+
+  if (!shotFrames.length) {
+    showToast('No shots with both a Final Image and a timestamp yet.', true);
+    return;
+  }
+
+  const audioFile = await idbGet(_audioKey() + '-file');
+  if (!audioFile) {
+    showToast('No audio loaded — import audio first.', true);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  status.textContent = 'Uploading frames and audio…';
+  empty.style.display = 'none';
+  video.style.display = 'none';
+
+  try {
+    const formData = new FormData();
+    formData.append('audio', audioFile);
+    formData.append('shots', JSON.stringify(shotFrames));
+
+    const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    video.src = url;
+    video.style.display = 'block';
+    status.textContent = '';
+  } catch(e) {
+    showToast('Animatic failed: ' + e.message, true);
+    status.textContent = '';
+    empty.style.display = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate Animatic';
+  }
+}
+
 function renderShots() {
   const openIds = new Set(
     [...document.querySelectorAll('.shot-detail-row')]
@@ -1124,6 +1628,8 @@ function renderShots() {
       if (btn) btn.textContent = '▼';
     }
   });
+  // Re-render any pending suggestion flags
+  shots.forEach(s => { if (s._suggestions && Object.keys(s._suggestions).length) renderShotSuggestionFlags(s.id); });
 }
 
 function charRowHTML(c) {
@@ -1135,7 +1641,13 @@ function charRowHTML(c) {
     ? `<img src="${esc(c.referenceImage.dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${c.id}', event)">✕</button>`
     : `<div class="upload-hint">Click to<br>upload</div>`;
   return `<tr data-id="${c.id}">
-    <td><input type="text" class="field-name" placeholder="Name…" value="${esc(c.name)}" oninput="debouncedSave()"></td>
+    <td>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <input type="text" class="field-name" placeholder="Name…" value="${esc(c.name)}" oninput="debouncedSave()">
+        ${c.missingFromScript ? `<div class="missing-from-script-flag">Missing from script — <button onclick="deleteCharacter('${c.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissMissingFlag('char','${c.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
+        <button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
+      </div>
+    </td>
     <td><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
     <td>
       <div class="ref-img-cell">
@@ -1168,18 +1680,17 @@ function charRowHTML(c) {
     </td>
     <td>
       <div class="actions">
-        <button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')">▶ Angles</button>
         <button class="btn btn-gen-prompt" onclick="generateCharPrompt('${c.id}')">Generate Prompt</button>
         <button class="btn btn-gen-images" onclick="generateCharFrontProfile('${c.id}')">Generate Front Profile</button>
-        <button class="btn btn-gen-images" style="background:#162a2a;border-color:#254a4a;color:#4adede" onclick="generateCharAngles('${c.id}')">Generate Angles</button>
+        <button class="btn btn-gen-images" style="background:#162a2a;border-color:#254a4a;color:#4adede" onclick="generateCharAngles('${c.id}')">Generate Variations</button>
         <button class="btn btn-delete" onclick="deleteCharacter('${c.id}')">Remove</button>
       </div>
     </td>
   </tr>`;
 }
 
-function charAngleRowHTML(c) {
-  const rows = CHAR_ANGLES.map(angle => {
+function charAngleRowsInnerHTML(c) {
+  const standardRows = CHAR_ANGLES.map(angle => {
     const d = c.angles?.[angle] || {};
     const isMirror = !!MIRROR_PAIRS[angle];
     const imgHTML = d.image
@@ -1198,12 +1709,30 @@ function charAngleRowHTML(c) {
       <td><button class="btn btn-regen" onclick="regenerateCharAngle('${c.id}','${angle}')">${isMirror ? '🪞 Re-mirror' : '↺ Regenerate'}</button></td>
     </tr>`;
   }).join('');
+
+  // Generated variants (from expressionCache / compose-generated variations)
+  const variantRows = Object.entries(c.angles || {})
+    .filter(([k, v]) => v?.isVariant)
+    .map(([key, v]) => {
+      const imgHTML = v.image ? `<img src="${esc(v.image)}" alt="${esc(key)}">` : `<span class="placeholder">·</span>`;
+      return `<tr>
+        <td class="angle-label" style="color:#818cf8">${esc(key)}</td>
+        <td style="color:#555;font-size:10px;font-style:italic;vertical-align:middle">${esc(v.prompt || '')}</td>
+        <td><div class="angle-img-slot">${imgHTML}</div></td>
+        <td><button onclick="deleteCharVariant('${esc(c.id)}','${esc(key)}')" style="background:none;border:1px solid #3a1a1a;border-radius:3px;color:#a05050;font-size:10px;padding:2px 6px;cursor:pointer;width:100%">Delete</button></td>
+      </tr>`;
+    }).join('');
+
+  return standardRows + variantRows;
+}
+
+function charAngleRowHTML(c) {
   return `<tr class="char-angle-row" id="char-angles-${c.id}" style="display:none">
     <td colspan="6">
       <div class="char-angle-inner">
         <table class="angle-subtable">
-          <thead><tr><th>Angle</th><th>Prompt</th><th>Image</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
+          <thead><tr><th>Variation</th><th>Prompt</th><th>Image</th><th></th></tr></thead>
+          <tbody>${charAngleRowsInnerHTML(c)}</tbody>
         </table>
       </div>
     </td>
@@ -1220,7 +1749,11 @@ function locRowHTML(l) {
     <td>
       <div style="display:flex;flex-direction:column;gap:4px">
         <input type="text" class="field-name" placeholder="Name…" value="${esc(l.name)}" oninput="debouncedSave()">
-        ${l.possibleDuplicate ? `<div class="loc-dup-flag" title="May be the same as another location">⚠ Possible duplicate</div>` : ''}
+        ${l.missingFromScript ? `<div class="missing-from-script-flag">Missing from script — <button onclick="deleteLocation('${l.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissMissingFlag('loc','${l.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
+        ${l.possibleDuplicate ? (() => {
+          const twin = locations.find(x => x.id !== l.id && x.name && locationsSimilar(x.name, l.name));
+          return `<div class="loc-dup-flag">⚠ Possible duplicate of "${esc(twin?.name || '?')}"${twin ? ` — <button onclick="mergeLocationsIntoOne('${esc(twin.id)}','${esc(l.id)}')" style="background:none;border:none;color:#f59e0b;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Merge into it</button>` : ''} — <button onclick="dismissDuplicateFlag('loc','${esc(l.id)}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>`;
+        })() : ''}
         <button class="btn-toggle-shot-angles" onclick="toggleLocAngles('${l.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
       </div>
     </td>
@@ -1259,7 +1792,7 @@ function shotRowHTML(s, idx) {
   const charChecks = characters.length
     ? characters.map(c => `<label class="char-check-item"><input type="checkbox" class="char-cb" value="${c.id}"${(s.characterIds||[]).includes(c.id) ? ' checked' : ''} onchange="autoSave();refreshShotDetailIfOpen('${s.id}')">${esc(c.name || 'Unnamed')}</label>`).join('')
     : `<span class="char-checks-empty">No characters yet</span>`;
-  const locOpts = `<option value="">— None —</option>` + locations.map(l => `<option value="${esc(l.id)}"${(s.locationId||'')=== l.id?' selected':''}>${esc(l.name||'Unnamed')}</option>`).join('');
+  const locOpts = `<option value="">— None —</option>` + locations.map(l => `<option value="${esc(l.id)}"${(s.locationId||'')=== l.id?' selected':''}>${esc(locDisplayName(l))}</option>`).join('');
   const sizeOpts = SHOT_SIZES.map(v => `<option${s.shotSize === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
   const angleOpts = SHOT_ANGLES.map(v => `<option${s.shotAngle === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
   const moveOpts = SHOT_MOVEMENTS.map(v => `<option${s.shotMovement === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
@@ -1271,7 +1804,17 @@ function shotRowHTML(s, idx) {
       <button class="btn-ord" onclick="addShotAfter('${s.id}')" title="Add shot below" style="color:#4ade80;border-color:#254a31">+</button>
       <button class="btn-ord" onclick="deleteShot('${s.id}')" title="Delete shot" style="color:#e05050;border-color:#4a1a1a">✕</button>
     </div></td>
-    <td><textarea class="field-lyric" rows="3" placeholder="Lyric or action…" oninput="debouncedSave()">${esc(s.lyric)}</textarea></td>
+    <td style="text-align:center">
+      <input type="text" class="field-timestamp" placeholder="0:00" value="${esc(s.timestamp || '')}" data-shot-id="${esc(s.id)}" oninput="debouncedSave();onTimestampInput(this)" style="width:60px;font-size:11px;font-family:monospace;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:3px 5px">
+    </td>
+    <td>
+      ${s.missingFromScript ? `<div class="missing-from-script-flag" style="margin-bottom:4px">Missing from script — <button onclick="deleteShot('${s.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissShotMissingFlag('${s.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
+      <textarea class="field-lyric" rows="3" placeholder="Audio / lyric…" oninput="debouncedSave()">${esc(s.lyric)}</textarea>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn-play-shot" id="btn-play-${esc(s.id)}" onclick="playAudioAtShot('${esc(s.id)}')" title="Play from timestamp" style="${s.timestamp && s.timestamp !== '0:00' ? '' : 'opacity:0.2;pointer-events:none'}">▶</button>
+        <button class="btn-retry-timestamp" onclick="retryTimestampForShot('${esc(s.id)}')" title="Retry timestamp from transcript" style="background:none;border:1px solid #222;border-radius:3px;color:#555;font-size:10px;padding:2px 6px;cursor:pointer">↻</button>
+      </div>
+    </td>
     <td><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
     <td><div class="char-checks">${charChecks}</div></td>
     <td><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select>
@@ -1292,9 +1835,21 @@ function shotRowHTML(s, idx) {
           const loc = locations.find(l => l.id === s.locationId);
           const locImg = loc?.images?.[0] || null;
           const previewImg = s.finalImage || locImg;
-          const locOpts2 = `<option value="">— No Location —</option>` + locations.map(l => `<option value="${esc(l.id)}"${s.locationId === l.id?' selected':''}>${esc(l.name||'Unnamed')}</option>`).join('');
+          const shotCharsWithImg = (s.characterIds || [])
+            .map(id => characters.find(c => c.id === id))
+            .filter(c => c && c.images?.length);
+          const locOpts2 = `<option value="">— No Location —</option>` + locations.map(l => `<option value="${esc(l.id)}"${s.locationId === l.id?' selected':''}>${esc(locDisplayName(l))}</option>`).join('');
+          const charOverlay = (!s.finalImage && shotCharsWithImg.length)
+            ? shotCharsWithImg.map((c, i) => {
+                const total = shotCharsWithImg.length;
+                const leftPct = ((i + 1) / (total + 1)) * 100;
+                const imgSrc = c.bgRemovedImage || c.images[0];
+                return `<img src="${esc(imgSrc)}" class="final-preview-char-overlay" style="left:${leftPct}%;transform:translateX(-50%)">`;
+              }).join('')
+            : '';
           return `<div class="final-image-loc-preview" onclick="openCompose('${s.id}')">
             ${previewImg ? `<img src="${esc(previewImg)}" class="final-image-preview">` : `<div class="final-image-loc-empty"><span>No location</span></div>`}
+            ${charOverlay}
             ${s.finalImage ? `<div class="final-image-badge">✎ Final</div>` : ''}
             <div class="final-image-compose-hint">Click to compose</div>
           </div>
@@ -1328,7 +1883,9 @@ function renderScriptPreview() {
 
 function removeScript() {
   lastScriptText = null; lastScriptName = null;
-  localStorage.removeItem('character-generator-script');
+  for (const c of characters) delete c.missingFromScript;
+  for (const l of locations) delete l.missingFromScript;
+  for (const s of shots) delete s.missingFromScript;
   renderScriptPreview();
   document.getElementById('upload-status').textContent = 'Accepts .txt, .pdf, .docx';
   document.getElementById('upload-status').className = 'upload-status';
@@ -1350,10 +1907,11 @@ async function handleScriptUpload(input) {
     syncFromDOM();
     lastScriptText = data.scriptText || null;
     lastScriptName = file.name;
-    if (lastScriptText) localStorage.setItem('character-generator-script', JSON.stringify({ text: lastScriptText, name: lastScriptName }));
     renderScriptPreview();
-    if (data.characters?.length) mergeCharacters(data.characters);
-    if (data.locations?.length) mergeLocations(data.locations);
+    const hadExistingData = characters.length > 0 || locations.length > 0 || shots.length > 0;
+    if (data.characters?.length) mergeCharacters(data.characters, hadExistingData);
+    if (data.locations?.length) mergeLocations(data.locations, hadExistingData);
+    if (hadExistingData && lastScriptText) flagMissingShots(lastScriptText);
     status.textContent = `Parsed ${data.characters?.length ?? 0} characters and ${data.locations?.length ?? 0} locations from "${file.name}" — click Generate Shot Sequence to build shots`;
     status.className = 'upload-status done';
   } catch (e) {
@@ -1361,6 +1919,277 @@ async function handleScriptUpload(input) {
     showToast('Script parse failed: ' + e.message, true);
   }
   input.value = '';
+}
+
+// ── Audio import + Whisper transcript ────────────────────────────────────────
+let _audioTranscript = null; // array of word objects: { word, start, end }
+
+function _audioKey() { return `audio-${currentProjectId || 'default'}`; }
+
+async function _saveAudio(file) {
+  try { await idbSet(_audioKey() + '-file', file); } catch(e) { console.warn('audio save failed', e); }
+}
+
+async function _saveTranscript(words) {
+  try { await idbSet(_audioKey() + '-transcript', words); } catch(e) { console.warn('transcript save failed', e); }
+}
+
+function getPinnedPlayer() {
+  return document.getElementById('pinned-audio-player');
+}
+
+function showPinnedPlayer() {
+  const bar = document.getElementById('pinned-audio-bar');
+  if (bar) { bar.style.display = ''; bar.dataset.hidden = ''; }
+  document.body.classList.add('has-pinned-audio');
+}
+
+function togglePinnedPlayer() {
+  const bar = document.getElementById('pinned-audio-bar');
+  if (!bar) return;
+  const hidden = bar.dataset.hidden === '1';
+  bar.dataset.hidden = hidden ? '' : '1';
+  const inner = document.getElementById('pinned-audio-inner');
+  if (inner) inner.style.display = hidden ? '' : 'none';
+  const hideBtn = document.getElementById('btn-pinned-toggle');
+  const showBtn = document.getElementById('btn-pinned-expand');
+  if (hideBtn) hideBtn.style.display = hidden ? '' : 'none';
+  if (showBtn) showBtn.style.display = hidden ? 'none' : '';
+}
+
+function _setAudioSrc(src) {
+  const pinned = document.getElementById('pinned-audio-player');
+  if (pinned) pinned.src = src;
+  showPinnedPlayer();
+}
+
+function clearAudioState() {
+  _audioTranscript = null;
+  const pinned = document.getElementById('pinned-audio-player');
+  if (pinned) { pinned.pause(); pinned.src = ''; }
+  const bar = document.getElementById('pinned-audio-bar');
+  if (bar) { bar.style.display = 'none'; bar.dataset.hidden = ''; }
+  document.body.classList.remove('has-pinned-audio');
+  const hideBtn = document.getElementById('btn-pinned-toggle');
+  const showBtn = document.getElementById('btn-pinned-expand');
+  if (hideBtn) hideBtn.style.display = '';
+  if (showBtn) showBtn.style.display = 'none';
+  const transcriptBox = document.getElementById('audio-transcript');
+  if (transcriptBox) { transcriptBox.value = ''; transcriptBox.style.display = 'none'; }
+  const statusEl = document.getElementById('audio-upload-status');
+  if (statusEl) { statusEl.textContent = 'MP3, WAV, M4A, MP4…'; statusEl.className = 'upload-status'; }
+}
+
+async function restoreAudio() {
+  clearAudioState();
+  try {
+    const file = await idbGet(_audioKey() + '-file');
+    const words = await idbGet(_audioKey() + '-transcript');
+    const transcriptBox = document.getElementById('audio-transcript');
+    const statusEl = document.getElementById('audio-upload-status');
+    if (file) {
+      const src = URL.createObjectURL(file);
+      _setAudioSrc(src);
+    }
+    if (words?.length) {
+      _audioTranscript = words;
+      const fullText = words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
+      if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
+      if (statusEl) { statusEl.textContent = `${words.length} words transcribed`; statusEl.className = 'upload-status done'; }
+    }
+  } catch(e) { console.warn('restoreAudio failed', e); }
+}
+
+async function handleAudioUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('audio-upload-status');
+  const player = document.getElementById('audio-player');
+  const transcriptBox = document.getElementById('audio-transcript');
+  if (statusEl) { statusEl.textContent = 'Transcribing…'; statusEl.className = 'upload-status loading'; }
+  await _saveAudio(file);
+  _setAudioSrc(URL.createObjectURL(file));
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/api/transcribe-audio', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    _audioTranscript = data.words || [];
+    await _saveTranscript(_audioTranscript);
+    const fullText = _audioTranscript.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
+    if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
+    if (statusEl) { statusEl.textContent = `Transcribed ${_audioTranscript.length} words`; statusEl.className = 'upload-status done'; }
+    matchTranscriptToShots();
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.className = 'upload-status error'; }
+    showToast('Transcription failed: ' + e.message, true);
+  }
+  input.value = '';
+}
+
+function formatTimestamp(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60).toString().padStart(2, '0');
+  const ms = Math.floor((secs % 1) * 10);
+  return `${m}:${s}.${ms}`;
+}
+
+function matchShotToTranscript(shot) {
+  if (!_audioTranscript?.length || !shot.lyric?.trim()) return false;
+  const words = _audioTranscript;
+  const lyricWords = shot.lyric.trim().toLowerCase().split(/\s+/);
+  const firstLyricWord = lyricWords[0];
+  let bestMatch = -1, bestScore = 0;
+  for (let i = 0; i < words.length; i++) {
+    const tw = words[i].word.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const lw = firstLyricWord.replace(/[^a-z0-9]/g, '');
+    if (tw === lw || (lw.length > 3 && (tw.startsWith(lw) || lw.startsWith(tw)))) {
+      let score = 0;
+      for (let j = 0; j < Math.min(lyricWords.length, 4) && i + j < words.length; j++) {
+        const ta = words[i + j].word.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const la = lyricWords[j].replace(/[^a-z0-9]/g, '');
+        if (ta === la || (la.length > 2 && (ta.startsWith(la) || la.startsWith(ta)))) score++;
+        else break;
+      }
+      if (score > bestScore) { bestScore = score; bestMatch = i; }
+    }
+  }
+  if (bestMatch >= 0) { shot.timestamp = formatTimestamp(words[bestMatch].start); return true; }
+  return false;
+}
+
+function matchTranscriptToShots() {
+  if (!_audioTranscript?.length || !shots.length) return;
+  syncFromDOM();
+
+  // First pass: direct transcript matches
+  const directMatch = shots.map(shot => matchShotToTranscript(shot));
+
+  // Build anchor list: shots that got a direct match, with their timestamp in seconds
+  const anchors = []; // { idx, secs }
+  shots.forEach((shot, idx) => {
+    if (directMatch[idx] && shot.timestamp) {
+      const secs = parseTimestamp(shot.timestamp);
+      if (secs != null && !isNaN(secs)) anchors.push({ idx, secs });
+    }
+  });
+
+  if (anchors.length > 0) {
+    // Shots before the first anchor — interpolate from 0:00 to first anchor
+    const first = anchors[0];
+    if (first.idx > 0) {
+      for (let i = 0; i < first.idx; i++) {
+        const t = first.secs * (i / first.idx);
+        shots[i].timestamp = formatTimestamp(t);
+      }
+    }
+
+    // Shots between consecutive anchors — interpolate evenly
+    for (let a = 0; a < anchors.length - 1; a++) {
+      const lo = anchors[a], hi = anchors[a + 1];
+      const span = hi.idx - lo.idx;
+      for (let i = lo.idx + 1; i < hi.idx; i++) {
+        if (!directMatch[i]) {
+          const t = lo.secs + (hi.secs - lo.secs) * ((i - lo.idx) / span);
+          shots[i].timestamp = formatTimestamp(t);
+        }
+      }
+    }
+  }
+
+  renderShots();
+  autoSave();
+  showToast('Timestamps matched to shots.');
+}
+
+function retryTimestampForShot(shotId) {
+  if (!_audioTranscript?.length) { showToast('No transcript loaded.', true); return; }
+  syncFromDOM();
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return;
+  const found = matchShotToTranscript(shot);
+  // Update just the timestamp input and play button without full re-render
+  const input = document.querySelector(`.field-timestamp[data-shot-id="${shotId}"]`);
+  if (input) input.value = shot.timestamp || '';
+  const playBtn = document.getElementById(`btn-play-${shotId}`);
+  if (playBtn) {
+    const hasTs = shot.timestamp && shot.timestamp !== '0:00';
+    playBtn.style.opacity = hasTs ? '1' : '0.2';
+    playBtn.style.pointerEvents = hasTs ? '' : 'none';
+  }
+  autoSave();
+  showToast(found ? `Timestamp set to ${shot.timestamp}` : 'No match found in transcript.', !found);
+}
+
+function onTimestampInput(input) {
+  const shotId = input.dataset.shotId;
+  const val = input.value.trim();
+  const btn = document.getElementById(`btn-play-${shotId}`);
+  if (!btn) return;
+  const hasTs = val && val !== '0:00';
+  btn.style.opacity = hasTs ? '1' : '0.2';
+  btn.style.pointerEvents = hasTs ? '' : 'none';
+}
+
+function parseTimestamp(ts) {
+  if (!ts) return null;
+  // Accepts "1:23.4", "1:23", "83.4" (seconds)
+  const parts = ts.split(':');
+  if (parts.length === 2) return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+  return parseFloat(parts[0]);
+}
+
+function playAudioAtShot(shotId) {
+  const player = getPinnedPlayer();
+  if (!player || !player.src) { showToast('No audio loaded yet.', true); return; }
+  const idx = shots.findIndex(s => s.id === shotId);
+  if (idx < 0) return;
+
+  // Read timestamp live from DOM (user may have typed one since render)
+  const inputEl = document.querySelector(`.field-timestamp[data-shot-id="${shotId}"]`);
+  const tsVal = inputEl ? inputEl.value.trim() : shots[idx].timestamp;
+  const startTs = parseTimestamp(tsVal);
+  if (startTs === null) return;
+
+  // Find next shot with a real timestamp
+  let endTs = null;
+  for (let i = idx + 1; i < shots.length; i++) {
+    const inputNext = document.querySelector(`.field-timestamp[data-shot-id="${shots[i].id}"]`);
+    const nextTs = parseTimestamp(inputNext ? inputNext.value.trim() : shots[i].timestamp);
+    if (nextTs !== null && nextTs > 0) { endTs = nextTs; break; }
+  }
+
+  showPinnedPlayer();
+
+  // Clear any existing stop-listener from a previous playAudioAtShot call
+  if (player._shotStopCheck) {
+    player.removeEventListener('timeupdate', player._shotStopCheck);
+    player._shotStopCheck = null;
+  }
+
+  const doPlay = () => {
+    player.play().catch(() => {});
+    if (endTs !== null) {
+      const stopAt = endTs;
+      player._shotStopCheck = () => {
+        if (player.currentTime >= stopAt) {
+          player.pause();
+          player.removeEventListener('timeupdate', player._shotStopCheck);
+          player._shotStopCheck = null;
+        }
+      };
+      player.addEventListener('timeupdate', player._shotStopCheck);
+    }
+  };
+
+  if (Math.abs(player.currentTime - startTs) < 0.05) {
+    // Already at the right position — just play
+    doPlay();
+  } else {
+    player.addEventListener('seeked', doPlay, { once: true });
+    player.currentTime = startTs;
+  }
 }
 
 function formatAttributesHtml(attributes) {
@@ -1388,6 +2217,58 @@ function singularize(name) {
   return name;
 }
 
+function dismissShotMissingFlag(shotId) {
+  dismissMissingFlag('shot', shotId);
+}
+
+function dismissMissingFlag(type, id) {
+  if (type === 'shot') {
+    const s = shots.find(x => x.id === id);
+    if (s) { delete s.missingFromScript; autoSave(); renderShots(); }
+  } else if (type === 'char') {
+    const c = characters.find(x => x.id === id);
+    if (c) { delete c.missingFromScript; autoSave(); renderCharacters(); }
+  } else if (type === 'loc') {
+    const l = locations.find(x => x.id === id);
+    if (l) { delete l.missingFromScript; autoSave(); renderLocations(); }
+  }
+}
+
+function dismissDuplicateFlag(type, id) {
+  if (type === 'loc') {
+    const l = locations.find(x => x.id === id);
+    if (l) { l.possibleDuplicate = false; autoSave(); renderLocations(); }
+  } else if (type === 'char') {
+    const c = characters.find(x => x.id === id);
+    if (c) { c.possibleDuplicate = false; autoSave(); renderCharacters(); }
+  }
+}
+
+function mergeLocationsIntoOne(keepId, dropId) {
+  const keep = locations.find(l => l.id === keepId);
+  const drop = locations.find(l => l.id === dropId);
+  if (!keep || !drop) return;
+  // Store the dropped name (and its aliases) on the keeper so future imports recognise both
+  keep.aliases = [...(keep.aliases || []), drop.name, ...(drop.aliases || [])].filter(Boolean);
+  // Redirect all shots that referenced the dropped location
+  for (const s of shots) { if (s.locationId === dropId) s.locationId = keepId; }
+  // Remove the duplicate
+  locations = locations.filter(l => l.id !== dropId);
+  // Re-run duplicate detection
+  for (let i = 0; i < locations.length; i++) {
+    locations[i].possibleDuplicate = false;
+    for (let j = 0; j < locations.length; j++) {
+      if (i !== j && locations[i].name && locations[j].name && locationsSimilar(locations[i].name, locations[j].name)) {
+        locations[i].possibleDuplicate = true; break;
+      }
+    }
+  }
+  renderLocations();
+  renderShots();
+  autoSave();
+  showToast(`Merged "${drop.name}" into "${keep.name}".`);
+}
+
 function locationsSimilar(a, b) {
   const stop = new Set(['the','a','an','of','in','at','on','and','or','with','near','by']);
   const words = s => s.toLowerCase().split(/\W+/).filter(w => w.length > 2 && !stop.has(w));
@@ -1397,7 +2278,19 @@ function locationsSimilar(a, b) {
   return shared.length >= Math.min(w1.length, w2.length) * 0.6;
 }
 
-function mergeCharacters(incoming) {
+function mergeCharacters(incoming, flagMissing = false) {
+  const incomingNames = new Set(incoming.flatMap(c => {
+    if (c.isPlural && (c.pluralCount || 1) > 1) {
+      const base = singularize(c.name);
+      return Array.from({ length: c.pluralCount || 3 }, (_, i) => `${base} #${i + 1}`.toLowerCase());
+    }
+    return [(c.name || '').trim().toLowerCase()];
+  }));
+  if (flagMissing) {
+    for (const c of characters) {
+      if (c.name.trim()) c.missingFromScript = !incomingNames.has(c.name.trim().toLowerCase());
+    }
+  }
   if (incoming.length) {
     characters = characters.filter(c => c.name.trim() || c.reference.trim() || c.prompt.trim() || c.images?.length);
   }
@@ -1413,12 +2306,15 @@ function mergeCharacters(incoming) {
           char.reference = formatAttributesHtml(c.attributes);
           char.attributes = c.attributes;
           characters.push(char);
+        } else {
+          existing.missingFromScript = false;
         }
       }
     } else {
       const name = (c.name || '').trim();
       const existing = characters.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
       if (existing) {
+        existing.missingFromScript = false;
         if (!existing.reference && c.attributes?.length) {
           existing.reference = formatAttributesHtml(c.attributes);
           existing.attributes = c.attributes;
@@ -1441,14 +2337,25 @@ function mergeCharacters(incoming) {
   autoSave();
 }
 
-function mergeLocations(incoming) {
+function mergeLocations(incoming, flagMissing = false) {
+  const incomingNames = new Set(incoming.map(l => (l.name || '').trim().toLowerCase()));
+  if (flagMissing) {
+    for (const l of locations) {
+      if (l.name.trim()) l.missingFromScript = !incomingNames.has(l.name.trim().toLowerCase());
+    }
+  }
   if (incoming.length) {
     locations = locations.filter(l => l.name.trim() || l.reference.trim() || l.prompt.trim() || l.images?.length);
   }
   for (const l of incoming) {
     const name = (l.name || '').trim();
-    const existing = locations.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
+    const nameLower = name.toLowerCase();
+    const existing = locations.find(x =>
+      x.name.trim().toLowerCase() === nameLower ||
+      (x.aliases || []).some(a => a.trim().toLowerCase() === nameLower)
+    );
     if (existing) {
+      existing.missingFromScript = false;
       if (!existing.reference && l.description) existing.reference = l.description;
     } else {
       locations.push({ ...newLocation(), name, reference: l.description || '' });
@@ -1470,6 +2377,22 @@ function mergeLocations(incoming) {
   autoSave();
 }
 
+function flagMissingShots(scriptText) {
+  const lowerScript = scriptText.toLowerCase();
+  for (const s of shots) {
+    if (s.lyric && s.lyric.trim()) {
+      // Flag if a meaningful chunk of the lyric text doesn't appear in the script
+      const words = s.lyric.trim().toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      const matchCount = words.filter(w => lowerScript.includes(w)).length;
+      s.missingFromScript = words.length > 0 && matchCount < words.length * 0.4;
+    } else {
+      s.missingFromScript = false;
+    }
+  }
+  renderShots();
+  autoSave();
+}
+
 async function generateCharactersFromScript() {
   if (!lastScriptText) { showToast('Upload a script first.', true); return; }
   const btn = document.getElementById('btn-gen-chars');
@@ -1481,6 +2404,29 @@ async function generateCharactersFromScript() {
     showToast(`Generated ${data.characters?.length ?? 0} characters.`);
   } catch(e) { showToast('Error: ' + e.message, true); }
   finally { btn.disabled = false; btn.innerHTML = 'Generate Characters'; }
+}
+
+async function fixLocationPrefixes() {
+  syncFromDOM();
+  if (!locations.length) { showToast('No locations to fix.', true); return; }
+  const btn = document.querySelector('[onclick="fixLocationPrefixes()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '✦ Fixing…'; }
+  try {
+    const payload = locations.map(l => ({ id: l.id, name: l.name }));
+    const data = await apiFetch('/api/fix-location-prefixes', { locations: payload, scriptText: lastScriptText || null });
+    for (const fixed of (data.locations || [])) {
+      const loc = locations.find(l => l.id === fixed.id);
+      if (loc) loc.name = fixed.name;
+    }
+    renderLocations();
+    renderShots();
+    autoSave();
+    showToast(`Updated ${data.locations?.length ?? 0} location names.`);
+  } catch(e) {
+    showToast('Failed: ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Fix INT./EXT.'; }
+  }
 }
 
 async function generateLocationsFromScript() {
@@ -1620,6 +2566,52 @@ function deleteLocCustomView(id, idx) {
     row.style.display = '';
     const btn = document.querySelector(`#locations-body tr[data-id="${id}"] .btn-toggle-shot-angles`);
     if (btn) btn.textContent = '▼ Variations';
+  }
+  autoSave();
+}
+
+// Delete by cv.id — used from compose bg thumbnails
+function deleteLocCustomViewById(locId, cvId) {
+  const loc = locations.find(l => l.id === locId);
+  if (!loc?.customViews) return;
+  const idx = loc.customViews.findIndex(cv => cv.id === cvId);
+  if (idx === -1) return;
+  loc.customViews.splice(idx, 1);
+  renderLocations();
+  autoSave();
+  // Rebuild compose bg thumbs if compose is open for this location's shot
+  if (_compose) {
+    const shot = shots.find(s => s.id === _compose.shotId);
+    if (shot) buildComposeLocThumbs(shot);
+  }
+}
+
+// Delete a generated character variant by its angle key
+function deleteCharVariant(charId, variantKey) {
+  const char = characters.find(c => c.id === charId);
+  if (!char?.angles?.[variantKey]) return;
+  // Remove from char.angles
+  delete char.angles[variantKey];
+  // Also remove from expressionCache — key format is "angle · expr"
+  const sep = variantKey.indexOf(' · ');
+  if (sep !== -1) {
+    const angle = variantKey.slice(0, sep);
+    const expr = variantKey.slice(sep + 3).toLowerCase();
+    if (char.expressionCache?.[angle]?.[expr]) delete char.expressionCache[angle][expr];
+  }
+  // If this was the currently selected variation, fall back to Front
+  if (_selectedCompExpr && _selectedCompAngle + ' · ' + _selectedCompExpr === variantKey) {
+    _selectedCompAngle = 'Front';
+    _selectedCompExpr = '';
+  }
+  // Refresh main page angle sub-row
+  const tbody = document.querySelector(`#char-angles-${charId} .char-angle-inner table tbody`);
+  if (tbody) tbody.innerHTML = charAngleRowsInnerHTML(char);
+  // Refresh compose detail if that char is selected
+  if (_selectedCompCharId === charId) {
+    const detailWrap = document.getElementById('compose-char-detail-wrap');
+    if (detailWrap) detailWrap.innerHTML = compCharDetailHTML();
+    else renderComposeLayerTab();
   }
   autoSave();
 }
@@ -1893,7 +2885,10 @@ function mirrorImageUrl(srcUrl) {
 function buildAnglePrompt(char, angle) {
   const desc = ANGLE_DESC[angle] || angle;
   const name = char.name ? `${char.name}, ` : '';
-  return `${name}${desc}`;
+  const style = getStylePrompt();
+  const parts = [`${name}${desc}`];
+  if (style) parts.push(style);
+  return parts.join('. ');
 }
 
 function toggleCharAngles(id) {
@@ -1902,7 +2897,7 @@ function toggleCharAngles(id) {
   if (!angleRow) return;
   const hidden = angleRow.style.display === 'none' || angleRow.style.display === '';
   angleRow.style.display = hidden ? 'table-row' : 'none';
-  if (btn) btn.textContent = hidden ? '▼ Angles' : '▶ Angles';
+  if (btn) btn.textContent = hidden ? '▼ Variations' : '▶ Variations';
 }
 
 async function generateCharFrontProfile(id) {
@@ -1961,7 +2956,7 @@ async function generateCharAngles(id) {
       const anglePrompt = existingPrompt || buildAnglePrompt(char, angle);
       if (anglePromptField && !existingPrompt) anglePromptField.value = anglePrompt;
       try {
-        const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl] });
+        const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });
         const url = varData.url || null;
         if (!char.angles[angle]) char.angles[angle] = {};
         char.angles[angle].prompt = anglePrompt;
@@ -1984,7 +2979,7 @@ async function generateCharAngles(id) {
     autoSave();
     showToast('Angle images generated.');
   } catch(e) { showToast('Error: ' + e.message, true); }
-  finally { btn.disabled = false; btn.innerHTML = 'Generate Angles'; }
+  finally { btn.disabled = false; btn.innerHTML = 'Generate Variations'; }
 }
 
 async function generateMissingCharPrompts() {
@@ -2153,7 +3148,7 @@ async function regenerateCharAngle(id, angle) {
   if (mirrorSlot) mirrorSlot.innerHTML = '<span class="spinner"></span>';
 
   try {
-    const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl] });
+    const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });
     const url = varData.url || null;
     if (!char.angles) char.angles = {};
     if (!char.angles[angle]) char.angles[angle] = {};
@@ -2393,7 +3388,7 @@ async function generateCharVariant(shotId, charId) {
   resultEl.innerHTML = '<span class="spinner" style="border-top-color:#4ade80"></span>';
 
   try {
-    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg] });
+    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg], stylePrompt: getStylePrompt() });
     const url = data.url || null;
     if (!shot.characterDetails) shot.characterDetails = {};
     shot.characterDetails[charId] = { expression, facingDir, prompt, variantImage: url };
@@ -2473,46 +3468,65 @@ function loadComposeBackground(url) {
 }
 
 function markComposeBgSelected(key) {
-  document.querySelectorAll('.compose-thumb[data-bg-key]').forEach(el => {
+  document.querySelectorAll('[data-bg-key]').forEach(el => {
     el.classList.toggle('selected', el.dataset.bgKey === key);
   });
-  // Also highlight the active location row
-  document.querySelectorAll('.compose-loc-bg-row').forEach(el => {
-    el.classList.toggle('selected', key && key.startsWith(`loc-${el.dataset.locId}-`));
+  document.querySelectorAll('.compose-loc-var-thumb').forEach(el => {
+    const k = `loc-${el.dataset.locId}-${el.dataset.viewKey}`;
+    el.classList.toggle('selected', k === key);
   });
 }
 
 function buildComposeLocThumbs(shot) {
   const thumbContainer = document.getElementById('compose-loc-thumbs');
   if (!thumbContainer) return;
-  if (!locations.length) { thumbContainer.innerHTML = `<span class="compose-empty">No locations</span>`; return; }
+  if (!locations.length) { thumbContainer.innerHTML = `<span class="compose-empty" style="padding:8px 10px;font-size:11px;color:#444">No locations yet.</span>`; return; }
+
+  // Build pairs for 2-col grid — each location gets a "wrap" spanning both cols
   thumbContainer.innerHTML = locations.map(l => {
-    const views = [{ key: 'default', label: 'Default View', img: l.images?.[0] || null }];
-    LOC_ANGLES.forEach(a => {
-      const img = l.shotAngles?.[a]?.image;
-      if (img) views.push({ key: `angle-${a}`, label: a, img });
-    });
-    (l.customViews || []).forEach(cv => {
-      if (cv.image) views.push({ key: `custom-${cv.id}`, label: cv.name || 'Unnamed', img: cv.image });
-    });
-    const bgKey = `loc-${l.id}-default`;
-    const thumbImg = views[0]?.img;
-    const viewOpts = views.map(v => `<option value="${esc(v.key)}">${esc(v.label)}</option>`).join('');
-    return `<div class="compose-loc-bg-row" data-loc-id="${esc(l.id)}">
-      <div class="compose-thumb" data-bg-key="${esc(bgKey)}" onclick="onLocBgThumbClick('${esc(l.id)}')">
-        ${thumbImg ? `<img src="${esc(proxyUrl(thumbImg))}" crossorigin="anonymous">` : '<span style="width:40px;height:40px;background:#1a1a1a;border-radius:4px;display:block"></span>'}
-        <span class="compose-thumb-name">${esc(l.name || 'Unnamed')}</span>
-        <span class="compose-thumb-add">↺</span>
+    const views = [{ key: 'default', label: 'Default', img: l.images?.[0] || null }];
+    LOC_ANGLES.forEach(a => { const img = l.shotAngles?.[a]?.image; if (img) views.push({ key: `angle-${a}`, label: a.replace('establishing shot','est.').replace(' shot',''), img }); });
+    (l.customViews || []).forEach(cv => { if (cv.image) views.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img: cv.image }); });
+
+    const defaultImg = views[0]?.img;
+    const hasVariations = views.length > 1;
+    const variationThumbs = views.map(v => {
+      const isDeletable = v.key.startsWith('custom-');
+      const cvId = isDeletable ? v.key.slice(7) : null;
+      return `
+      <div class="compose-loc-var-thumb" style="position:relative" data-loc-id="${esc(l.id)}" data-view-key="${esc(v.key)}" onclick="onLocBgViewChange('${esc(l.id)}','${esc(v.key)}')" title="${esc(v.label)}">
+        ${v.img ? `<img src="${esc(proxyUrl(v.img))}" crossorigin="anonymous">` : `<div class="compose-loc-var-thumb-empty">·</div>`}
+        <span class="compose-loc-var-label">${esc(v.label)}</span>
+        ${isDeletable ? `<button class="comp-thumb-delete" onclick="event.stopPropagation();deleteLocCustomViewById('${esc(l.id)}','${esc(cvId)}')" title="Delete variation">✕</button>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="compose-loc-card-wrap" data-loc-id="${esc(l.id)}">
+      <div class="compose-loc-card-main">
+        <div class="compose-bg-card" data-bg-key="loc-${esc(l.id)}-default" onclick="onLocBgCardClick('${esc(l.id)}')">
+          ${defaultImg ? `<img src="${esc(proxyUrl(defaultImg))}" crossorigin="anonymous">` : `<div class="compose-bg-card-empty">·</div>`}
+          <span class="compose-bg-card-label">${esc(l.name || 'Unnamed')}</span>
+        </div>
+        ${hasVariations ? `<div class="compose-bg-card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;color:#555;font-size:10px" onclick="toggleLocVariations('${esc(l.id)}')">
+          <span style="font-size:18px;line-height:1">⊞</span>
+          <span>${views.length} views</span>
+        </div>` : ''}
       </div>
-      ${views.length > 1 ? `<select class="compose-loc-view-sel" data-loc-id="${esc(l.id)}" onchange="onLocBgViewChange('${esc(l.id)}',this.value)" style="width:100%;margin-top:3px;font-size:10px;background:#111;border:1px solid #222;border-radius:3px;color:#888;padding:3px 4px">${viewOpts}</select>` : ''}
+      ${hasVariations ? `<div class="compose-loc-variations" id="loc-vars-${esc(l.id)}">${variationThumbs}</div>` : ''}
     </div>`;
   }).join('');
 }
 
-function onLocBgThumbClick(locId) {
-  const sel = document.querySelector(`.compose-loc-view-sel[data-loc-id="${locId}"]`);
-  const viewKey = sel ? sel.value : 'default';
-  onLocBgViewChange(locId, viewKey);
+function toggleLocVariations(locId) {
+  const el = document.getElementById(`loc-vars-${locId}`);
+  if (el) el.classList.toggle('open');
+}
+
+function onLocBgCardClick(locId) {
+  // Select default view and also open variations
+  onLocBgViewChange(locId, 'default');
+  const el = document.getElementById(`loc-vars-${locId}`);
+  if (el && !el.classList.contains('open')) el.classList.add('open');
 }
 
 function onLocBgViewChange(locId, viewKey) {
@@ -2555,15 +3569,11 @@ function buildOtherShotBgPicker(picker) {
   }
   picker.innerHTML = otherShots.map(s => {
     const key = `other-shot-${s.id}`;
-    return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectOtherShotAsBg('${esc(s.id)}')">
+    return `<div class="compose-bg-card" data-bg-key="${esc(key)}" onclick="selectOtherShotAsBg('${esc(s.id)}')">
       <img src="${esc(proxyUrl(s.finalImage))}" crossorigin="anonymous">
-      <span class="compose-thumb-name">${esc(s.lyric || s.description || `Shot`)}</span>
-      <span class="compose-thumb-add">↺</span>
+      <span class="compose-bg-card-label">${esc(s.lyric || s.description || `Shot`)}</span>
     </div>`;
   }).join('');
-  picker.style.display = 'flex';
-  picker.style.flexDirection = 'column';
-  picker.style.gap = '4px';
 }
 
 function toggleShotBgPicker() {
@@ -2677,7 +3687,7 @@ function openCompose(shotId) {
   const shot = shots.find(s => s.id === shotId);
   if (!shot) return;
 
-  _compose = { shotId, layers: [], selectedIdx: -1, globalLighting: shot.composeMeta?.globalLighting || 'none', globalLightingDir: shot.composeMeta?.globalLightingDir || 'none', bgSeparation: shot.composeMeta?.bgSeparation ?? 0, bgKey: null, bgUrl: null, bgMask: null, bgMaskUrl: shot.composeMeta?.bgMaskUrl || null, bgColor: shot.composeMeta?.bgColor || null, globalContrast: shot.composeMeta?.globalContrast ?? 100, globalSaturation: shot.composeMeta?.globalSaturation ?? 100, history: [], undoStack: [] };
+  _compose = { shotId, layers: [], selectedIdx: -1, globalLighting: shot.composeMeta?.globalLighting || 'none', globalLightingDir: shot.composeMeta?.globalLightingDir || 'none', bgSeparation: shot.composeMeta?.bgSeparation ?? 0, bgKey: null, bgUrl: null, bgMask: null, bgMaskUrl: shot.composeMeta?.bgMaskUrl || null, bgColor: shot.composeMeta?.bgColor || null, globalContrast: shot.composeMeta?.globalContrast ?? 100, globalSaturation: shot.composeMeta?.globalSaturation ?? 100, bgScale: shot.composeMeta?.bgScale ?? 1, bgOffsetX: shot.composeMeta?.bgOffsetX ?? 0, bgOffsetY: shot.composeMeta?.bgOffsetY ?? 0, history: [], undoStack: [] };
   const canvas = document.getElementById('compose-canvas');
   canvas.width = COMPOSE_W; canvas.height = COMPOSE_H;
 
@@ -2686,7 +3696,23 @@ function openCompose(shotId) {
   loadComposeBackground(bgLoc?.images?.[0] || shot.images?.[0] || null);
 
   // Restore previously saved layers
-  if (shot.composeLayers?.length) restoreComposeLayers(shot.composeLayers);
+  if (shot.composeLayers?.length) {
+    restoreComposeLayers(shot.composeLayers);
+  } else {
+    // Auto-place default character images for characters assigned to this shot
+    const shotChars = (shot.characterIds || [])
+      .map(id => characters.find(c => c.id === id))
+      .filter(c => c && c.images?.length);
+    if (shotChars.length) {
+      // Spread characters horizontally across the lower portion of the canvas
+      shotChars.forEach((c, i) => {
+        const total = shotChars.length;
+        const cx = COMPOSE_W * ((i + 1) / (total + 1));
+        const cy = COMPOSE_H * 0.65;
+        addComposeLayerUrl(c.images[0], c.name || 'Character', c.id, { cx, cy });
+      });
+    }
+  }
 
   // Restore subject mask if previously detected
   if (_compose.bgMaskUrl) {
@@ -2710,10 +3736,9 @@ function openCompose(shotId) {
     if (shotImgs.length) {
       shotBgThumbs.innerHTML = shotImgs.map((url, i) => {
         const key = `shot-img-${i}`;
-        return `<div class="compose-thumb" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
+        return `<div class="compose-bg-card" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
           <img src="${esc(proxyUrl(url))}" crossorigin="anonymous">
-          <span class="compose-thumb-name">Shot Image ${i + 1}</span>
-          <span class="compose-thumb-add">↺</span>
+          <span class="compose-bg-card-label">Image ${i + 1}</span>
         </div>`;
       }).join('');
       if (shotBgEmpty) shotBgEmpty.style.display = 'none';
@@ -2722,6 +3747,10 @@ function openCompose(shotId) {
       if (shotBgEmpty) shotBgEmpty.style.display = '';
     }
   }
+
+  // Build other-shot picker (always visible now)
+  const otherPicker = document.getElementById('compose-shot-bg-picker');
+  if (otherPicker) buildOtherShotBgPicker(otherPicker);
 
   // Populate save-as-location-view select
   const saveBgLocSel = document.getElementById('compose-save-bg-loc-select');
@@ -2746,6 +3775,8 @@ function openCompose(shotId) {
   const sepPct = Math.round((_compose.bgSeparation ?? 0) * 100);
   if (sepSlider) sepSlider.value = sepPct;
   if (sepVal) sepVal.textContent = sepPct + '%';
+  syncBgPanZoomSliders();
+  updateComposeHeader();
   document.getElementById('compose-modal').classList.add('open');
   updateUndoBtn();
 }
@@ -2785,7 +3816,8 @@ function compCharGridHTML() {
     const onStage = _compose?.layers.some(l => l.charId === c.id);
     const selected = _selectedCompCharId === c.id;
     return `<div class="comp-char-tile${selected ? ' selected' : ''}${onStage ? ' on-stage' : ''}"
-        id="comp-tile-${esc(c.id)}" onclick="selectComposeChar('${esc(c.id)}')">
+        id="comp-tile-${esc(c.id)}" onclick="selectComposeChar('${esc(c.id)}')"
+        draggable="true" ondragstart="onCompCharDragStart(event,'${esc(c.id)}')" ondragend="onCompCharDragEnd()">
       ${frontImg
         ? `<img class="comp-char-tile-img" src="${esc(frontImg)}" alt="${esc(c.name)}">`
         : `<div class="comp-char-tile-img-empty">·</div>`}
@@ -2795,39 +3827,64 @@ function compCharGridHTML() {
   return `<div class="comp-char-grid">${tiles}</div>`;
 }
 
+let _selectedCompExpr = ''; // tracks selected variation expression (empty = base angle)
+
 function compCharDetailHTML() {
   if (!_selectedCompCharId) return '';
   const char = characters.find(c => c.id === _selectedCompCharId);
   if (!char) return '';
   const shot = shots.find(s => s.id === _compose?.shotId);
   const det = (shot?.characterDetails || {})[char.id] || {};
-  const expr = det.expression || '';
 
-  // Large preview: show AI variant if exists, else the selected angle image
-  const previewImg = getCompCharImage(char, _selectedCompAngle, expr);
-
-  const angleThumbs = ALL_ANGLES.map(a => {
-    // Show the actual angle-specific image; do NOT fall back to front so users see what's generated
+  // Build all variation thumbnails: base angles + expressionCache entries
+  const variationItems = [];
+  // Standard angles
+  ALL_ANGLES.forEach(a => {
     const img = a === 'Front' ? (char.images?.[0] || null) : (char.angles?.[a]?.image || null);
-    const sel = _selectedCompAngle === a;
-    return `<div class="comp-angle-thumb${sel ? ' selected' : ''}${img ? '' : ' comp-angle-thumb-missing'}" onclick="selectComposeAngle('${esc(a)}')" title="${esc(a)}">
-      ${img ? `<img src="${esc(img)}" alt="${esc(a)}">` : `<div class="comp-angle-thumb-empty">·</div>`}
-      <div class="comp-angle-label">${esc(a.replace('3/4 ','¾ '))}</div>
+    variationItems.push({ angle: a, expr: '', img, label: a.replace('3/4 ','¾ ') });
+  });
+  // Expression cache variants
+  Object.entries(char.expressionCache || {}).forEach(([angle, exprs]) => {
+    Object.entries(exprs || {}).forEach(([expr, imgUrl]) => {
+      if (imgUrl && expr && expr !== 'neutral') {
+        variationItems.push({ angle, expr, img: imgUrl, label: `${angle.replace('3/4','¾')} · ${expr}` });
+      }
+    });
+  });
+
+  const variationThumbs = variationItems.map(v => {
+    const sel = _selectedCompAngle === v.angle && _selectedCompExpr === v.expr;
+    const isVariant = !!v.expr; // base angles have no expr
+    const deleteBtn = isVariant
+      ? `<button class="comp-thumb-delete" onclick="event.stopPropagation();deleteCharVariant('${esc(char.id)}','${esc(v.angle)} · ${esc(v.expr)}')" title="Delete variation">✕</button>`
+      : '';
+    return `<div class="comp-angle-thumb${sel ? ' selected' : ''}${v.img ? '' : ' comp-angle-thumb-missing'}" style="position:relative"
+        onclick="selectComposeVariation('${esc(v.angle)}','${esc(v.expr)}')" title="${esc(v.label)}"
+        draggable="true" ondragstart="onCompCharDragStart(event,'${esc(char.id)}')" ondragend="onCompCharDragEnd()">
+      ${v.img ? `<img src="${esc(v.img)}" alt="${esc(v.label)}">` : `<div class="comp-angle-thumb-empty">·</div>`}
+      <div class="comp-angle-label">${esc(v.label)}</div>
+      ${deleteBtn}
     </div>`;
   }).join('');
 
-  return `<div class="comp-char-detail" id="comp-char-detail">
+  const previewImg = getCompCharImage(char, _selectedCompAngle, _selectedCompExpr);
+  const labelSuffix = _selectedCompExpr ? ` · ${_selectedCompExpr}` : ` · ${_selectedCompAngle}`;
+
+  return `<div class="comp-char-detail" id="comp-char-detail"
+      draggable="true" ondragstart="onCompCharDragStart(event,'${esc(char.id)}')" ondragend="onCompCharDragEnd()">
     <div class="comp-char-preview-large">
       ${previewImg
         ? `<img src="${esc(previewImg)}" alt="${esc(char.name)}" id="comp-detail-preview-img">`
         : `<div class="comp-char-preview-large-empty" id="comp-detail-preview-img">No image generated</div>`}
-      <div class="comp-char-preview-label-overlay">${esc(char.name || 'Unnamed')} · ${esc(_selectedCompAngle)}</div>
+      <div class="comp-char-preview-label-overlay">${esc(char.name || 'Unnamed')}${esc(labelSuffix)}</div>
     </div>
-    <div class="comp-char-angle-grid">${angleThumbs}</div>
-    <textarea id="comp-alter-prompt" class="compose-tool-textarea" placeholder="Alter image… (e.g. smiling, looking left)">${esc(expr)}</textarea>
-    <div class="comp-char-actions">
+    <div class="comp-char-angle-grid">${variationThumbs}</div>
+    <div style="position:relative;margin-top:6px">
+      <textarea id="comp-alter-prompt" class="compose-tool-textarea" placeholder="Describe changes… (e.g. smiling, looking left)" style="padding-right:36px"></textarea>
+      <button class="btn-comp-gen-inline" onclick="compGenerateExpr('${esc(char.id)}')" title="Generate variation">✦</button>
+    </div>
+    <div class="comp-char-actions" style="margin-top:4px">
       <button class="btn-comp-add" onclick="compAddCharToStage('${esc(char.id)}')">+ Add to canvas</button>
-      <button class="btn-comp-gen" onclick="compGenerateExpr('${esc(char.id)}')">Generate</button>
     </div>
   </div>`;
 }
@@ -2845,19 +3902,72 @@ function selectComposeChar(charId) {
   renderComposeCharCards();
 }
 
-function selectComposeAngle(angle) {
+async function selectComposeVariation(angle, expr) {
   _selectedCompAngle = angle;
-  if (_selectedCompCharId && _compose) {
+  _selectedCompExpr = expr || '';
+
+  // Determine charId: prefer the selected layer's charId, fall back to the char selected in add-mode
+  const charId = (_compose && _compose.selectedIdx >= 0
+    ? _compose.layers[_compose.selectedIdx]?.charId
+    : null) || _selectedCompCharId;
+
+  if (charId && _compose) {
+    const char = characters.find(c => c.id === charId);
     const shot = shots.find(s => s.id === _compose.shotId);
     if (shot) {
       if (!shot.characterDetails) shot.characterDetails = {};
-      if (!shot.characterDetails[_selectedCompCharId]) shot.characterDetails[_selectedCompCharId] = {};
-      shot.characterDetails[_selectedCompCharId].facingDir = angle;
+      if (!shot.characterDetails[charId]) shot.characterDetails[charId] = {};
+      shot.characterDetails[charId].facingDir = angle;
+      if (expr) shot.characterDetails[charId].expression = expr;
+    }
+
+    // Find the canvas layer to update — prefer the currently selected layer, else first layer for this char
+    let layerIdx = (_compose.selectedIdx >= 0 && _compose.layers[_compose.selectedIdx]?.charId === charId)
+      ? _compose.selectedIdx
+      : _compose.layers.findIndex(l => l.charId === charId && !l.loading);
+
+    if (layerIdx >= 0 && char) {
+      const newRawUrl = getCompCharImage(char, angle, expr || '');
+      const layer = _compose.layers[layerIdx];
+      if (newRawUrl && newRawUrl !== layer.imgUrl) {
+        // Show a loading placeholder while we remove the background
+        _compose.layers[layerIdx] = { ...layer, loading: true };
+        renderCompose();
+
+        // Re-render sidebar immediately so the selection highlight updates
+        const detailWrap = document.getElementById('compose-char-detail-wrap');
+        if (detailWrap) detailWrap.innerHTML = compCharDetailHTML();
+        else renderComposeLayerTab();
+
+        try {
+          const bgData = await apiFetch('/api/remove-background', { imageUrl: newRawUrl });
+          const finalUrl = bgData.url || newRawUrl;
+          const imgEl = new Image();
+          imgEl.crossOrigin = 'anonymous';
+          imgEl.onload = () => {
+            const h = COMPOSE_H * layer.scale;
+            const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
+            _compose.layers[layerIdx] = { ...layer, loading: false, imgEl, imgUrl: finalUrl, w, h };
+            renderCompose();
+            saveComposeLayers();
+          };
+          imgEl.src = proxyUrl(finalUrl);
+        } catch(e) {
+          _compose.layers[layerIdx] = { ...layer, loading: false };
+          renderCompose();
+          showToast('Could not swap variation: ' + e.message, true);
+        }
+        return; // sidebar already re-rendered above
+      }
     }
   }
+
   const detailWrap = document.getElementById('compose-char-detail-wrap');
   if (detailWrap) detailWrap.innerHTML = compCharDetailHTML();
+  else renderComposeLayerTab();
 }
+
+function selectComposeAngle(angle) { selectComposeVariation(angle, ''); }
 
 function refreshCompCharCard(charId) {
   // Re-render whole grid (tiles update on-stage state)
@@ -2919,40 +4029,54 @@ async function compGenerateExpr(charId) {
   const angle = _selectedCompAngle || det.facingDir || 'Front';
   const alterEl = document.getElementById('comp-alter-prompt');
   const expr = (alterEl ? alterEl.value : det.expression || '').trim();
+  if (!expr) { showToast('Describe a variation first.', true); return; }
   det.expression = expr;
   det.facingDir = angle;
 
   const refImg = getCharAngleImage(char, angle);
   if (!refImg) { showToast('Generate character images first.', true); return; }
 
-  const genBtn = document.querySelector(`#comp-char-detail .btn-comp-gen`);
+  const genBtn = document.querySelector(`#comp-char-detail .btn-comp-gen-inline`);
   if (genBtn) { genBtn.disabled = true; genBtn.textContent = '…'; }
 
-  const prompt = expr
-    ? `Keep everything identical. Change only the facial expression to: ${expr}.`
-    : `Keep the character with a neutral expression. Do not change anything else.`;
+  const prompt = `Keep everything identical. Change only: ${expr}.`;
 
   try {
-    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg] });
+    const data = await apiFetch('/api/generate-char-variant', { prompt, referenceImageUrls: [refImg], stylePrompt: getStylePrompt() });
     const url = data.url || null;
     if (url) {
+      // Save to expressionCache (for compose view)
       if (!char.expressionCache) char.expressionCache = {};
       if (!char.expressionCache[angle]) char.expressionCache[angle] = {};
-      char.expressionCache[angle][expr.toLowerCase() || 'neutral'] = url;
+      const exprKey = expr.toLowerCase();
+      char.expressionCache[angle][exprKey] = url;
       det.variantImage = url;
+      // Also store in char.angles under a unique variation key so main page shows it
+      if (!char.angles) char.angles = {};
+      const varKey = `${angle} · ${expr}`;
+      char.angles[varKey] = { image: url, prompt: expr, isVariant: true, baseAngle: angle };
       // Ensure char is in shot's characterIds
       if (!shot.characterIds.includes(charId)) {
         shot.characterIds.push(charId);
         syncCharCheckbox(_compose.shotId, charId, true);
       }
+      // Select the newly generated variation
+      _selectedCompAngle = angle;
+      _selectedCompExpr = exprKey;
     }
     refreshCompCharCard(charId);
+    // Also refresh main page character angle rows so the variation shows up
+    const angleRow = document.getElementById(`char-angles-${charId}`);
+    if (angleRow) {
+      const tbody = angleRow.querySelector('.char-angle-inner table tbody');
+      if (tbody) { const c = characters.find(c => c.id === charId); if (c) tbody.innerHTML = charAngleRowsInnerHTML(c); }
+    }
     refreshShotDetailIfOpen(_compose.shotId);
     autoSave();
-    showToast('Generated.');
+    showToast('Variation generated.');
   } catch(e) {
-    if (previewEl) previewEl.innerHTML = '<span class="placeholder">✕</span>';
     showToast('Error: ' + e.message, true);
+    if (genBtn) { genBtn.disabled = false; genBtn.textContent = '✦'; }
   }
 }
 
@@ -3023,6 +4147,12 @@ async function addComposeLayerUrl(url, label, charId = null, dropPos = null) {
     const data = await apiFetch('/api/remove-background', { imageUrl: url });
     const bgRemovedUrl = data.url || url;
 
+    // Cache bg-removed URL on the character so the shot preview can use it
+    if (charId) {
+      const char = characters.find(c => c.id === charId);
+      if (char && bgRemovedUrl !== url) { char.bgRemovedImage = bgRemovedUrl; autoSave(); }
+    }
+
     const imgEl = new Image();
     imgEl.crossOrigin = 'anonymous';
     imgEl.onload = () => {
@@ -3083,6 +4213,9 @@ function saveComposeLayers() {
   shot.composeMeta.bgColor = _compose.bgColor || null;
   shot.composeMeta.globalContrast = _compose.globalContrast ?? 100;
   shot.composeMeta.globalSaturation = _compose.globalSaturation ?? 100;
+  shot.composeMeta.bgScale = _compose.bgScale ?? 1;
+  shot.composeMeta.bgOffsetX = _compose.bgOffsetX ?? 0;
+  shot.composeMeta.bgOffsetY = _compose.bgOffsetY ?? 0;
   autoSave();
 }
 
@@ -3101,7 +4234,7 @@ function setComposeSolidColor(color) {
   _compose.bgUrl = null;
   _compose.bgKey = 'solid';
   document.querySelectorAll('#compose-loc-thumbs .compose-thumb').forEach(el => el.classList.remove('selected'));
-  const swatch = document.getElementById('compose-color-swatch');
+  const swatch = document.getElementById('compose-color-swatch') || document.getElementById('compose-color-swatch-lg');
   if (swatch) swatch.style.background = color;
   renderCompose(); saveComposeLayers();
 }
@@ -3291,6 +4424,129 @@ function closeCompose() {
   _composeDrag = null;
 }
 
+function updateComposeHeader() {
+  if (!_compose) return;
+  const idx = shots.findIndex(s => s.id === _compose.shotId);
+  const shot = shots[idx];
+  const title = document.getElementById('compose-shot-title');
+  const indexLabel = document.getElementById('compose-shot-index');
+  const prevBtn = document.getElementById('btn-compose-prev');
+  const nextBtn = document.getElementById('btn-compose-next');
+  const playBtn = document.getElementById('btn-compose-play');
+  if (title) title.textContent = `Shot ${idx + 1}${shot?.lyric ? ' — ' + shot.lyric.slice(0, 40) : ''}`;
+  if (indexLabel) indexLabel.textContent = `${idx + 1} / ${shots.length}`;
+  if (prevBtn) prevBtn.disabled = idx <= 0;
+  if (nextBtn) nextBtn.disabled = idx >= shots.length - 1;
+  // Enable play only when there's audio loaded and this shot has a usable timestamp
+  const hasAudio = !!(getPinnedPlayer()?.src);
+  const ts = shot?.timestamp;
+  const hasTs = ts && ts !== '0:00' && parseTimestamp(ts) !== null;
+  if (playBtn) playBtn.disabled = !(hasAudio && hasTs);
+  // Restore video state if shot has one
+  if (shot?.videoUrl) {
+    const vid = document.getElementById('compose-video-main');
+    if (vid) vid.src = shot.videoUrl;
+    const sideVid = document.getElementById('compose-video-player');
+    if (sideVid) { sideVid.src = shot.videoUrl; sideVid.style.display = ''; }
+  }
+}
+
+function composeNavShot(dir) {
+  if (!_compose) return;
+  const idx = shots.findIndex(s => s.id === _compose.shotId);
+  const next = shots[idx + dir];
+  if (!next) return;
+  saveComposeLayers();
+  // Reset video view to image when navigating
+  switchComposeView('image');
+  openCompose(next.id);
+}
+
+function composePlayAudio() {
+  if (!_compose) return;
+  playAudioAtShot(_compose.shotId);
+}
+
+function openVideoTab() {
+  switchComposeTab('video');
+}
+
+async function createTalkingVideo() {
+  if (!_compose) return;
+  const shot = shots.find(s => s.id === _compose.shotId);
+  if (!shot) return;
+
+  // Get the composed image — save a fresh render as a data URL, upload it
+  const canvas = document.getElementById('compose-canvas');
+  const savedIdx = _compose.selectedIdx;
+  _compose.selectedIdx = -1;
+  renderCompose();
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  _compose.selectedIdx = savedIdx;
+  renderCompose();
+
+  const btn = document.getElementById('btn-talking-video');
+  const status = document.getElementById('talking-video-status');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Uploading image…'; }
+  if (status) status.textContent = '';
+
+  try {
+    // Upload the composed image
+    const uploadData = await apiFetch('/api/upload-reference', { base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
+    const imageUrl = uploadData.url;
+    if (!imageUrl) throw new Error('Image upload failed');
+
+    // Extract audio clip for this shot's timestamp range
+    if (btn) btn.textContent = '⏳ Preparing audio…';
+    let audioUrl = null;
+    const player = getPinnedPlayer();
+    if (player?.src && shot.timestamp && shot.timestamp !== '0:00') {
+      // Upload the full audio file — the API will use the image + audio together
+      const audioFile = await idbGet(_audioKey() + '-file');
+      if (audioFile) {
+        const audioB64 = await fileToBase64(audioFile);
+        const audioUpload = await apiFetch('/api/upload-reference', { base64: audioB64.split(',')[1], mediaType: audioFile.type || 'audio/mpeg' });
+        audioUrl = audioUpload.url;
+      }
+    }
+
+    if (btn) btn.textContent = '⏳ Generating video…';
+    const prompt = shot.lyric || shot.action || 'Character speaking naturally';
+    const data = await apiFetch('/api/create-talking-video', { imageUrl, audioUrl, prompt });
+    const videoUrl = data.url;
+    if (!videoUrl) throw new Error('No video returned');
+
+    // Save video to shot
+    shot.videoUrl = videoUrl;
+    _compose.videoUrl = videoUrl;
+    autoSave();
+
+    // Show the video in the sidebar panel
+    const sideVid = document.getElementById('compose-video-player');
+    if (sideVid) { sideVid.src = videoUrl; sideVid.style.display = ''; }
+
+    // Switch main view to video
+    switchComposeView('video');
+
+    if (status) status.textContent = 'Video ready.';
+    showToast('Talking video created!');
+  } catch(e) {
+    showToast('Video failed: ' + e.message, true);
+    if (status) status.textContent = 'Error: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Create Talking Video'; }
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function addComposeLayer(type, id) {
   if (!_compose) return;
   const item = type === 'char' ? characters.find(c => c.id === id) : locations.find(l => l.id === id);
@@ -3422,57 +4678,186 @@ function switchComposeTab(tab) {
   document.querySelectorAll('.compose-tab-panel').forEach(p => p.style.display = 'none');
   const panel = document.getElementById(`compose-tabpanel-${tab}`);
   if (panel) panel.style.display = '';
+  if (tab === 'layer') renderComposeLayerTab();
+  // Video tab: switch main view
+  switchComposeView(tab === 'video' && _compose?.videoUrl ? 'video' : 'image');
 }
 
-function setComposeBgMode(mode) {
-  document.querySelectorAll('.compose-bg-mode-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
-  ['location','shot','color','other'].forEach(m => {
-    const p = document.getElementById(`compose-bgpanel-${m}`);
-    if (p) p.style.display = m === mode ? '' : 'none';
-  });
-  // populate other-shot panel on demand
-  if (mode === 'other') {
-    const picker = document.getElementById('compose-shot-bg-picker');
-    if (picker && !picker.dataset.built) {
-      buildOtherShotBgPicker(picker);
-      picker.dataset.built = '1';
-    }
+function switchComposeView(mode) {
+  const canvasWrap = document.querySelector('.compose-canvas-wrap');
+  const videoView = document.getElementById('compose-video-view');
+  if (!canvasWrap || !videoView) return;
+  if (mode === 'video') {
+    canvasWrap.style.display = 'none';
+    videoView.style.display = 'flex';
+    const vid = document.getElementById('compose-video-main');
+    if (vid && _compose?.videoUrl && vid.src !== _compose.videoUrl) vid.src = _compose.videoUrl;
+  } else {
+    canvasWrap.style.display = '';
+    videoView.style.display = 'none';
   }
 }
+
+function renderComposeLayerTab() {
+  if (!_compose) return;
+  const sel = document.getElementById('compose-layer-select');
+  const content = document.getElementById('compose-layer-content');
+  if (!sel || !content) return;
+
+  // Rebuild dropdown options
+  const layers = _compose.layers;
+  const currentVal = sel.value;
+  sel.innerHTML = `<option value="__add__">+ Add Character</option>` +
+    layers.map((l, i) => `<option value="${i}">${esc(l.label || `Layer ${i + 1}`)}</option>`).join('');
+
+  // Keep selection if still valid
+  const idx = _compose.selectedIdx;
+  if (idx >= 0 && idx < layers.length) {
+    sel.value = String(idx);
+  } else {
+    sel.value = '__add__';
+    _compose.selectedIdx = -1;
+  }
+
+  // Render content area
+  if (sel.value === '__add__') {
+    content.innerHTML = `<div class="compose-layer-add-mode" id="compose-char-add-wrap">
+      <div id="compose-char-cards"></div>
+      <div id="compose-char-detail-wrap" class="compose-char-detail-wrap"></div>
+    </div>`;
+    renderComposeCharCards();
+  } else {
+    content.innerHTML = compLayerEditHTML(layers[idx], idx);
+    syncLayerEditSliders(layers[idx]);
+  }
+}
+
+function onLayerDropdownChange(val) {
+  if (!_compose) return;
+  if (val === '__add__') {
+    _compose.selectedIdx = -1;
+    _selectedCompCharId = null;
+  } else {
+    _compose.selectedIdx = parseInt(val, 10);
+  }
+  renderComposeLayerTab();
+  renderCompose && renderCompose();
+}
+
+function compLayerEditHTML(layer, idx) {
+  const char = layer.charId ? characters.find(c => c.id === layer.charId) : null;
+  const shot = shots.find(s => s.id === _compose?.shotId);
+  const det = char ? ((shot?.characterDetails || {})[char.id] || {}) : {};
+  const angle = det.facingDir || 'Front';
+
+  const charPreview = char ? (() => {
+    const curExpr = _selectedCompCharId ? _selectedCompExpr : (det.expression || '');
+    const curAngle = _selectedCompCharId ? _selectedCompAngle : angle;
+    const img = getCompCharImage(char, curAngle, curExpr);
+    // Build all variation thumbnails: base angles + expressionCache entries
+    const varItems = [];
+    ALL_ANGLES.forEach(a => {
+      const aImg = a === 'Front' ? (char.images?.[0] || null) : (char.angles?.[a]?.image || null);
+      varItems.push({ angle: a, expr: '', img: aImg, label: a.replace('3/4 ','¾ ') });
+    });
+    Object.entries(char.expressionCache || {}).forEach(([a, exprs]) => {
+      Object.entries(exprs || {}).forEach(([ex, imgUrl]) => {
+        if (imgUrl && ex && ex !== 'neutral')
+          varItems.push({ angle: a, expr: ex, img: imgUrl, label: `${a.replace('3/4','¾')} · ${ex}` });
+      });
+    });
+    const thumbs = varItems.map(v => {
+      const sel = curAngle === v.angle && curExpr === v.expr;
+      return `<div class="comp-angle-thumb${sel ? ' selected' : ''}${v.img ? '' : ' comp-angle-thumb-missing'}"
+          onclick="selectComposeVariation('${esc(v.angle)}','${esc(v.expr)}')" title="${esc(v.label)}">
+        ${v.img ? `<img src="${esc(v.img)}" alt="${esc(v.label)}">` : `<div class="comp-angle-thumb-empty">·</div>`}
+        <div class="comp-angle-label">${esc(v.label)}</div>
+      </div>`;
+    }).join('');
+    return `<div class="comp-layer-char-preview">
+      ${img ? `<img src="${esc(img)}" alt="${esc(char.name)}">` : `<div class="comp-char-preview-large-empty">No image</div>`}
+      <div class="comp-char-preview-label-overlay">${esc(char.name || 'Unnamed')} · ${esc(curExpr || curAngle)}</div>
+    </div>
+    <div class="compose-section-title" style="margin:8px 0 4px">Variations</div>
+    <div class="comp-char-angle-grid" style="margin-bottom:8px">${thumbs}</div>`;
+  })() : `<p style="font-size:11px;color:#555;margin-bottom:8px">${esc(layer.label || 'Layer')}</p>`;
+
+  return `<div class="compose-layer-edit-mode">
+    ${charPreview}
+    <div class="compose-section-title" style="margin:8px 0 6px">Layer Settings</div>
+    <div class="compose-slider-row">
+      <span class="compose-slider-label">Size</span>
+      <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
+      <span class="compose-slider-val" id="compose-scale-val">30%</span>
+    </div>
+    <div class="compose-slider-row">
+      <span class="compose-slider-label">Opacity</span>
+      <input type="range" id="compose-opacity-slider" min="10" max="100" value="100" oninput="setComposeLayerOpacity(this.value)" onmousedown="captureUndoState()">
+      <span class="compose-slider-val" id="compose-opacity-val">100%</span>
+    </div>
+    <div class="compose-slider-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <span class="compose-slider-label">Lighting</span>
+      <select id="compose-lighting-select" onchange="setComposeLayerLighting(this.value)" style="font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;padding:4px 6px;width:100%">
+        <option value="none">None</option>
+        <option value="front">Front (soft)</option>
+        <option value="left">Side — Left</option>
+        <option value="right">Side — Right</option>
+        <option value="top">Top down</option>
+        <option value="bottom">Bottom up</option>
+        <option value="backlit">Backlit / Rim</option>
+      </select>
+    </div>
+    <div class="compose-slider-row" id="compose-lighting-intensity-row" style="display:none">
+      <span class="compose-slider-label">Intensity</span>
+      <input type="range" id="compose-lighting-slider" min="10" max="100" value="60" oninput="setComposeLayerLightingIntensity(this.value)" onmousedown="captureUndoState()">
+      <span class="compose-slider-val" id="compose-lighting-val">60%</span>
+    </div>
+    <div class="compose-slider-row">
+      <span class="compose-slider-label">Contrast</span>
+      <input type="range" id="compose-layer-contrast" min="50" max="200" value="100" oninput="setComposeLayerContrast(this.value)" onmousedown="captureUndoState()">
+      <span class="compose-slider-val" id="compose-layer-contrast-val">100%</span>
+    </div>
+    <div class="compose-slider-row">
+      <span class="compose-slider-label">Saturation</span>
+      <input type="range" id="compose-layer-saturation" min="0" max="200" value="100" oninput="setComposeLayerSaturation(this.value)" onmousedown="captureUndoState()">
+      <span class="compose-slider-val" id="compose-layer-saturation-val">100%</span>
+    </div>
+    <button onclick="flipComposeLayerH()" style="width:100%;margin-top:2px;padding:5px 8px;font-size:11px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer">⇔ Flip Horizontal</button>
+    <textarea id="compose-layer-prompt" placeholder="Prompt to alter this layer…" class="compose-tool-textarea" style="margin-top:6px"></textarea>
+    <button id="btn-apply-layer-prompt" onclick="applyLayerPrompt()" class="compose-tool-btn-purple" style="margin-top:4px">Apply Prompt to Layer</button>
+    <button class="btn btn-remove-layer" style="width:100%;margin-top:4px" onclick="removeComposeLayer()">Remove Layer</button>
+  </div>`;
+}
+
+function syncLayerEditSliders(layer) {
+  if (!layer) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  const scaleVal = Math.round(layer.scale * 100);
+  set('compose-scale-slider', scaleVal); setText('compose-scale-val', scaleVal + '%');
+  const opacityVal = Math.round(layer.opacity * 100);
+  set('compose-opacity-slider', opacityVal); setText('compose-opacity-val', opacityVal + '%');
+  const lighting = layer.lighting || 'none';
+  set('compose-lighting-select', lighting);
+  const intensityRow = document.getElementById('compose-lighting-intensity-row');
+  if (intensityRow) intensityRow.style.display = lighting === 'none' ? 'none' : 'flex';
+  const intensity = Math.round((layer.lightingIntensity ?? 0.6) * 100);
+  set('compose-lighting-slider', intensity); setText('compose-lighting-val', intensity + '%');
+  const contrastVal = Math.round(layer.contrast ?? 100);
+  set('compose-layer-contrast', contrastVal); setText('compose-layer-contrast-val', contrastVal + '%');
+  const satVal = Math.round(layer.saturation ?? 100);
+  set('compose-layer-saturation', satVal); setText('compose-layer-saturation-val', satVal + '%');
+}
+
+function setComposeBgMode() {} // no-op — mode bar removed, all sections always visible
 
 function updateComposeLayerPanel() {
-  const noSel = document.getElementById('compose-layer-no-selection');
-  const inner = document.getElementById('compose-layer-controls-inner');
+  if (!_compose) return;
   const layerTab = document.getElementById('compose-tab-layer');
-  if (!_compose || _compose.selectedIdx < 0 || _compose.selectedIdx >= _compose.layers.length) {
-    if (noSel) noSel.style.display = '';
-    if (inner) inner.style.display = 'none';
-    if (layerTab) layerTab.style.color = '';
-    return;
-  }
-  if (noSel) noSel.style.display = 'none';
-  if (inner) inner.style.display = '';
-  if (layerTab) { layerTab.style.color = '#4ade80'; switchComposeTab('layer'); }
-  const layer = _compose.layers[_compose.selectedIdx];
-  const scaleVal = Math.round(layer.scale * 100);
-  document.getElementById('compose-scale-slider').value = scaleVal;
-  document.getElementById('compose-scale-val').textContent = scaleVal + '%';
-  document.getElementById('compose-opacity-slider').value = Math.round(layer.opacity * 100);
-  document.getElementById('compose-opacity-val').textContent = Math.round(layer.opacity * 100) + '%';
-  const lighting = layer.lighting || 'none';
-  document.getElementById('compose-lighting-select').value = lighting;
-  const intensity = Math.round((layer.lightingIntensity ?? 0.6) * 100);
-  document.getElementById('compose-lighting-slider').value = intensity;
-  document.getElementById('compose-lighting-val').textContent = intensity + '%';
-  document.getElementById('compose-lighting-intensity-row').style.display = lighting === 'none' ? 'none' : 'flex';
-  const layerContrast = Math.round(layer.contrast ?? 100);
-  const layerSaturation = Math.round(layer.saturation ?? 100);
-  const lcSlider = document.getElementById('compose-layer-contrast');
-  if (lcSlider) { lcSlider.value = layerContrast; document.getElementById('compose-layer-contrast-val').textContent = layerContrast + '%'; }
-  const lsSlider = document.getElementById('compose-layer-saturation');
-  if (lsSlider) { lsSlider.value = layerSaturation; document.getElementById('compose-layer-saturation-val').textContent = layerSaturation + '%'; }
-  const layerPromptEl = document.getElementById('compose-layer-prompt');
-  if (layerPromptEl && !layerPromptEl.value) layerPromptEl.value = 'Keep the subject in the same position. But ';
+  const hasSelection = _compose.selectedIdx >= 0 && _compose.selectedIdx < _compose.layers.length;
+  if (layerTab) layerTab.style.color = hasSelection ? '#4ade80' : '';
+  switchComposeTab('layer');
+  // renderComposeLayerTab is called by switchComposeTab('layer')
 }
 
 function renderCompose() {
@@ -3488,7 +4873,14 @@ function renderCompose() {
   } else {
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
-    if (_compose.bgImg) ctx.drawImage(_compose.bgImg, 0, 0, COMPOSE_W, COMPOSE_H);
+    if (_compose.bgImg) {
+      const s = _compose.bgScale ?? 1;
+      const drawW = COMPOSE_W * s;
+      const drawH = COMPOSE_H * s;
+      const ox = (_compose.bgOffsetX ?? 0) + (COMPOSE_W - drawW) / 2;
+      const oy = (_compose.bgOffsetY ?? 0) + (COMPOSE_H - drawH) / 2;
+      ctx.drawImage(_compose.bgImg, ox, oy, drawW, drawH);
+    }
   }
 
   // Rule-of-thirds overlay (subtle)
@@ -3804,21 +5196,52 @@ async function applyLayerPrompt() {
   if (!prompt || !layer.imgUrl) { showToast('Select a layer and enter a prompt.', true); return; }
   captureUndoState();
   const btn = document.getElementById('btn-apply-layer-prompt');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
   try {
-    const data = await apiFetch('/api/generate-shot-images', { prompt, referenceImageUrls: [layer.imgUrl], stylePrompt: '' });
-    const url = data.images?.[0];
-    if (url) {
-      const imgEl = new Image();
-      imgEl.crossOrigin = 'anonymous';
-      imgEl.onload = () => {
-        const h = COMPOSE_H * layer.scale;
-        const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
-        _compose.layers[_compose.selectedIdx] = { ..._compose.layers[_compose.selectedIdx], imgEl, imgUrl: url, w, h };
-        updateComposeLayerPanel(); renderCompose(); saveComposeLayers();
-      };
-      imgEl.src = proxyUrl(url);
+    // Generate the variant using the character variant endpoint (keeps character design)
+    const genData = await apiFetch('/api/generate-char-variant', {
+      prompt,
+      referenceImageUrls: [layer.imgUrl],
+      stylePrompt: getStylePrompt()
+    });
+    const rawUrl = genData.url;
+    if (!rawUrl) throw new Error('No image returned');
+
+    if (btn) btn.textContent = '⏳ Removing bg…';
+
+    // Remove background so only the character is shown on the layer
+    const bgData = await apiFetch('/api/remove-background', { imageUrl: rawUrl });
+    const finalUrl = bgData.url || rawUrl;
+
+    // Save as a new variation on the character if this layer has a charId
+    const char = layer.charId ? characters.find(c => c.id === layer.charId) : null;
+    if (char) {
+      const angle = _selectedCompAngle || 'Front';
+      const exprKey = prompt.toLowerCase().slice(0, 60);
+      if (!char.expressionCache) char.expressionCache = {};
+      if (!char.expressionCache[angle]) char.expressionCache[angle] = {};
+      char.expressionCache[angle][exprKey] = finalUrl;
+      if (!char.angles) char.angles = {};
+      char.angles[`${angle} · ${prompt.slice(0, 40)}`] = { image: finalUrl, prompt, isVariant: true, baseAngle: angle };
+      // Update main page angle sub-rows live
+      const angleRow = document.getElementById(`char-angles-${char.id}`);
+      if (angleRow) {
+        const tbody = angleRow.querySelector('.char-angle-inner table tbody');
+        if (tbody) tbody.innerHTML = charAngleRowsInnerHTML(char);
+      }
     }
+
+    const imgEl = new Image();
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.onload = () => {
+      const h = COMPOSE_H * layer.scale;
+      const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
+      _compose.layers[_compose.selectedIdx] = { ..._compose.layers[_compose.selectedIdx], imgEl, imgUrl: finalUrl, w, h };
+      updateComposeLayerPanel(); renderCompose(); saveComposeLayers();
+    };
+    imgEl.src = proxyUrl(finalUrl);
+    autoSave();
+    showToast('Layer updated.');
   } catch(e) { showToast('Layer prompt failed: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Apply Prompt to Layer'; } }
 }
@@ -3867,7 +5290,8 @@ function composeCanvasCoords(e) {
   };
 }
 
-let _composeResize = null; // { layerIdx, anchorX, anchorY, origW, origH, origCx, origCy, origDiag }
+let _composeResize = null;
+let _bgDrag = null; // { startOx, startOy, startMx, startMy }
 
 function getCornerHit(layer, x, y) {
   const HIT = 12;
@@ -3914,10 +5338,14 @@ document.getElementById('compose-canvas').addEventListener('mousedown', e => {
       return;
     }
   }
-  // Clicked empty space — deselect
-  _compose.selectedIdx = -1;
-  updateComposeLayerPanel();
-  renderCompose();
+  // Clicked empty space — drag background if one is loaded, else deselect
+  if (_compose.bgImg && !_compose.bgColor) {
+    _bgDrag = { startOx: _compose.bgOffsetX ?? 0, startOy: _compose.bgOffsetY ?? 0, startMx: x, startMy: y };
+  } else {
+    _compose.selectedIdx = -1;
+    updateComposeLayerPanel();
+    renderCompose();
+  }
 });
 
 document.addEventListener('mousemove', e => {
@@ -3950,13 +5378,45 @@ document.addEventListener('mousemove', e => {
     layer.cy = _composeDrag.startCy + (y - _composeDrag.startMy);
     renderCompose();
   }
+  if (_bgDrag) {
+    _compose.bgOffsetX = _bgDrag.startOx + (x - _bgDrag.startMx);
+    _compose.bgOffsetY = _bgDrag.startOy + (y - _bgDrag.startMy);
+    syncBgPanZoomSliders();
+    renderCompose();
+  }
 });
 
 document.addEventListener('mouseup', () => {
   if (_composeDrag || _composeResize) saveComposeLayers();
+  if (_bgDrag) saveComposeLayers();
   _composeDrag = null;
   _composeResize = null;
+  _bgDrag = null;
 });
+
+// ── Background scroll-to-zoom ─────────────────────────────────────────────────
+document.getElementById('compose-canvas').addEventListener('wheel', e => {
+  if (!_compose || !_compose.bgImg) return;
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.05 : 0.05;
+  _compose.bgScale = Math.max(0.1, Math.min(5, (_compose.bgScale ?? 1) + delta));
+  syncBgPanZoomSliders();
+  renderCompose();
+  saveComposeLayers();
+}, { passive: false });
+
+function syncBgPanZoomSliders() {
+  if (!_compose) return;
+  const ox = Math.round(_compose.bgOffsetX ?? 0);
+  const oy = Math.round(_compose.bgOffsetY ?? 0);
+  const zoom = Math.round((_compose.bgScale ?? 1) * 100);
+  const sx = document.getElementById('bg-pan-x'); if (sx) sx.value = ox;
+  const sxv = document.getElementById('bg-pan-x-val'); if (sxv) sxv.textContent = ox;
+  const sy = document.getElementById('bg-pan-y'); if (sy) sy.value = oy;
+  const syv = document.getElementById('bg-pan-y-val'); if (syv) syv.textContent = oy;
+  const sz = document.getElementById('bg-zoom'); if (sz) sz.value = zoom;
+  const zv = document.getElementById('bg-zoom-val'); if (zv) zv.textContent = zoom + '%';
+}
 
 // ── Undo system ──────────────────────────────────────────────────────────────
 function captureUndoState() {
@@ -4049,7 +5509,7 @@ function syncComposeGlobalUI() {
   const aiBtn = document.getElementById('btn-ai-relight');
   if (aiBtn) aiBtn.style.display = (_compose.globalLightingDir && _compose.globalLightingDir !== 'none') ? 'block' : 'none';
   markComposeBgSelected(_compose.bgKey || '');
-  const swatch = document.getElementById('compose-color-swatch');
+  const swatch = document.getElementById('compose-color-swatch') || document.getElementById('compose-color-swatch-lg');
   const picker = document.getElementById('compose-bg-color-picker');
   if (swatch && _compose.bgColor) swatch.style.background = _compose.bgColor;
   if (picker && _compose.bgColor) picker.value = _compose.bgColor;
@@ -4207,3 +5667,24 @@ async function saveCompose() {
     saveBtn.innerHTML = 'Save as Final Image';
   }
 }
+
+// ── Persist on page unload ────────────────────────────────────────────────────
+// Flush any pending debounce and synchronously write text data to localStorage
+// so refreshing or closing the tab never loses unsaved changes.
+// (IDB image writes are async and can't be guaranteed during unload — text is safe.)
+window.addEventListener('pagehide', () => {
+  if (!currentProjectId) return;
+  clearTimeout(_saveTimer);
+  syncFromDOM();
+  const key = projectDataKey(currentProjectId);
+  const { stripped } = extractImages(_buildPayload());
+  try { localStorage.setItem(key, JSON.stringify(stripped)); } catch {}
+});
+
+// Also catch visibility change (tab switch, mobile background) as a belt-and-suspenders save
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && currentProjectId) {
+    clearTimeout(_saveTimer);
+    autoSave();
+  }
+});

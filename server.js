@@ -113,6 +113,77 @@ async function generateShotImageKontextMulti(prompt, referenceImageUrls, stylePr
 
 // ── routes ────────────────────────────────────────────────────────────────────
 
+const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+app.post('/api/transcribe-audio', audioUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  log('info', 'transcribe-audio started', { name: req.file.originalname, size: req.file.size });
+  try {
+    const FormData = require('form-data');
+    const https = require('https');
+    const { execFile } = require('child_process');
+    const os = require('os');
+    const path = require('path');
+    const WHISPER_LIMIT = 24 * 1024 * 1024; // 24MB to stay safely under OpenAI's 25MB limit
+    let audioBuffer = req.file.buffer;
+    let audioFilename = req.file.originalname;
+    let audioMime = req.file.mimetype;
+    if (audioBuffer.length > WHISPER_LIMIT) {
+      log('info', 'transcribe-audio: compressing oversized file', { size: audioBuffer.length });
+      const tmpIn = path.join(os.tmpdir(), `sg-audio-in-${Date.now()}`);
+      const tmpOut = path.join(os.tmpdir(), `sg-audio-out-${Date.now()}.mp3`);
+      require('fs').writeFileSync(tmpIn, audioBuffer);
+      await new Promise((resolve, reject) => {
+        execFile('ffmpeg', ['-y', '-i', tmpIn, '-ac', '1', '-ar', '16000', '-b:a', '32k', tmpOut], (err) => {
+          require('fs').unlinkSync(tmpIn);
+          if (err) reject(new Error('ffmpeg compression failed: ' + err.message));
+          else resolve();
+        });
+      });
+      audioBuffer = require('fs').readFileSync(tmpOut);
+      require('fs').unlinkSync(tmpOut);
+      audioFilename = 'audio.mp3';
+      audioMime = 'audio/mpeg';
+      log('info', 'transcribe-audio: compressed', { newSize: audioBuffer.length });
+    }
+    const form = new FormData();
+    form.append('file', audioBuffer, { filename: audioFilename, contentType: audioMime });
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities[]', 'word');
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY not set' });
+
+    const options = {
+      hostname: 'api.openai.com',
+      path: '/v1/audio/transcriptions',
+      method: 'POST',
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${apiKey}` },
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const req2 = https.request(options, r => {
+        let body = '';
+        r.on('data', d => body += d);
+        r.on('end', () => {
+          try { resolve({ status: r.statusCode, data: JSON.parse(body) }); }
+          catch { reject(new Error(body)); }
+        });
+      });
+      req2.on('error', reject);
+      form.pipe(req2);
+    });
+
+    if (result.status !== 200) throw new Error(result.data?.error?.message || `HTTP ${result.status}`);
+    const words = (result.data.words || []).map(w => ({ word: w.word, start: w.start, end: w.end }));
+    res.json({ text: result.data.text, words });
+  } catch(e) {
+    log('error', 'transcribe-audio failed', { error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/parse-script', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   log('info', 'parse-script started', { name: req.file.originalname, size: req.file.size });
@@ -135,7 +206,7 @@ For each character:
    - "reasoning": one brief sentence explaining how you derived this from the script
 4. Do NOT mention props, held objects, or setting details.
 
-For each location provide a name and a visual reference description (environment, lighting, time of day, atmosphere, notable visual features).
+For each location provide a name (prefixed with "INT." or "EXT." or "INT./EXT." exactly as it appears in the script, e.g. "INT. Coffee Shop", "EXT. Park") and a visual reference description (environment, lighting, time of day, atmosphere, notable visual features).
 
 Respond with valid JSON only, no markdown:
 {
@@ -227,7 +298,7 @@ app.post('/api/parse-locations', async (req, res) => {
       messages: [{
         role: 'user',
         content: `Analyze this script/screenplay/lyrics and extract every distinct location or setting.
-For each location provide a name and a visual reference description (environment, lighting, time of day, atmosphere, notable visual features). Do NOT include characters or people.
+For each location provide a name prefixed with "INT." or "EXT." or "INT./EXT." exactly as it appears in the script (e.g. "INT. Coffee Shop", "EXT. Park"), and a visual reference description (environment, lighting, time of day, atmosphere, notable visual features). Do NOT include characters or people.
 
 Respond with valid JSON only, no markdown:
 { "locations": [{ "name": "string", "description": "string" }] }
@@ -315,7 +386,9 @@ app.post('/api/generate-prompt', async (req, res) => {
     const rules = customRules || (isLocation ? defaultLocationRules : defaultCharacterRules);
     const promptInstruction = isLocation
       ? `You are an expert at writing AI image generation prompts. Write a 2-sentence description of a location/setting for use in an image generation prompt.
-
+${referenceImage ? `
+IMPORTANT: A reference image is provided. Describe ONLY what is visible in that image — do not add details, objects, lighting, or atmosphere that are not clearly shown. The location is shown centered in the frame from a frontal view; include that in your description.
+` : ''}
 STRICT RULES:
 ${rules}
 
@@ -536,16 +609,151 @@ app.post('/api/generate-shot-video', async (req, res) => {
   }
 });
 
+// ── Animatic generation ──────────────────────────────────────────────────────
+const animaticUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 150 * 1024 * 1024 } });
+
+app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, res) => {
+  const { execFile } = require('child_process');
+  const os = require('os');
+  const https = require('https');
+  const http = require('http');
+
+  let tmpFiles = [];
+  const tmp = (ext) => { const p = path.join(os.tmpdir(), `sg-anim-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`); tmpFiles.push(p); return p; };
+
+  try {
+    const shots = JSON.parse(req.body.shots || '[]');
+    if (!shots.length) return res.status(400).json({ error: 'No shots provided' });
+    if (!req.file) return res.status(400).json({ error: 'No audio provided' });
+
+    // Parse timestamps to seconds
+    const toSecs = (ts) => {
+      if (!ts) return null;
+      const parts = ts.split(':').map(Number);
+      return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0] * 3600 + parts[1] * 60 + parts[2];
+    };
+
+    // Download a URL to a temp file
+    const download = (url, dest) => new Promise((resolve, reject) => {
+      const proto = url.startsWith('https') ? https : http;
+      const file = fs.createWriteStream(dest);
+      proto.get(url, r => { r.pipe(file); file.on('finish', () => { file.close(); resolve(); }); }).on('error', reject);
+    });
+
+    // Download all shot images
+    const frames = [];
+    for (const shot of shots) {
+      const secs = toSecs(shot.timestamp);
+      if (secs === null) continue;
+      let imgPath;
+      if (shot.imageUrl.startsWith('data:')) {
+        // base64 data URL
+        const m = shot.imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+        if (!m) continue;
+        imgPath = tmp('.' + m[1]);
+        fs.writeFileSync(imgPath, Buffer.from(m[2], 'base64'));
+      } else {
+        imgPath = tmp('.jpg');
+        await download(shot.imageUrl, imgPath);
+      }
+      frames.push({ imgPath, secs });
+    }
+
+    if (!frames.length) return res.status(400).json({ error: 'No valid frames' });
+    frames.sort((a, b) => a.secs - b.secs);
+
+    // Write audio to temp file
+    const audioPath = tmp('.mp3');
+    fs.writeFileSync(audioPath, req.file.buffer);
+
+    // Get audio duration via ffprobe
+    const audioDuration = await new Promise((resolve) => {
+      execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath], (err, stdout) => {
+        resolve(err ? 120 : parseFloat(stdout.trim()) || 120);
+      });
+    });
+
+    // Build concat file: each frame shown from its timestamp to the next
+    const concatPath = tmp('.txt');
+    let concatContent = '';
+    for (let i = 0; i < frames.length; i++) {
+      const start = frames[i].secs;
+      const end = i + 1 < frames.length ? frames[i + 1].secs : audioDuration;
+      const duration = Math.max(end - start, 0.1);
+      concatContent += `file '${frames[i].imgPath}'\nduration ${duration.toFixed(3)}\n`;
+    }
+    // ffmpeg concat needs final file listed twice
+    concatContent += `file '${frames[frames.length - 1].imgPath}'\n`;
+    fs.writeFileSync(concatPath, concatContent);
+
+    // Audio may start after first frame — need offset
+    const audioOffset = frames[0].secs;
+    const outputPath = tmp('.mp4');
+
+    await new Promise((resolve, reject) => {
+      const args = [
+        '-y',
+        '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-ss', String(audioOffset), '-i', audioPath,
+        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-shortest',
+        outputPath
+      ];
+      execFile('ffmpeg', args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) reject(new Error('ffmpeg failed: ' + (stderr || err.message)));
+        else resolve();
+      });
+    });
+
+    const videoBuffer = fs.readFileSync(outputPath);
+    res.set('Content-Type', 'video/mp4');
+    res.set('Content-Disposition', 'inline; filename="animatic.mp4"');
+    res.send(videoBuffer);
+  } catch(e) {
+    console.error('Animatic error:', e);
+    res.status(500).json({ error: e.message });
+  } finally {
+    tmpFiles.forEach(f => { try { fs.unlinkSync(f); } catch {} });
+  }
+});
+
+app.post('/api/create-talking-video', async (req, res) => {
+  const { imageUrl, audioUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
+  if (!audioUrl) return res.status(400).json({ error: 'audioUrl required — load audio in the Upload Script section first' });
+  log('info', 'create-talking-video started');
+  const t0 = Date.now();
+  try {
+    const r = await fal.subscribe('fal-ai/sadtalker', {
+      input: {
+        source_image_url: imageUrl,
+        driven_audio_url: audioUrl,
+        expression_scale: 1,
+        still_mode: false,
+        preprocess: 'crop',
+      }
+    });
+    const url = r?.data?.video?.url ?? null;
+    log('info', 'create-talking-video done', { url, ms: Date.now() - t0 });
+    res.json({ url });
+  } catch (e) {
+    log('error', 'create-talking-video failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/generate-char-variant', async (req, res) => {
-  const { prompt, referenceImageUrls } = req.body;
+  const { prompt, referenceImageUrls, stylePrompt } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   const refs = Array.isArray(referenceImageUrls) ? referenceImageUrls.filter(Boolean) : [];
   if (!refs.length) return res.status(400).json({ error: 'at least one character reference image required' });
   log('info', 'generate-char-variant started', { prompt, refs: refs.length });
   const t0 = Date.now();
   try {
-    // Use Kontext to edit the character reference image — preserves art style
-    const editPrompt = `Cartoon animated character illustration: ${prompt}. Keep the exact same cartoon art style, character design, fully clothed outfit, and colors. Only change the pose, facing direction, and expression as described.`;
+    const fullPrompt = stylePrompt ? `${prompt}. ${stylePrompt}` : prompt;
+    const editPrompt = `${fullPrompt}. Keep the exact same character design, fully clothed outfit, and colors from the reference image. Only change the pose, facing direction, and expression as described.`;
     const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
       input: {
         prompt: editPrompt,
@@ -582,6 +790,20 @@ app.post('/api/apply-expression', async (req, res) => {
     });
     const imageResultUrl = result?.data?.images?.[0]?.url || null;
     res.json({ imageUrl: imageResultUrl });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/apply-prompt', async (req, res) => {
+  const { imageUrl, prompt } = req.body;
+  if (!imageUrl || !prompt) return res.status(400).json({ error: 'imageUrl and prompt required' });
+  try {
+    const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
+      input: { prompt, image_url: imageUrl, aspect_ratio: '16:9', num_images: 1, safety_tolerance: '6' }
+    });
+    const url = result?.data?.images?.[0]?.url ?? null;
+    res.json({ url });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -684,6 +906,87 @@ app.post('/api/generate-vrm', async (req, res) => {
     res.json({ url });
   } catch (e) {
     log('error', 'generate-vrm failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/fix-location-prefixes', async (req, res) => {
+  const { locations, scriptText } = req.body;
+  if (!locations?.length) return res.json({ locations: [] });
+  try {
+    const locList = locations.map((l, i) => `${i + 1}. id="${l.id}" name="${l.name}"`).join('\n');
+    const scriptContext = scriptText ? `\nScript excerpt for context:\n${scriptText.slice(0, 6000)}` : '';
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `For each location below, add the correct INT., EXT., or INT./EXT. prefix to the name based on whether it is an interior, exterior, or both. If the name already has a correct prefix, leave it as-is. Preserve the original capitalisation of the rest of the name.${scriptContext}
+
+Locations:
+${locList}
+
+Return ONLY a JSON array with this exact structure — one object per location in the same order:
+[{"id":"...","name":"INT. or EXT. prefixed name"},...]`
+      }]
+    });
+    const match = message.content[0].text.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('No JSON in response');
+    res.json({ locations: JSON.parse(match[0]) });
+  } catch(e) {
+    log('error', 'fix-location-prefixes failed', { error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/cleanup-shot-fields', async (req, res) => {
+  const { shots, locations = [], characters = [], scriptText = '' } = req.body;
+  if (!shots?.length) return res.json({ shots: [] });
+  try {
+    const locList = locations.map(l => `"${l.name}" (id: ${l.id})`).join(', ');
+    const charList = characters.map(c => `"${c.name}" (id: ${c.id})`).join(', ');
+    const scriptContext = scriptText ? `\nScript for reference:\n${scriptText.slice(0, 8000)}\n` : '';
+    const input = shots.map((s, i) => `Shot ${i + 1} (id: ${s.id}):\n  audio: ${s.lyric || '(empty)'}\n  visual: ${s.description || '(empty)'}\n  currentLocation: ${s.locationName || '(none)'}\n  currentCharacters: ${s.characterNames || '(none)'}`).join('\n\n');
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: `You are cleaning up shot sequence data for a storyboard.${scriptContext}
+Available locations: ${locList || 'none'}
+Available characters: ${charList || 'none'}
+
+For each shot:
+1. "lyric": should contain ONLY lyrics, dialogue, voiceover, sound cues, or other audio content. If correct, return the same value unchanged.
+2. "description": should contain ONLY visual descriptions — what is seen on screen, camera angles, action, setting. If correct, return the same value unchanged.
+3. "suggestedLocationId": if you can identify the location for this shot from the script or content, return the matching location id from the available locations list. Return null if uncertain.
+4. "suggestedCharacterIds": array of character ids from the available characters list that appear in this shot. Return [] if uncertain.
+
+Redistribute lyric/description content only if it is clearly in the wrong field. Never duplicate content. If a field is empty and the other has mixed content, split appropriately.
+
+Return ONLY a valid JSON array, one object per shot. Escape all special characters in string values (quotes, newlines, backslashes). Do not include markdown fences or any text outside the array:
+[{"id":"...","lyric":"...","description":"...","suggestedLocationId":null,"suggestedCharacterIds":[]},...]
+
+Shots:
+${input}`
+      }]
+    });
+    const text = message.content[0].text.trim();
+    // Try direct parse first, then strip markdown fences, then find array
+    let cleaned;
+    const attempts = [
+      text,
+      text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim(),
+      (text.match(/\[[\s\S]*\]/) || [])[0],
+    ];
+    for (const attempt of attempts) {
+      if (!attempt) continue;
+      try { cleaned = JSON.parse(attempt); break; } catch {}
+    }
+    if (!cleaned) throw new Error('Could not parse JSON from response');
+    res.json({ shots: cleaned });
+  } catch(e) {
+    log('error', 'cleanup-shot-fields failed', { error: e.message });
     res.status(500).json({ error: e.message });
   }
 });
