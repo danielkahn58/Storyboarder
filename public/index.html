@@ -705,10 +705,18 @@
        CARD LAYOUT: Character Variations
        2-column grid, single column below 400px
        ══════════════════════════════════════════ */
-    /* Make angle/loc subrows fill full card width */
-    .char-angle-row, .loc-shot-row { display: block !important; width: 100%; }
+    /* Make angle/loc subrows fill full card width when visible */
+    /* No display:block !important — inline style="display:none" must still win */
+    .char-angle-row, .loc-shot-row { width: 100%; }
     .char-angle-row > td, .loc-shot-row > td { display: block; width: 100%; box-sizing: border-box; padding: 0; }
     .char-angle-inner { width: 100%; }
+
+    /* Fix image overflow in variation cards */
+    .loc-shot-img-slot { width: auto !important; }
+    .loc-shot-img-slot img { width: 100% !important; height: auto !important; }
+    .angle-img-slot { width: 100% !important; height: auto !important; aspect-ratio: 1; }
+    .angle-img-slot img { width: 100% !important; height: 100% !important; }
+    .img-slot { max-width: 100%; }
 
     .angle-subtable thead { display: none; }
     .angle-subtable { display: block; width: 100%; }

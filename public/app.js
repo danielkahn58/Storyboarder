@@ -313,9 +313,9 @@ function extractImages(data) {
   const imgs = { chars: {}, locs: {}, shots: {} };
   const chars = (data.characters || []).map(c => {
     imgs.chars[c.id] = { images: c.images, referenceImage: c.referenceImage, expressionCache: c.expressionCache,
-      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { image: v.image }])) : {} };
+      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {} };
     return { ...c, images: [], referenceImage: null, expressionCache: {},
-      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt }])) : {} };
+      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt, useRef: v.useRef || false }])) : {} };
   });
   const locs = (data.locations || []).map(l => {
     imgs.locs[l.id] = { images: l.images, referenceImage: l.referenceImage,
@@ -339,7 +339,7 @@ function mergeImages(data, imgs) {
     const ci = imgs.chars?.[c.id] || {};
     const angles = { ...c.angles };
     for (const [k, v] of Object.entries(ci.angles || {})) {
-      angles[k] = { ...(angles[k] || {}), image: v.image };
+      angles[k] = { ...(angles[k] || {}), image: v.image, refImage: v.refImage || null };
     }
     return { ...c, images: ci.images || [], referenceImage: ci.referenceImage || null,
       expressionCache: ci.expressionCache || {}, angles };
@@ -1820,17 +1820,29 @@ function charAngleRowsInnerHTML(c) {
   const standardRows = CHAR_ANGLES.map(angle => {
     const d = c.angles?.[angle] || {};
     const isMirror = !!MIRROR_PAIRS[angle];
-    const imgHTML = d.image
-      ? `<img src="${esc(d.image)}" alt="${esc(angle)}">`
+    const refImg = d.refImage;
+    const effectiveImg = d.useRef && refImg ? refImg.dataUrl : d.image;
+    const imgHTML = effectiveImg
+      ? `<img src="${esc(effectiveImg)}" alt="${esc(angle)}">`
       : `<span class="placeholder">·</span>`;
     const labelHTML = isMirror
       ? `${esc(angle)} <span style="color:#555;font-size:9px">🪞</span>`
       : esc(angle);
+    const refHtml = refImg
+      ? `<div style="position:relative;display:inline-block">
+           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${d.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleCharAngleUseRef('${c.id}','${angle}')" title="${d.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <button onclick="removeCharAngleRefImage('${c.id}','${angle}')" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
+         </div>`
+      : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleCharAngleRefUpload('${c.id}','${angle}',this)"></label>`;
     return `<tr>
       <td class="angle-label" data-label="Variation">${labelHTML}</td>
       ${isMirror ? `<td data-label="Prompt" style="color:#383838;font-size:10px;font-style:italic;vertical-align:middle">Mirrored from ${esc(MIRROR_PAIRS[angle])}</td>` : `<td data-label="Prompt"><textarea class="angle-prompt-field" data-angle="${esc(angle)}" rows="3" oninput="debouncedSave()">${esc(d.prompt || '')}</textarea></td>`}
+      <td data-label="Ref Image" style="width:52px">${isMirror ? '' : refHtml}</td>
       <td data-label="Image"><div class="angle-img-slot" id="angle-img-${c.id}-${angle.replace(/\W/g,'_')}">${imgHTML}</div></td>
-      <td><button class="btn btn-regen" onclick="regenerateCharAngle('${c.id}','${angle}')">${isMirror ? '🪞 Re-mirror' : '↺ Regenerate'}</button></td>
+      <td>
+        <button class="btn btn-regen" onclick="regenerateCharAngle('${c.id}','${angle}')">${isMirror ? '🪞 Re-mirror' : '↺ Regenerate'}</button>
+        ${!isMirror && refImg ? `<button onclick="toggleCharAngleUseRef('${c.id}','${angle}')" style="display:block;margin-top:4px;background:${d.useRef ? '#1a2a1a' : 'none'};border:1px solid ${d.useRef ? '#4ade80' : '#2a2a2a'};border-radius:3px;color:${d.useRef ? '#4ade80' : '#666'};font-size:10px;padding:2px 6px;cursor:pointer;width:100%;white-space:nowrap">${d.useRef ? '📷 Using Ref' : '📷 Use Ref'}</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
 
@@ -1855,7 +1867,7 @@ function charAngleRowHTML(c) {
     <td colspan="6">
       <div class="char-angle-inner">
         <table class="angle-subtable">
-          <thead><tr><th>Variation</th><th>Prompt</th><th>Image</th><th></th></tr></thead>
+          <thead><tr><th>Variation</th><th>Prompt</th><th>Ref</th><th>Image</th><th></th></tr></thead>
           <tbody>${charAngleRowsInnerHTML(c)}</tbody>
         </table>
       </div>
@@ -2792,6 +2804,44 @@ async function generateLocCustomView(id, idx) {
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Generate'; } }
 }
 
+function handleCharAngleRefUpload(charId, angle, input) {
+  const file = input.files?.[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    const char = characters.find(c => c.id === charId);
+    if (!char) return;
+    if (!char.angles) char.angles = {};
+    if (!char.angles[angle]) char.angles[angle] = {};
+    char.angles[angle].refImage = { dataUrl, base64, mediaType: file.type };
+    autoSave(); renderCharacters();
+    // Re-open the angle row
+    const row = document.getElementById(`char-angles-${charId}`);
+    if (row) row.style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeCharAngleRefImage(charId, angle) {
+  const char = characters.find(c => c.id === charId);
+  if (!char?.angles?.[angle]) return;
+  delete char.angles[angle].refImage;
+  delete char.angles[angle].useRef;
+  autoSave(); renderCharacters();
+  const row = document.getElementById(`char-angles-${charId}`);
+  if (row) row.style.display = '';
+}
+
+function toggleCharAngleUseRef(charId, angle) {
+  const char = characters.find(c => c.id === charId);
+  if (!char?.angles?.[angle]) return;
+  char.angles[angle].useRef = !char.angles[angle].useRef;
+  autoSave(); renderCharacters();
+  const row = document.getElementById(`char-angles-${charId}`);
+  if (row) row.style.display = '';
+}
+
 function handleLocAngleRefUpload(locId, angle, input) {
   const file = input.files?.[0]; if (!file) return;
   const reader = new FileReader();
@@ -3117,7 +3167,7 @@ function toggleCharAngles(id) {
   const angleRow = document.getElementById(`char-angles-${id}`);
   if (!angleRow) return;
   const hidden = angleRow.style.display === 'none' || angleRow.style.display === '';
-  angleRow.style.display = hidden ? 'table-row' : 'none';
+  angleRow.style.display = hidden ? '' : 'none'; // '' lets CSS handle display (table-row on desktop, block on mobile)
   document.querySelectorAll(`#characters-body tr[data-id="${id}"] .btn-toggle-angles`).forEach(btn => {
     btn.textContent = hidden ? '▼ Variations' : '▶ Variations';
   });
@@ -3398,8 +3448,9 @@ async function regenerateCharAngle(id, angle) {
   const anglePrompt = anglePromptField?.value.trim() || buildAnglePrompt(char, angle);
   if (anglePromptField && !anglePromptField.value.trim()) anglePromptField.value = anglePrompt;
 
-  const refUrl = char.images?.[0] || char.referenceImage?.dataUrl || null;
-  if (!refUrl) { showToast('Generate the front image first.', true); return; }
+  const angleRefImage = char.angles?.[angle]?.refImage;
+  let refUrl = angleRefImage?.dataUrl || char.images?.[0] || char.referenceImage?.dataUrl || null;
+  if (!refUrl) { showToast('Generate the front image first, or upload a ref image for this angle.', true); return; }
 
   const btn = slotEl?.closest('tr')?.querySelector('.btn-regen');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
@@ -3409,6 +3460,15 @@ async function regenerateCharAngle(id, angle) {
   const mirrorAngle = Object.keys(MIRROR_PAIRS).find(k => MIRROR_PAIRS[k] === angle);
   const mirrorSlot = mirrorAngle ? document.getElementById(`angle-img-${id}-${mirrorAngle.replace(/\W/g, '_')}`) : null;
   if (mirrorSlot) mirrorSlot.innerHTML = '<span class="spinner"></span>';
+
+  // If ref image is a dataUrl (not a CDN URL), upload it first
+  if (refUrl.startsWith('data:')) {
+    try {
+      const src = angleRefImage || char.referenceImage;
+      const uploaded = await apiFetch('/api/upload-reference', { base64: src.base64, mediaType: src.mediaType });
+      refUrl = uploaded.url;
+    } catch(e) { /* fall back to dataUrl if upload fails */ }
+  }
 
   try {
     const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });
