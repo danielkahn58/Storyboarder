@@ -539,41 +539,304 @@
 
   /* ── Mobile ── */
   @media (max-width: 768px) {
+    /* ── Nav & header ── */
     .table-wrap { padding: 8px 12px; }
     .section-nav { overflow-x: auto; flex-wrap: nowrap; padding: 0 12px; gap: 0; }
     .section-nav-btn { font-size: 11px; padding: 8px 10px; white-space: nowrap; }
     .section-header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
     .section-header h2 { font-size: 15px; }
+    .section-header > div { flex-wrap: wrap; }
     .bottom-bar { padding: 8px 16px; }
 
-    /* Characters & Locations: hide less critical columns, let key ones show */
-    .char-table col.col-prompt,
-    .char-table col.col-images { display: none; }
-    .char-table .field-prompt,
-    .char-table .col-images { display: none; }
-
-    /* Shot table: show only the most important columns, hide the rest */
-    .shot-table col.col-imgprompt,
-    .shot-table col.col-vidprompt,
-    .shot-table col.col-angle,
-    .shot-table col.col-movement,
-    .shot-table col.col-position { display: none; }
-    .shot-table .field-imgprompt,
-    .shot-table .field-vidprompt,
-    .shot-table .field-angle,
-    .shot-table .field-movement { display: none; }
-    /* hide th/td for hidden cols by nth-child isn't reliable; use overflow scroll instead */
-
-    /* General mobile table approach: just let them scroll horizontally */
-    .char-table, .shot-table { min-width: 600px; }
-    .shot-table { min-width: 900px; }
-
-    /* Stack section header actions */
-    .section-header > div { flex-wrap: wrap; }
-
-    /* Compose / editor */
+    /* ── Compose / editor ── */
     #compose-modal .compose-body { flex-direction: column; }
     #compose-sidebar { width: 100%; max-height: 200px; overflow-y: auto; border-left: none; border-top: 1px solid #1a1a1a; }
+
+    /* ══════════════════════════════════════════
+       CARD LAYOUT: Characters & Locations
+       Each <tr data-id> becomes a card.
+       Columns reflow via flex-wrap.
+       ══════════════════════════════════════════ */
+    .char-table colgroup,
+    .char-table thead { display: none; }
+
+    .char-table,
+    .char-table tbody { display: block; }
+
+    /* Each entity row = a card */
+    .char-table tbody tr[data-id] {
+      display: flex;
+      flex-wrap: wrap;
+      border: 1px solid #222;
+      border-radius: 8px;
+      margin-bottom: 14px;
+      background: #0c0c0c;
+      overflow: hidden;
+    }
+
+    /* Subrows (variations) keep normal block flow */
+    .char-table tbody tr:not([data-id]) { display: block; }
+
+    /* All cells: full width by default, padding, label */
+    .char-table tbody tr[data-id] > td {
+      display: block;
+      flex: 0 0 100%;
+      padding: 10px 12px;
+      border-bottom: 1px solid #181818;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .char-table tbody tr[data-id] > td:last-child { border-bottom: none; }
+
+    /* Field labels via data-label */
+    .char-table tbody tr[data-id] > td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #444;
+      margin-bottom: 5px;
+    }
+
+    /* Name cell (1st): takes ~60% width, floats left */
+    .char-table tbody tr[data-id] > td:nth-child(1) {
+      flex: 1 1 55%;
+      border-right: 1px solid #181818;
+      border-bottom: 1px solid #181818;
+    }
+
+    /* Ref image cell (3rd): sits right of name — suppress label (upload hint is self-explanatory) */
+    .char-table tbody tr[data-id] > td:nth-child(3) {
+      flex: 0 0 90px;
+      border-bottom: 1px solid #181818;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+    }
+    .char-table tbody tr[data-id] > td:nth-child(3)::before { display: none; }
+    .char-table tbody tr[data-id] > td:nth-child(3) .ref-img-preview {
+      width: 70px;
+      height: 70px;
+    }
+
+    /* Actions cell: wrap buttons */
+    .char-table .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .char-table .actions .btn {
+      flex: 1 1 auto;
+      min-width: 120px;
+      font-size: 11px;
+    }
+
+    /* ══════════════════════════════════════════
+       CARD LAYOUT: Location Variations
+       (.loc-shot-table inside the subrow)
+       ══════════════════════════════════════════ */
+    .loc-shot-table thead { display: none; }
+    .loc-shot-table { display: block; width: 100%; }
+    .loc-shot-table tbody { display: block; }
+
+    .loc-shot-table tbody tr {
+      display: flex;
+      flex-wrap: wrap;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      background: #090909;
+      overflow: hidden;
+    }
+
+    .loc-shot-table tbody tr > td {
+      display: block;
+      flex: 0 0 100%;
+      padding: 8px 10px;
+      border-bottom: 1px solid #141414;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .loc-shot-table tbody tr > td:last-child { border-bottom: none; }
+
+    .loc-shot-table tbody tr > td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #3a3a3a;
+      margin-bottom: 4px;
+    }
+
+    /* Variation name: ~60%, ref image: ~80px, side by side */
+    .loc-shot-table tbody tr > td:nth-child(1) {
+      flex: 1 1 55%;
+      border-right: 1px solid #141414;
+      border-bottom: 1px solid #141414;
+    }
+    .loc-shot-table tbody tr > td:nth-child(3) {
+      flex: 0 0 80px;
+      border-bottom: 1px solid #141414;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+    }
+
+    /* ══════════════════════════════════════════
+       CARD LAYOUT: Character Variations
+       (.angle-subtable)
+       ══════════════════════════════════════════ */
+    .angle-subtable thead { display: none; }
+    .angle-subtable { display: block; width: 100%; }
+    .angle-subtable tbody { display: block; }
+
+    .angle-subtable tbody tr {
+      display: flex;
+      flex-wrap: wrap;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      background: #090909;
+      overflow: hidden;
+    }
+
+    .angle-subtable tbody tr > td {
+      display: block;
+      flex: 0 0 100%;
+      padding: 8px 10px;
+      border-bottom: 1px solid #141414;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .angle-subtable tbody tr > td:last-child { border-bottom: none; }
+
+    .angle-subtable tbody tr > td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #3a3a3a;
+      margin-bottom: 4px;
+    }
+
+    /* Angle name: flex 1, action button: auto, side by side */
+    .angle-subtable tbody tr > td:nth-child(1) {
+      flex: 1 1 auto;
+      border-right: 1px solid #141414;
+      border-bottom: 1px solid #141414;
+    }
+    .angle-subtable tbody tr > td:nth-child(4) {
+      flex: 0 0 auto;
+      border-bottom: 1px solid #141414;
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+    }
+
+    /* ══════════════════════════════════════════
+       CARD LAYOUT: Shot Sequence
+       ══════════════════════════════════════════ */
+    .shot-table colgroup,
+    .shot-table thead { display: none; }
+
+    .shot-table,
+    .shot-table tbody { display: block; }
+
+    .shot-table tbody tr[data-id] {
+      display: flex;
+      flex-wrap: wrap;
+      border: 1px solid #222;
+      border-radius: 8px;
+      margin-bottom: 14px;
+      background: #0c0c0c;
+      overflow: hidden;
+    }
+
+    .shot-table tbody tr:not([data-id]) { display: block; }
+
+    .shot-table tbody tr[data-id] > td {
+      display: block;
+      flex: 0 0 100%;
+      padding: 10px 12px;
+      border-bottom: 1px solid #181818;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .shot-table tbody tr[data-id] > td:last-child { border-bottom: none; }
+
+    .shot-table tbody tr[data-id] > td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #444;
+      margin-bottom: 5px;
+    }
+
+    /* Controls: card header bar */
+    .shot-table tbody tr[data-id] > td.shot-card-controls {
+      flex: 1 1 auto;
+      background: #111;
+      border-bottom: 1px solid #1e1e1e;
+      padding: 8px 12px;
+    }
+    .shot-card-controls .order-btns { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+    .shot-card-controls .btn-ord { min-width: 32px; flex-shrink: 0; }
+
+    /* Timestamp: sits right of controls in header row */
+    .shot-table tbody tr[data-id] > td.shot-card-timestamp {
+      flex: 0 0 80px;
+      background: #111;
+      border-bottom: 1px solid #1e1e1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+    }
+
+    /* Characters + Location: side by side */
+    .shot-table tbody tr[data-id] > td.shot-card-chars {
+      flex: 1 1 55%;
+      border-right: 1px solid #181818;
+      border-bottom: 1px solid #181818;
+    }
+    .shot-table tbody tr[data-id] > td.shot-card-loc {
+      flex: 0 0 130px;
+      border-bottom: 1px solid #181818;
+    }
+
+    /* Size + Movement: side by side */
+    .shot-table tbody tr[data-id] > td.shot-card-size {
+      flex: 1 1 45%;
+      border-right: 1px solid #181818;
+      border-bottom: 1px solid #181818;
+    }
+    .shot-table tbody tr[data-id] > td.shot-card-movement {
+      flex: 1 1 45%;
+      border-bottom: 1px solid #181818;
+    }
+
+    /* Shot actions */
+    .shot-table .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .shot-table .actions .btn {
+      flex: 1 1 auto;
+      min-width: 110px;
+      font-size: 11px;
+    }
   }
 </style>
 </head>

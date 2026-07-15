@@ -1247,10 +1247,10 @@ function locAngleRowHTML(l) {
          </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocAngleRefUpload('${l.id}','${angle}',this)"></label>`;
     return `<tr>
-      <td class="loc-shot-label">${esc(angle)}</td>
-      <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocAnglePromptChange('${l.id}','${angle}',this.value)">${esc(entry.prompt || '')}</textarea></td>
-      <td style="width:52px">${refHtml}</td>
-      <td class="loc-shot-img-slot" id="loc-angle-img-${l.id}-${key}">${angleImgHtml}</td>
+      <td class="loc-shot-label" data-label="Variation">${esc(angle)}</td>
+      <td data-label="Prompt"><textarea class="loc-angle-prompt" rows="3" oninput="onLocAnglePromptChange('${l.id}','${angle}',this.value)">${esc(entry.prompt || '')}</textarea></td>
+      <td data-label="Ref Image" style="width:52px">${refHtml}</td>
+      <td class="loc-shot-img-slot" data-label="Image" id="loc-angle-img-${l.id}-${key}">${angleImgHtml}</td>
       <td>
         <button class="btn-regen-angle" onclick="generateLocAngleSingle('${l.id}','${angle}')">Regenerate</button>
         ${refImg ? `<button onclick="toggleLocAngleUseRef('${l.id}','${angle}')" style="display:block;margin-top:4px;background:${entry.useRef ? '#1a2a1a' : 'none'};border:1px solid ${entry.useRef ? '#4ade80' : '#2a2a2a'};border-radius:3px;color:${entry.useRef ? '#4ade80' : '#666'};font-size:10px;padding:2px 6px;cursor:pointer;width:100%;white-space:nowrap">${entry.useRef ? '📷 Using Ref' : '📷 Use Ref'}</button>` : ''}
@@ -1273,10 +1273,10 @@ function locAngleRowHTML(l) {
          </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocCustomRefUpload('${l.id}',${i},this)"></label>`;
     return `<tr>
-      <td class="loc-shot-label"><input type="text" value="${esc(cv.name)}" placeholder="View name…" style="width:100%;background:#111;border:1px solid #222;border-radius:3px;color:#ccc;font-size:11px;padding:3px 5px" oninput="onLocCustomViewNameChange('${l.id}',${i},this.value)"></td>
-      <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocCustomViewPromptChange('${l.id}',${i},this.value)">${esc(cv.prompt || '')}</textarea></td>
-      <td style="width:52px">${refHtml}</td>
-      <td class="loc-shot-img-slot" id="loc-custom-img-${l.id}-${i}">${cvImgHtml}</td>
+      <td class="loc-shot-label" data-label="Variation"><input type="text" value="${esc(cv.name)}" placeholder="View name…" style="width:100%;background:#111;border:1px solid #222;border-radius:3px;color:#ccc;font-size:11px;padding:3px 5px" oninput="onLocCustomViewNameChange('${l.id}',${i},this.value)"></td>
+      <td data-label="Prompt"><textarea class="loc-angle-prompt" rows="3" oninput="onLocCustomViewPromptChange('${l.id}',${i},this.value)">${esc(cv.prompt || '')}</textarea></td>
+      <td data-label="Ref Image" style="width:52px">${refHtml}</td>
+      <td class="loc-shot-img-slot" data-label="Image" id="loc-custom-img-${l.id}-${i}">${cvImgHtml}</td>
       <td>
         <button class="btn-regen-angle" onclick="generateLocCustomView('${l.id}',${i})">Generate</button>
         ${refImg ? `<button onclick="toggleLocCustomViewUseRef('${l.id}',${i})" style="display:block;margin-top:4px;background:${cv.useRef ? '#1a2a1a' : 'none'};border:1px solid ${cv.useRef ? '#4ade80' : '#2a2a2a'};border-radius:3px;color:${cv.useRef ? '#4ade80' : '#666'};font-size:10px;padding:2px 6px;cursor:pointer;width:100%;white-space:nowrap">${cv.useRef ? '📷 Using Ref' : '📷 Use Ref'}</button>` : ''}
@@ -1678,14 +1678,14 @@ function charRowHTML(c) {
         <button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
       </div>
     </td>
-    <td><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
-    <td>
+    <td data-label="Description"><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
+    <td data-label="Reference Image">
       <div class="ref-img-cell">
         <div class="ref-img-preview" onclick="triggerImageUpload('${c.id}')">${refImgHTML}</div>
         <input type="file" id="file-${c.id}" class="hidden" accept="image/*" onchange="handleImageUpload('${c.id}', this)">
       </div>
     </td>
-    <td>
+    <td data-label="Prompt">
       <div class="char-prompt-section">
         <span class="char-prompt-label">Character Description</span>
         <textarea class="field-prompt" rows="3" placeholder="Describe the character's appearance…" oninput="debouncedSave()">${esc(c.prompt)}</textarea>
@@ -1695,7 +1695,7 @@ function charRowHTML(c) {
         <div class="char-prompt-static char-style-preview">${esc(getStylePrompt()) || '(no style selected)'}</div>
       </div>
     </td>
-    <td>
+    <td data-label="Generated Image">
       <div class="char-front-wrap">
         <div class="char-front-slot" id="char-front-${c.id}">${frontHTML}</div>
         <select class="expr-select" id="expr-${c.id}" onchange="applyCharExpression('${c.id}')">
@@ -1729,13 +1729,10 @@ function charAngleRowsInnerHTML(c) {
     const labelHTML = isMirror
       ? `${esc(angle)} <span style="color:#555;font-size:9px">🪞</span>`
       : esc(angle);
-    const promptCell = isMirror
-      ? `<td style="color:#383838;font-size:10px;font-style:italic;vertical-align:middle">Mirrored from ${esc(MIRROR_PAIRS[angle])}</td>`
-      : `<td><textarea class="angle-prompt-field" data-angle="${esc(angle)}" rows="3" oninput="debouncedSave()">${esc(d.prompt || '')}</textarea></td>`;
     return `<tr>
-      <td class="angle-label">${labelHTML}</td>
-      ${promptCell}
-      <td><div class="angle-img-slot" id="angle-img-${c.id}-${angle.replace(/\W/g,'_')}">${imgHTML}</div></td>
+      <td class="angle-label" data-label="Variation">${labelHTML}</td>
+      ${isMirror ? `<td data-label="Prompt" style="color:#383838;font-size:10px;font-style:italic;vertical-align:middle">Mirrored from ${esc(MIRROR_PAIRS[angle])}</td>` : `<td data-label="Prompt"><textarea class="angle-prompt-field" data-angle="${esc(angle)}" rows="3" oninput="debouncedSave()">${esc(d.prompt || '')}</textarea></td>`}
+      <td data-label="Image"><div class="angle-img-slot" id="angle-img-${c.id}-${angle.replace(/\W/g,'_')}">${imgHTML}</div></td>
       <td><button class="btn btn-regen" onclick="regenerateCharAngle('${c.id}','${angle}')">${isMirror ? '🪞 Re-mirror' : '↺ Regenerate'}</button></td>
     </tr>`;
   }).join('');
@@ -1787,14 +1784,14 @@ function locRowHTML(l) {
         <button class="btn-toggle-shot-angles" onclick="toggleLocAngles('${l.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
       </div>
     </td>
-    <td><textarea class="field-ref" rows="3" placeholder="Describe environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.reference)}</textarea></td>
-    <td>
+    <td data-label="Description"><textarea class="field-ref" rows="3" placeholder="Describe environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.reference)}</textarea></td>
+    <td data-label="Reference Image">
       <div class="ref-img-cell">
         <div class="ref-img-preview" onclick="${l.referenceImage ? `toggleLocUseRef('${l.id}')` : `triggerLocImageUpload('${l.id}')`}">${refImgHTML}</div>
         <input type="file" id="locfile-${l.id}" class="hidden" accept="image/*" onchange="handleLocImageUpload('${l.id}', this)">
       </div>
     </td>
-    <td>
+    <td data-label="Prompt">
       <div class="char-prompt-section">
         <span class="char-prompt-label">Location Description</span>
         <textarea class="field-prompt" rows="3" placeholder="Describe the environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.prompt)}</textarea>
@@ -1802,7 +1799,7 @@ function locRowHTML(l) {
         <div class="char-prompt-static char-style-preview">${esc(getStylePrompt()) || '(no style selected)'}</div>
       </div>
     </td>
-    <td><div class="images-grid" id="loc-imgs-${l.id}">${imgsHTML}</div></td>
+    <td data-label="Image"><div class="images-grid" id="loc-imgs-${l.id}">${imgsHTML}</div></td>
     <td>
       <div class="actions">
         <button class="btn btn-gen-prompt" onclick="generateLocPrompt('${l.id}')">Generate Prompt</button>
@@ -1828,17 +1825,17 @@ function shotRowHTML(s, idx) {
   const angleOpts = SHOT_ANGLES.map(v => `<option${s.shotAngle === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
   const moveOpts = SHOT_MOVEMENTS.map(v => `<option${s.shotMovement === v ? ' selected' : ''}>${esc(v)}</option>`).join('');
   return `<tr data-id="${s.id}">
-    <td><div class="order-btns">
+    <td class="shot-card-controls"><div class="order-btns">
       <button class="btn-ord" onclick="moveShot('${s.id}',-1)" ${idx===0?'disabled':''}>▲</button>
       <button class="btn-ord" onclick="moveShot('${s.id}',1)" ${idx===shots.length-1?'disabled':''}>▼</button>
       <button class="btn-ord btn-detail-toggle" onclick="toggleShotDetail('${s.id}')" title="Character details">▶</button>
       <button class="btn-ord" onclick="addShotAfter('${s.id}')" title="Add shot below" style="color:#4ade80;border-color:#254a31">+</button>
       <button class="btn-ord" onclick="deleteShot('${s.id}')" title="Delete shot" style="color:#e05050;border-color:#4a1a1a">✕</button>
     </div></td>
-    <td style="text-align:center">
+    <td class="shot-card-timestamp" style="text-align:center">
       <input type="text" class="field-timestamp" placeholder="0:00" value="${esc(s.timestamp || '')}" data-shot-id="${esc(s.id)}" oninput="debouncedSave();onTimestampInput(this)" style="width:60px;font-size:11px;font-family:monospace;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:3px 5px">
     </td>
-    <td>
+    <td data-label="Audio">
       ${s.missingFromScript ? `<div class="missing-from-script-flag" style="margin-bottom:4px">Missing from script — <button onclick="deleteShot('${s.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissShotMissingFlag('${s.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
       <textarea class="field-lyric" rows="3" placeholder="Audio / lyric…" oninput="debouncedSave()">${esc(s.lyric)}</textarea>
       <div style="display:flex;gap:4px;margin-top:4px">
@@ -1846,20 +1843,20 @@ function shotRowHTML(s, idx) {
         <button class="btn-retry-timestamp" onclick="retryTimestampForShot('${esc(s.id)}')" title="Retry timestamp from transcript" style="background:none;border:1px solid #222;border-radius:3px;color:#555;font-size:10px;padding:2px 6px;cursor:pointer">↻</button>
       </div>
     </td>
-    <td><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
-    <td><div class="char-checks">${charChecks}</div></td>
-    <td><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select>
+    <td data-label="Visual"><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
+    <td class="shot-card-chars" data-label="Characters"><div class="char-checks">${charChecks}</div></td>
+    <td class="shot-card-loc" data-label="Location"><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select>
 <div class="shot-ref-zone" onclick="triggerShotRefUpload('${s.id}')" title="Reference photo — overrides location when generating images">
   ${s.refImage
     ? `<img src="${esc(s.refImage.dataUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:3px"><button class="shot-ref-remove" onclick="removeShotRefImage('${s.id}',event)">✕</button>`
     : `<span>📷</span><span style="font-size:8px">Ref</span>`}
 </div>
 <input type="file" id="shotref-${s.id}" accept="image/*" capture="environment" style="display:none" onchange="handleShotRefUpload('${s.id}',this)"></td>
-    <td><select class="field-size" onchange="autoSave()">${sizeOpts}</select></td>
-    <td><select class="field-movement" onchange="autoSave()">${moveOpts}</select></td>
-    <td><textarea class="field-imgprompt" rows="3" placeholder="Image prompt (opening frame)…" oninput="debouncedSave()">${esc(s.imagePrompt)}</textarea></td>
-    <td><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea></td>
-    <td><div class="images-grid" id="shot-imgs-${s.id}">${imgsHTML}</div></td>
+    <td class="shot-card-size" data-label="Size"><select class="field-size" onchange="autoSave()">${sizeOpts}</select></td>
+    <td class="shot-card-movement" data-label="Movement"><select class="field-movement" onchange="autoSave()">${moveOpts}</select></td>
+    <td data-label="Image Prompt"><textarea class="field-imgprompt" rows="3" placeholder="Image prompt (opening frame)…" oninput="debouncedSave()">${esc(s.imagePrompt)}</textarea></td>
+    <td data-label="Video Prompt"><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea></td>
+    <td data-label="Generated Images"><div class="images-grid" id="shot-imgs-${s.id}">${imgsHTML}</div></td>
     <td>
       <div class="final-image-cell" id="final-img-${s.id}">
         ${(() => {
@@ -2922,9 +2919,17 @@ async function generateLocImages(id) {
   const grid = document.getElementById(`loc-imgs-${id}`);
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…'; }
   grid.innerHTML = loadingSlots(1);
-  const fullLocPrompt = [prompt, getStylePrompt()].filter(Boolean).join('\n\n');
+  const stylePrompt = getStylePrompt();
+  // If a reference image is uploaded, use kontext to keep visual consistency with it
+  let locImageUrls = [];
+  if (loc?.referenceImage) {
+    try {
+      const uploaded = await apiFetch('/api/upload-reference', { base64: loc.referenceImage.base64, mediaType: loc.referenceImage.mediaType });
+      locImageUrls = [uploaded.url];
+    } catch(e) { /* fall back to pure AI if upload fails */ }
+  }
   try {
-    const data = await apiFetch('/api/generate-images', { prompt: fullLocPrompt, stylePrompt: '' });
+    const data = await apiFetch('/api/generate-shot-images', { prompt, stylePrompt, locImageUrls });
     const imgs = data.images.slice(0, 1);
     if (loc) { loc.images = imgs; loc.useRefAsDefault = false; }
     grid.innerHTML = imageSlots(imgs, 1);
