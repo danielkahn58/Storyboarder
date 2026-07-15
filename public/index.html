@@ -711,7 +711,7 @@
       <thead>
         <tr>
           <th>Location name</th><th>Reference description</th><th>Reference image</th>
-          <th>Prompt</th><th>AI Generated Images</th><th>Actions</th>
+          <th>Prompt</th><th>Image</th><th>Actions</th>
         </tr>
       </thead>
       <tbody id="locations-body"></tbody>
@@ -727,6 +727,7 @@
     <span id="shots-section-title" style="font-weight:600;font-size:14px">Shot Sequence</span>
     <div id="shots-tab-actions" style="display:flex;gap:8px;align-items:center">
       <button class="btn-upload" id="btn-gen-shots" onclick="generateShotSequence()" style="font-size:12px;padding:6px 14px;">Generate Shot Sequence</button>
+      <button class="btn-upload" id="btn-gen-missing-shot-prompts" onclick="generateMissingShotPrompts()" style="font-size:12px;padding:6px 14px;background:#1a1a1a;color:#aaa;border-color:#333;">Generate Missing Prompts</button>
       <button class="btn-upload" id="btn-cleanup-shots" onclick="cleanupShotFields()" style="font-size:12px;padding:6px 14px;background:#161626;border-color:#3a3a6a;color:#a5b4fc" title="Use AI to sort existing shot data into the correct Audio and Visual Description columns">✦ Clean Up Fields</button>
     </div>
     <div id="avscript-tab-actions" style="display:none;gap:8px;align-items:center">

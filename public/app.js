@@ -1237,16 +1237,24 @@ function locAngleRowHTML(l) {
     const imgHtml = img
       ? `<img src="${esc(img)}" alt="${esc(angle)}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
+    const angleImgHtml = entry.useRef && refImg
+      ? `<img src="${esc(refImg.dataUrl)}" alt="${esc(angle)}">`
+      : imgHtml;
     const refHtml = refImg
-      ? `<img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer" onclick="removeLocAngleRefImage('${l.id}','${angle}')">
-         <div style="font-size:9px;color:#555;margin-top:2px">click to remove</div>`
+      ? `<div style="position:relative;display:inline-block">
+           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${entry.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocAngleUseRef('${l.id}','${angle}')" title="${entry.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <button onclick="removeLocAngleRefImage('${l.id}','${angle}')" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
+         </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocAngleRefUpload('${l.id}','${angle}',this)"></label>`;
     return `<tr>
       <td class="loc-shot-label">${esc(angle)}</td>
       <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocAnglePromptChange('${l.id}','${angle}',this.value)">${esc(entry.prompt || '')}</textarea></td>
       <td style="width:52px">${refHtml}</td>
-      <td class="loc-shot-img-slot" id="loc-angle-img-${l.id}-${key}">${imgHtml}</td>
-      <td><button class="btn-regen-angle" onclick="generateLocAngleSingle('${l.id}','${angle}')">Regenerate</button></td>
+      <td class="loc-shot-img-slot" id="loc-angle-img-${l.id}-${key}">${angleImgHtml}</td>
+      <td>
+        <button class="btn-regen-angle" onclick="generateLocAngleSingle('${l.id}','${angle}')">Regenerate</button>
+        ${refImg ? `<button onclick="toggleLocAngleUseRef('${l.id}','${angle}')" style="display:block;margin-top:4px;background:${entry.useRef ? '#1a2a1a' : 'none'};border:1px solid ${entry.useRef ? '#4ade80' : '#2a2a2a'};border-radius:3px;color:${entry.useRef ? '#4ade80' : '#666'};font-size:10px;padding:2px 6px;cursor:pointer;width:100%;white-space:nowrap">${entry.useRef ? '📷 Using Ref' : '📷 Use Ref'}</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
   const customRows = l.customViews.map((cv, i) => {
@@ -1255,17 +1263,23 @@ function locAngleRowHTML(l) {
     const imgHtml = img
       ? `<img src="${esc(img)}" alt="${esc(cv.name || '')}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
+    const cvImgHtml = cv.useRef && refImg
+      ? `<img src="${esc(refImg.dataUrl)}" alt="${esc(cv.name || '')}">`
+      : imgHtml;
     const refHtml = refImg
-      ? `<img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer" onclick="removeLocCustomRefImage('${l.id}',${i})">
-         <div style="font-size:9px;color:#555;margin-top:2px">click to remove</div>`
+      ? `<div style="position:relative;display:inline-block">
+           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${cv.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocCustomViewUseRef('${l.id}',${i})" title="${cv.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <button onclick="removeLocCustomRefImage('${l.id}',${i})" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
+         </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocCustomRefUpload('${l.id}',${i},this)"></label>`;
     return `<tr>
       <td class="loc-shot-label"><input type="text" value="${esc(cv.name)}" placeholder="View name…" style="width:100%;background:#111;border:1px solid #222;border-radius:3px;color:#ccc;font-size:11px;padding:3px 5px" oninput="onLocCustomViewNameChange('${l.id}',${i},this.value)"></td>
       <td><textarea class="loc-angle-prompt" rows="3" oninput="onLocCustomViewPromptChange('${l.id}',${i},this.value)">${esc(cv.prompt || '')}</textarea></td>
       <td style="width:52px">${refHtml}</td>
-      <td class="loc-shot-img-slot" id="loc-custom-img-${l.id}-${i}">${imgHtml}</td>
+      <td class="loc-shot-img-slot" id="loc-custom-img-${l.id}-${i}">${cvImgHtml}</td>
       <td>
         <button class="btn-regen-angle" onclick="generateLocCustomView('${l.id}',${i})">Generate</button>
+        ${refImg ? `<button onclick="toggleLocCustomViewUseRef('${l.id}',${i})" style="display:block;margin-top:4px;background:${cv.useRef ? '#1a2a1a' : 'none'};border:1px solid ${cv.useRef ? '#4ade80' : '#2a2a2a'};border-radius:3px;color:${cv.useRef ? '#4ade80' : '#666'};font-size:10px;padding:2px 6px;cursor:pointer;width:100%;white-space:nowrap">${cv.useRef ? '📷 Using Ref' : '📷 Use Ref'}</button>` : ''}
         <button onclick="deleteLocCustomView('${l.id}',${i})" style="display:block;margin-top:4px;background:none;border:1px solid #3a1a1a;border-radius:3px;color:#a05050;font-size:10px;padding:2px 6px;cursor:pointer;width:100%">Remove</button>
       </td>
     </tr>`;
@@ -1756,7 +1770,7 @@ function charAngleRowHTML(c) {
 }
 
 function locRowHTML(l) {
-  const defaultImg = l.images?.[0];
+  const defaultImg = locDefaultImage(l);
   const imgsHTML = `<div class="img-slot">${defaultImg ? `<img src="${esc(defaultImg)}" alt="">` : `<span class="placeholder">·</span>`}</div>`;
   const refImgHTML = l.referenceImage
     ? `<img src="${esc(l.referenceImage.dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${l.id}', event)">✕</button>`
@@ -1776,7 +1790,7 @@ function locRowHTML(l) {
     <td><textarea class="field-ref" rows="3" placeholder="Describe environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.reference)}</textarea></td>
     <td>
       <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="triggerLocImageUpload('${l.id}')">${refImgHTML}</div>
+        <div class="ref-img-preview" onclick="${l.referenceImage ? `toggleLocUseRef('${l.id}')` : `triggerLocImageUpload('${l.id}')`}">${refImgHTML}</div>
         <input type="file" id="locfile-${l.id}" class="hidden" accept="image/*" onchange="handleLocImageUpload('${l.id}', this)">
       </div>
     </td>
@@ -2702,6 +2716,14 @@ function removeLocAngleRefImage(locId, angle) {
   const loc = locations.find(l => l.id === locId);
   if (!loc?.shotAngles?.[angle]) return;
   delete loc.shotAngles[angle].refImage;
+  delete loc.shotAngles[angle].useRef;
+  autoSave(); renderLocations();
+}
+
+function toggleLocAngleUseRef(locId, angle) {
+  const loc = locations.find(l => l.id === locId);
+  if (!loc?.shotAngles?.[angle]) return;
+  loc.shotAngles[angle].useRef = !loc.shotAngles[angle].useRef;
   autoSave(); renderLocations();
 }
 
@@ -2723,6 +2745,14 @@ function removeLocCustomRefImage(locId, idx) {
   const loc = locations.find(l => l.id === locId);
   if (!loc?.customViews?.[idx]) return;
   delete loc.customViews[idx].refImage;
+  delete loc.customViews[idx].useRef;
+  autoSave(); renderLocations();
+}
+
+function toggleLocCustomViewUseRef(locId, idx) {
+  const loc = locations.find(l => l.id === locId);
+  if (!loc?.customViews?.[idx]) return;
+  loc.customViews[idx].useRef = !loc.customViews[idx].useRef;
   autoSave(); renderLocations();
 }
 
@@ -3174,6 +3204,46 @@ async function generateMissingLocImages() {
   autoSave();
   showToast(`Done — images generated for ${done} location(s).`);
   btn.disabled = false; btn.textContent = 'Generate Missing Images';
+}
+
+async function generateMissingShotPrompts() {
+  const btn = document.getElementById('btn-gen-missing-shot-prompts');
+  const missing = shots.filter(s => !s.imagePrompt?.trim());
+  if (!missing.length) { showToast('All shots already have prompts.'); return; }
+  btn.disabled = true; btn.textContent = `Generating 0/${missing.length}…`;
+  let done = 0;
+  for (const shot of missing) {
+    const row = document.querySelector(`#shots-body tr[data-id="${shot.id}"]`);
+    if (!row) { done++; continue; }
+    const lyric = row.querySelector('.field-lyric')?.value.trim() || '';
+    const description = row.querySelector('.field-desc')?.value.trim() || '';
+    if (!lyric && !description) { done++; continue; }
+    const shotSize = row.querySelector('.field-size')?.value || '';
+    const shotMovement = row.querySelector('.field-movement')?.value || '';
+    const shotAngle = shot.shotAngle || '';
+    const selectedCharIds = [...row.querySelectorAll('.char-cb:checked')].map(cb => cb.value);
+    const selectedChars = characters.filter(c => selectedCharIds.includes(c.id)).map(c => ({
+      name: c.name, description: c.reference,
+      referenceImage: c.referenceImage ? { base64: c.referenceImage.base64, mediaType: c.referenceImage.mediaType } : null
+    }));
+    const locationId = row.querySelector('.field-loc-select')?.value || shot.locationId || '';
+    const selectedLocs = locations.filter(l => l.id === locationId).map(l => ({ name: l.name, description: l.reference }));
+    const rowBtn = row.querySelector('.btn-gen-prompt');
+    if (rowBtn) { rowBtn.disabled = true; rowBtn.innerHTML = '<span class="spinner"></span>'; }
+    try {
+      const data = await apiFetch('/api/generate-shot-prompts', { lyric, description, shotSize, shotAngle, shotMovement, position: '', characters: selectedChars, locations: selectedLocs, visualStyle });
+      shot.imagePrompt = data.imagePrompt || '';
+      shot.videoPrompt = data.videoPrompt || '';
+      if (row.querySelector('.field-imgprompt')) row.querySelector('.field-imgprompt').value = shot.imagePrompt;
+      if (row.querySelector('.field-vidprompt')) row.querySelector('.field-vidprompt').value = shot.videoPrompt;
+    } catch(e) { console.error('prompt gen failed for shot', shot.id, e); }
+    if (rowBtn) { rowBtn.disabled = false; rowBtn.innerHTML = 'Generate Prompts'; }
+    done++;
+    btn.textContent = `Generating ${done}/${missing.length}…`;
+  }
+  autoSave();
+  showToast(`Done — prompts generated for ${done} shot(s).`);
+  btn.disabled = false; btn.textContent = 'Generate Missing Prompts';
 }
 
 async function applyCharExpression(id) {
