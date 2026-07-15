@@ -230,6 +230,53 @@ const SHOT_MOVEMENTS = ['Static','Pan Left','Pan Right','Tilt Up','Tilt Down','S
 
 function genId() { return Math.random().toString(36).slice(2, 9); }
 
+// ── Supabase ──────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://ecgoffhladapojwxngfx.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_NP1omtMIQ9fTtjLcWtQHzw_ercGkQR3';
+
+function getSB() {
+  if (!window._sb) window._sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  return window._sb;
+}
+
+async function sbGetProjects() {
+  try {
+    const { data, error } = await getSB().from('projects').select('id,name,updated_at');
+    if (error) throw error;
+    return (data || []).map(p => ({ id: p.id, name: p.name, updatedAt: p.updated_at, createdAt: p.updated_at }));
+  } catch(e) { console.warn('sb load projects:', e.message); return null; }
+}
+
+async function sbUpsertMeta(proj) {
+  try {
+    await getSB().from('projects')
+      .upsert({ id: proj.id, name: proj.name, updated_at: proj.updatedAt }, { onConflict: 'id' });
+  } catch(e) { console.warn('sb upsert meta:', e.message); }
+}
+
+async function sbUpsertData(id, stripped, imgs) {
+  const proj = projects.find(p => p.id === id);
+  try {
+    await getSB().from('projects').upsert({
+      id, name: proj?.name || 'Untitled', updated_at: Date.now(),
+      data: stripped, images: imgs
+    }, { onConflict: 'id' });
+  } catch(e) { console.warn('sb upsert data:', e.message); }
+}
+
+async function sbGetData(id) {
+  try {
+    const { data, error } = await getSB().from('projects').select('data,images').eq('id', id).single();
+    if (error) throw error;
+    return data;
+  } catch(e) { console.warn('sb get data:', e.message); return null; }
+}
+
+async function sbDelete(id) {
+  try { await getSB().from('projects').delete().eq('id', id); }
+  catch(e) { console.warn('sb delete:', e.message); }
+}
+
 // ── IndexedDB image store ─────────────────────────────────────────────────
 // Images are large (base64 / CDN URLs); we keep them out of localStorage
 // (5 MB quota) and store them here instead.
@@ -319,33 +366,50 @@ function mergeImages(data, imgs) {
 function projectDataKey(id)     { return `sg-data-${id}`; }
 function projectVersionsKey(id) { return `sg-versions-${id}`; }
 
-function loadProjects() {
+async function loadProjects() {
+  // Load local projects first
+  let localProjects = [];
   try {
     const saved = localStorage.getItem('sg-projects');
-    if (saved) { const p = JSON.parse(saved); projects = Array.isArray(p) ? p : []; }
+    if (saved) { const p = JSON.parse(saved); localProjects = Array.isArray(p) ? p : []; }
   } catch {}
-  // Migrate legacy single-project data if no projects exist yet
-  if (!projects.length && localStorage.getItem('character-generator-data')) {
-    try {
-      const id = genId();
-      projects = [{ id, name: 'My Project', createdAt: Date.now(), updatedAt: Date.now() }];
-      // Move (not copy) old data to free space: write new key, then delete old key
-      const oldData = localStorage.getItem('character-generator-data');
-      const oldVersions = localStorage.getItem('character-generator-versions');
-      // Delete old keys first to free space before writing new ones
-      localStorage.removeItem('character-generator-data');
-      localStorage.removeItem('character-generator-versions');
-      localStorage.setItem(projectDataKey(id), oldData);
-      if (oldVersions) localStorage.setItem(projectVersionsKey(id), oldVersions);
-      saveProjects();
-    } catch(e) {
-      console.warn('Migration failed, starting fresh:', e.message);
-      projects = [];
+
+  // Try Supabase
+  const sbProjects = await sbGetProjects();
+  if (sbProjects !== null) {
+    if (sbProjects.length === 0 && localProjects.length > 0) {
+      // First time using Supabase: migrate local projects up
+      projects = localProjects;
+      await migrateLocalProjectsToSupabase();
+    } else {
+      projects = sbProjects;
+      localStorage.setItem('sg-projects', JSON.stringify(projects));
     }
+  } else {
+    // Supabase unavailable, use local
+    projects = localProjects;
   }
 }
 
+async function migrateLocalProjectsToSupabase() {
+  showToast('Migrating projects to cloud…');
+  for (const proj of projects) {
+    try {
+      const key = projectDataKey(proj.id);
+      const saved = localStorage.getItem(key);
+      const stripped = saved ? JSON.parse(saved) : null;
+      const imgs = await idbGet(key).catch(() => null);
+      await getSB().from('projects').upsert({
+        id: proj.id, name: proj.name, updated_at: proj.updatedAt || Date.now(),
+        data: stripped, images: imgs
+      }, { onConflict: 'id' });
+    } catch(e) { console.warn('Migration failed for', proj.id, e.message); }
+  }
+  showToast('Projects synced to cloud ✓');
+}
+
 function saveProjects() {
+  // Keep local cache in sync; Supabase is updated by sbUpsertMeta/sbUpsertData
   localStorage.setItem('sg-projects', JSON.stringify(projects));
 }
 
@@ -353,8 +417,10 @@ function createProject() {
   const name = prompt('Project name:');
   if (name === null) return; // cancelled
   const id = genId();
-  projects.push({ id, name: name.trim() || 'Untitled', createdAt: Date.now(), updatedAt: Date.now() });
+  const proj = { id, name: name.trim() || 'Untitled', createdAt: Date.now(), updatedAt: Date.now() };
+  projects.push(proj);
   saveProjects();
+  sbUpsertMeta(proj);
   openProject(id);
 }
 
@@ -391,7 +457,6 @@ function backToProjects() {
 async function duplicateProject(id) {
   const src = projects.find(p => p.id === id);
   if (!src) return;
-  // Determine unique name: append #2, #3, etc.
   const baseName = src.name.replace(/ #\d+$/, '');
   let suffix = 2;
   while (projects.find(p => p.name === `${baseName} #${suffix}`)) suffix++;
@@ -402,21 +467,30 @@ async function duplicateProject(id) {
   const srcData = localStorage.getItem(projectDataKey(id));
   if (srcData) localStorage.setItem(projectDataKey(newId), srcData);
   // Copy IDB image data
+  let imgs = null;
   try {
-    const imgs = await idbGet(projectDataKey(id));
+    imgs = await idbGet(projectDataKey(id));
     if (imgs) await idbSet(projectDataKey(newId), imgs);
   } catch(e) { console.warn('IDB duplicate failed:', e); }
-  // Copy audio file and transcript
+  // Copy audio
   try {
     const audioFile = await idbGet(`audio-${id}-file`);
     if (audioFile) await idbSet(`audio-${newId}-file`, audioFile);
     const audioTranscript = await idbGet(`audio-${id}-transcript`);
     if (audioTranscript) await idbSet(`audio-${newId}-transcript`, audioTranscript);
   } catch(e) { console.warn('Audio duplicate failed:', e); }
-  // Start fresh versions (v1 from current data)
-  // No versions copied — duplicated project starts clean
-  projects.push({ id: newId, name: newName, createdAt: now, updatedAt: now });
+  const newProj = { id: newId, name: newName, createdAt: now, updatedAt: now };
+  projects.push(newProj);
   saveProjects();
+  // Mirror duplicate to Supabase
+  try {
+    const sbSrc = await sbGetData(id);
+    await getSB().from('projects').upsert({
+      id: newId, name: newName, updated_at: now,
+      data: sbSrc?.data || (srcData ? JSON.parse(srcData) : null),
+      images: sbSrc?.images || imgs
+    }, { onConflict: 'id' });
+  } catch(e) { console.warn('sb duplicate failed:', e.message); }
   renderProjectsView();
   showToast(`Duplicated as "${newName}"`);
 }
@@ -427,6 +501,7 @@ function deleteProject(id) {
   localStorage.removeItem(projectDataKey(id));
   localStorage.removeItem(projectVersionsKey(id));
   saveProjects();
+  sbDelete(id);
   renderProjectsView();
 }
 
@@ -437,7 +512,7 @@ function renameProject(id, name) {
   proj.name = trimmed;
   proj.updatedAt = Date.now();
   saveProjects();
-  // If this is the currently open project, update the header name display
+  sbUpsertMeta(proj);
   if (currentProjectId === id) renderHeader();
 }
 
@@ -551,21 +626,41 @@ function promptRenameCurrentProject() {
   if (name !== null) { renameProject(currentProjectId, name); }
 }
 
-function initApp() {
-  loadProjects();
+async function initApp() {
   renderHeader();
-  renderProjectsView();
+  renderProjectsView(); // show loading state immediately
+  await loadProjects();
+  renderProjectsView(); // re-render once projects are loaded from Supabase
 }
 
 async function loadData() {
   loadVersions();
   try {
     const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-    const saved = localStorage.getItem(key);
+    let saved = null;
+    let imgs = null;
+
+    // Try Supabase first
+    if (currentProjectId) {
+      const sbRow = await sbGetData(currentProjectId);
+      if (sbRow?.data) {
+        saved = JSON.stringify(sbRow.data);
+        imgs = sbRow.images;
+        // Update local cache
+        try { localStorage.setItem(key, saved); } catch {}
+        try { if (imgs) await idbSet(key, imgs); } catch {}
+      }
+    }
+
+    // Fall back to localStorage/IDB
+    if (!saved) {
+      saved = localStorage.getItem(key);
+      try { imgs = await idbGet(key); } catch {}
+    }
+
     if (saved) {
       let d = JSON.parse(saved);
-      // Merge images from IDB back in
-      try { const imgs = await idbGet(key); if (imgs) d = mergeImages(d, imgs); } catch {}
+      if (imgs) d = mergeImages(d, imgs);
       characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
       if (d.visualStyles) {
         const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
@@ -624,13 +719,12 @@ function _buildPayload() {
 
 async function _persistData(key) {
   const { stripped, imgs } = extractImages(_buildPayload());
+  // Local cache
   try {
     localStorage.setItem(key, JSON.stringify(stripped));
   } catch(e) {
-    // If even stripped data exceeds quota, clear old keys and retry
-    console.warn('localStorage quota hit even after stripping:', e.message);
+    console.warn('localStorage quota hit, clearing old project data:', e.message);
     try {
-      // Remove keys from other projects to free space
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sg-data-') && k !== key) { localStorage.removeItem(k); break; }
@@ -639,6 +733,8 @@ async function _persistData(key) {
     } catch(e2) { console.error('localStorage save failed:', e2.message); }
   }
   try { await idbSet(key, imgs); } catch(e) { console.warn('IDB save failed:', e.message); }
+  // Sync to Supabase (fire and forget)
+  if (currentProjectId) sbUpsertData(currentProjectId, stripped, imgs);
 }
 
 function saveData() {
