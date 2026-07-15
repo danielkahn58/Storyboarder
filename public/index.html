@@ -537,6 +537,9 @@
   .btn-back-projects:hover { color: #aaa; background: #1a1a1a; }
   .header-divider { width: 1px; height: 18px; background: #222; }
 
+  /* Hide mobile-only cells on desktop */
+  .card-var-btn-cell { display: none; }
+
   /* ── Mobile ── */
   @media (max-width: 768px) {
     /* ── Nav & header ── */
@@ -600,16 +603,18 @@
       margin-bottom: 5px;
     }
 
-    /* Name cell (1st): takes ~60% width, floats left */
+    /* Name cell (1st): takes left portion of header row */
     .char-table tbody tr[data-id] > td:nth-child(1) {
       flex: 1 1 55%;
+      order: 1;
       border-right: 1px solid #181818;
       border-bottom: 1px solid #181818;
     }
 
-    /* Ref image cell (3rd): sits right of name — suppress label (upload hint is self-explanatory) */
+    /* Ref image cell (3rd): pulled up to sit right of name via order */
     .char-table tbody tr[data-id] > td:nth-child(3) {
       flex: 0 0 90px;
+      order: 2;
       border-bottom: 1px solid #181818;
       display: flex;
       align-items: center;
@@ -621,6 +626,13 @@
       width: 70px;
       height: 70px;
     }
+
+    /* Remaining cells: full width, in natural order after header row */
+    .char-table tbody tr[data-id] > td:nth-child(2) { order: 3; }
+    .char-table tbody tr[data-id] > td:nth-child(4) { order: 4; }
+    .char-table tbody tr[data-id] > td:nth-child(5) { order: 5; }
+    .char-table tbody tr[data-id] > td:nth-child(6) { order: 6; }
+    .char-table tbody tr[data-id] > td:nth-child(7) { order: 7; }
 
     /* Actions cell: wrap buttons */
     .char-table .actions {
@@ -634,27 +646,43 @@
       font-size: 11px;
     }
 
+    /* Variations button: hide inline (desktop) version, show bottom cell */
+    .btn-var-inline { display: none !important; }
+    .card-var-btn-cell {
+      flex: 0 0 100%;
+      padding: 10px 12px;
+      border-top: 1px solid #181818;
+      box-sizing: border-box;
+    }
+
     /* ══════════════════════════════════════════
        CARD LAYOUT: Location Variations
        (.loc-shot-table inside the subrow)
        ══════════════════════════════════════════ */
+    /* ══════════════════════════════════════════
+       CARD LAYOUT: Location Variations
+       2-column grid, single column below 400px
+       ══════════════════════════════════════════ */
     .loc-shot-table thead { display: none; }
     .loc-shot-table { display: block; width: 100%; }
-    .loc-shot-table tbody { display: block; }
+    .loc-shot-table tbody {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
 
     .loc-shot-table tbody tr {
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       border: 1px solid #1a1a1a;
       border-radius: 6px;
-      margin-bottom: 8px;
       background: #090909;
       overflow: hidden;
+      margin-bottom: 0;
     }
 
     .loc-shot-table tbody tr > td {
       display: block;
-      flex: 0 0 100%;
       padding: 8px 10px;
       border-bottom: 1px solid #141414;
       box-sizing: border-box;
@@ -673,42 +701,35 @@
       margin-bottom: 4px;
     }
 
-    /* Variation name: ~60%, ref image: ~80px, side by side */
-    .loc-shot-table tbody tr > td:nth-child(1) {
-      flex: 1 1 55%;
-      border-right: 1px solid #141414;
-      border-bottom: 1px solid #141414;
-    }
-    .loc-shot-table tbody tr > td:nth-child(3) {
-      flex: 0 0 80px;
-      border-bottom: 1px solid #141414;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 6px;
-    }
-
     /* ══════════════════════════════════════════
        CARD LAYOUT: Character Variations
-       (.angle-subtable)
+       2-column grid, single column below 400px
        ══════════════════════════════════════════ */
+    /* Make angle/loc subrows fill full card width */
+    .char-angle-row, .loc-shot-row { display: block !important; width: 100%; }
+    .char-angle-row > td, .loc-shot-row > td { display: block; width: 100%; box-sizing: border-box; padding: 0; }
+    .char-angle-inner { width: 100%; }
+
     .angle-subtable thead { display: none; }
     .angle-subtable { display: block; width: 100%; }
-    .angle-subtable tbody { display: block; }
+    .angle-subtable tbody {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
 
     .angle-subtable tbody tr {
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       border: 1px solid #1a1a1a;
       border-radius: 6px;
-      margin-bottom: 8px;
       background: #090909;
       overflow: hidden;
+      margin-bottom: 0;
     }
 
     .angle-subtable tbody tr > td {
       display: block;
-      flex: 0 0 100%;
       padding: 8px 10px;
       border-bottom: 1px solid #141414;
       box-sizing: border-box;
@@ -727,18 +748,10 @@
       margin-bottom: 4px;
     }
 
-    /* Angle name: flex 1, action button: auto, side by side */
-    .angle-subtable tbody tr > td:nth-child(1) {
-      flex: 1 1 auto;
-      border-right: 1px solid #141414;
-      border-bottom: 1px solid #141414;
-    }
-    .angle-subtable tbody tr > td:nth-child(4) {
-      flex: 0 0 auto;
-      border-bottom: 1px solid #141414;
-      display: flex;
-      align-items: center;
-      padding: 6px 8px;
+    /* Single column on very small screens */
+    @media (max-width: 320px) {
+      .angle-subtable tbody,
+      .loc-shot-table tbody { grid-template-columns: 1fr; }
     }
 
     /* ══════════════════════════════════════════

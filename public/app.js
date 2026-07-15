@@ -1675,7 +1675,7 @@ function charRowHTML(c) {
       <div style="display:flex;flex-direction:column;gap:4px">
         <input type="text" class="field-name" placeholder="Name…" value="${esc(c.name)}" oninput="debouncedSave()">
         ${c.missingFromScript ? `<div class="missing-from-script-flag">Missing from script — <button onclick="deleteCharacter('${c.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissMissingFlag('char','${c.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
-        <button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
+        <button class="btn-toggle-angles btn-var-inline" onclick="toggleCharAngles('${c.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
       </div>
     </td>
     <td data-label="Description"><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
@@ -1716,6 +1716,7 @@ function charRowHTML(c) {
         <button class="btn btn-delete" onclick="deleteCharacter('${c.id}')">Remove</button>
       </div>
     </td>
+    <td class="card-var-btn-cell"><button class="btn-toggle-angles" onclick="toggleCharAngles('${c.id}')" style="width:100%;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:11px;padding:6px;cursor:pointer">▶ Variations</button></td>
   </tr>`;
 }
 
@@ -1781,7 +1782,7 @@ function locRowHTML(l) {
           const twin = locations.find(x => x.id !== l.id && x.name && locationsSimilar(x.name, l.name));
           return `<div class="loc-dup-flag">⚠ Possible duplicate of "${esc(twin?.name || '?')}"${twin ? ` — <button onclick="mergeLocationsIntoOne('${esc(twin.id)}','${esc(l.id)}')" style="background:none;border:none;color:#f59e0b;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Merge into it</button>` : ''} — <button onclick="dismissDuplicateFlag('loc','${esc(l.id)}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>`;
         })() : ''}
-        <button class="btn-toggle-shot-angles" onclick="toggleLocAngles('${l.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
+        <button class="btn-toggle-shot-angles btn-var-inline" onclick="toggleLocAngles('${l.id}')" style="align-self:flex-start;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:10px;padding:3px 6px;cursor:pointer;white-space:nowrap">▶ Variations</button>
       </div>
     </td>
     <td data-label="Description"><textarea class="field-ref" rows="3" placeholder="Describe environment, lighting, atmosphere…" oninput="debouncedSave()">${esc(l.reference)}</textarea></td>
@@ -1809,6 +1810,7 @@ function locRowHTML(l) {
         <button class="btn btn-delete" onclick="deleteLocation('${l.id}')">Remove</button>
       </div>
     </td>
+    <td class="card-var-btn-cell"><button class="btn-toggle-shot-angles" onclick="toggleLocAngles('${l.id}')" style="width:100%;background:none;border:1px solid #222;border-radius:4px;color:#555;font-size:11px;padding:6px;cursor:pointer">▶ Variations</button></td>
   </tr>`;
 }
 
@@ -2562,8 +2564,9 @@ function toggleLocAngles(id) {
   if (!row) return;
   const isOpen = row.style.display !== 'none';
   row.style.display = isOpen ? 'none' : '';
-  const btn = document.querySelector(`#locations-body tr[data-id="${id}"] .btn-toggle-shot-angles`);
-  if (btn) btn.textContent = isOpen ? '▶ Variations' : '▼ Variations';
+  document.querySelectorAll(`#locations-body tr[data-id="${id}"] .btn-toggle-shot-angles`).forEach(btn => {
+    btn.textContent = isOpen ? '▶ Variations' : '▼ Variations';
+  });
 }
 
 function addLocCustomView(id) {
@@ -3016,11 +3019,12 @@ function buildAnglePrompt(char, angle) {
 
 function toggleCharAngles(id) {
   const angleRow = document.getElementById(`char-angles-${id}`);
-  const btn = document.querySelector(`#characters-body tr[data-id="${id}"] .btn-toggle-angles`);
   if (!angleRow) return;
   const hidden = angleRow.style.display === 'none' || angleRow.style.display === '';
   angleRow.style.display = hidden ? 'table-row' : 'none';
-  if (btn) btn.textContent = hidden ? '▼ Variations' : '▶ Variations';
+  document.querySelectorAll(`#characters-body tr[data-id="${id}"] .btn-toggle-angles`).forEach(btn => {
+    btn.textContent = hidden ? '▼ Variations' : '▶ Variations';
+  });
 }
 
 async function generateCharFrontProfile(id) {
