@@ -1,5 +1,8 @@
 require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
+const passport = require('passport');
+const { Strategy: GoogleStrategy } = require('passport-google-oauth20');
 const Anthropic = require('@anthropic-ai/sdk');
 const { fal } = require('@fal-ai/client');
 const JSZip = require('jszip');
@@ -13,6 +16,63 @@ const http = require('http');
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
+
+// ── auth ──────────────────────────────────────────────────────────────────────
+
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+const AUTH_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && ALLOWED_EMAILS.length);
+
+if (AUTH_ENABLED) {
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'local-dev-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
+  }));
+
+  app.use(passport.initialize());
+  app.use(passport.session());
+
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || '/auth/google/callback'
+  }, (accessToken, refreshToken, profile, done) => {
+    const email = profile.emails?.[0]?.value?.toLowerCase();
+    if (!email || !ALLOWED_EMAILS.includes(email)) {
+      return done(null, false, { message: 'Email not allowed' });
+    }
+    return done(null, { id: profile.id, email, name: profile.displayName });
+  }));
+
+  passport.serializeUser((user, done) => done(null, user));
+  passport.deserializeUser((user, done) => done(null, user));
+
+  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+  app.get('/auth/google/callback',
+    passport.authenticate('google', { failureRedirect: '/login.html' }),
+    (req, res) => res.redirect('/')
+  );
+
+  app.get('/auth/logout', (req, res) => {
+    req.logout(() => res.redirect('/login.html'));
+  });
+
+  app.get('/auth/me', (req, res) => {
+    if (req.isAuthenticated()) res.json({ email: req.user.email, name: req.user.name });
+    else res.status(401).json({ error: 'not authenticated' });
+  });
+
+  // Protect everything except auth routes and login page
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/auth/') || req.path === '/login.html') return next();
+    if (req.isAuthenticated()) return next();
+    if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'not authenticated' });
+    res.redirect('/login.html');
+  });
+}
+
 app.use(express.static('public', { etag: false, lastModified: false, setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -105,6 +165,34 @@ async function generateShotImageKontextMulti(prompt, referenceImageUrls, stylePr
       return url;
     }).catch(e => {
       log('error', `kontext-multi-task-${i + 1} failed`, { error: e.message, status: e.status, body: e.body });
+      return null;
+    })
+  );
+  return (await Promise.all(tasks)).filter(Boolean);
+}
+
+async function generateShotImageFlux2Edit(prompt, locs, chars, stylePrompt) {
+  // Build image_urls with location first, then characters
+  const imageUrls = [...locs, ...chars];
+  // Use @imageN syntax so the model knows which image is which role
+  const locLabel = locs.length === 1
+    ? '@image1 is the background/location scene'
+    : `@image1 through @image${locs.length} are the background/location scene`;
+  const charParts = chars.map((_, i) => `@image${locs.length + i + 1}`).join(' and ');
+  const charLabel = chars.length === 1
+    ? `${charParts} is the character to place in the scene`
+    : `${charParts} are the characters to place in the scene`;
+  const finalPrompt = applyStyle(`[${locLabel}; ${charLabel}] ${prompt}`, stylePrompt);
+  log('info', 'flux2-edit-input', { prompt: finalPrompt, image_urls: imageUrls });
+  const tasks = Array.from({ length: 2 }, (_, i) =>
+    fal.subscribe('fal-ai/flux-2-pro/edit', {
+      input: { prompt: finalPrompt, image_urls: imageUrls, image_size: 'landscape_16_9', safety_tolerance: '5' }
+    }).then(r => {
+      const url = r?.data?.images?.[0]?.url;
+      log('info', `flux2-edit-task-${i + 1} done`, { url });
+      return url;
+    }).catch(e => {
+      log('error', `flux2-edit-task-${i + 1} failed`, { error: e.message, status: e.status, body: e.body });
       return null;
     })
   );
@@ -564,19 +652,25 @@ app.post('/api/generate-shot-images', async (req, res) => {
   // Character image(s) follow so the subject is placed into that scene.
   const refs = hasSplit ? [...locs, ...chars] : (Array.isArray(referenceImageUrls) ? referenceImageUrls.filter(Boolean) : []);
 
-  // When both are present, label them so the model understands their roles
+  // flux-2-pro/edit handles its own @imageN prompt labeling internally
+  const useFlux2Edit = chars.length >= 2;
+
+  // For kontext-multi (1-char case), label refs in the prompt
   let finalPrompt = prompt;
-  if (hasSplit && chars.length > 0 && locs.length > 0) {
+  if (!useFlux2Edit && hasSplit && chars.length > 0 && locs.length > 0) {
     const locLabel = locs.length === 1 ? 'Reference image 1 is the location/background scene' : `Reference images 1–${locs.length} are the location/background scene`;
-    const charLabel = chars.length === 1 ? `reference image ${locs.length + 1} is the character to place in the scene` : `reference images ${locs.length + 1}–${refs.length} are the characters to place in the scene`;
+    const charLabel = `reference image ${locs.length + 1} is the character to place in the scene`;
     finalPrompt = `[${locLabel}; ${charLabel}] ${prompt}`;
   }
 
-  log('info', 'generate-shot-images started', { prompt_chars: prompt.length, refCount: refs.length, chars: chars.length, locs: locs.length, model: refs.length >= 2 ? 'kontext-multi' : refs.length === 1 ? 'kontext-single' : 'plain' });
+  const modelName = useFlux2Edit ? 'flux2-edit' : refs.length >= 2 ? 'kontext-multi' : refs.length === 1 ? 'kontext-single' : 'plain';
+  log('info', 'generate-shot-images started', { prompt_chars: prompt.length, refCount: refs.length, chars: chars.length, locs: locs.length, model: modelName });
   const t0 = Date.now();
   try {
     let images;
-    if (refs.length >= 2) {
+    if (useFlux2Edit) {
+      images = await generateShotImageFlux2Edit(prompt, locs, chars, stylePrompt);
+    } else if (refs.length >= 2) {
       images = await generateShotImageKontextMulti(finalPrompt, refs, stylePrompt);
     } else if (refs.length === 1) {
       images = await generateShotImageKontextSingle(finalPrompt, refs[0], stylePrompt);
@@ -991,5 +1085,24 @@ ${input}`
   }
 });
 
+app.post('/api/inpaint', async (req, res) => {
+  const { imageUrl, maskUrl, prompt } = req.body;
+  if (!imageUrl || !maskUrl || !prompt) return res.status(400).json({ error: 'imageUrl, maskUrl, prompt required' });
+  log('info', 'inpaint started', { prompt_chars: prompt.length });
+  const t0 = Date.now();
+  try {
+    const result = await fal.subscribe('fal-ai/flux-pro/v1/fill', {
+      input: { image_url: imageUrl, mask_url: maskUrl, prompt, num_images: 1, output_format: 'jpeg', safety_tolerance: '5' }
+    });
+    const url = result?.data?.images?.[0]?.url || null;
+    if (!url) throw new Error('No image returned');
+    log('info', 'inpaint done', { url, ms: Date.now() - t0 });
+    res.json({ url });
+  } catch(e) {
+    log('error', 'inpaint failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => log('info', `server started on port ${PORT}`, {}));
+app.listen(PORT, '0.0.0.0', () => log('info', `server started on port ${PORT}`, {}));

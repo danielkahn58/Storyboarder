@@ -394,7 +394,8 @@
   .btn-comp-gen-inline:hover { background: #20203a; }
   .comp-thumb-delete { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(30,10,10,0.85); border: 1px solid #5a2020; border-radius: 3px; color: #e05050; font-size: 9px; line-height: 1; cursor: pointer; display: none; align-items: center; justify-content: center; padding: 0; z-index: 2; }
   .comp-angle-thumb:hover .comp-thumb-delete,
-  .compose-loc-var-thumb:hover .comp-thumb-delete { display: flex; }
+  .compose-loc-var-thumb:hover .comp-thumb-delete,
+  .compose-bg-card:hover .comp-thumb-delete { display: flex; }
 
   /* rich reference field (contenteditable) */
   .ref-rich { background: #161616; border: 1px solid #252525; border-radius: 5px; color: #e8e8e8; font-size: 12px; padding: 7px 9px; min-height: 72px; line-height: 1.6; font-family: inherit; cursor: text; }
@@ -613,18 +614,28 @@
 
     /* Ref image cell (3rd): pulled up to sit right of name via order */
     .char-table tbody tr[data-id] > td:nth-child(3) {
-      flex: 0 0 90px;
+      flex: 0 0 auto;
+      min-width: 90px;
       order: 2;
       border-bottom: 1px solid #181818;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 8px;
+      gap: 4px;
     }
     .char-table tbody tr[data-id] > td:nth-child(3)::before { display: none; }
     .char-table tbody tr[data-id] > td:nth-child(3) .ref-img-preview {
       width: 70px;
       height: 70px;
+    }
+    .char-table tbody tr[data-id] > td:nth-child(3) .use-ref-btn {
+      font-size: 10px;
+      padding: 3px 6px;
+      white-space: normal;
+      text-align: center;
+      max-width: 110px;
     }
 
     /* Remaining cells: full width, in natural order after header row */
@@ -876,6 +887,10 @@
 
 <!-- ── Editor View ── -->
 <div id="view-editor" style="display:none;">
+<div id="data-loading-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(10,10,10,0.75);backdrop-filter:blur(2px);align-items:center;justify-content:center;flex-direction:column;gap:10px">
+  <div style="width:32px;height:32px;border:3px solid #333;border-top-color:#818cf8;border-radius:50%;animation:spin 0.7s linear infinite"></div>
+  <span style="color:#666;font-size:12px;letter-spacing:0.5px">Loading project…</span>
+</div>
 
 <!-- ── Debug Panel ── -->
 <div id="debug-panel" style="display:none;padding:10px 32px;border-bottom:1px solid #2a0a0a;background:#0a0505;">
@@ -1157,6 +1172,23 @@
               <div style="display:none;margin-top:6px">
                 <textarea id="compose-bg-prompt-input" placeholder="Describe changes to background only…" class="compose-tool-textarea"></textarea>
                 <button id="btn-apply-bg-prompt" onclick="applyBgOnlyPrompt()" class="compose-tool-btn-purple">✦ Apply to background</button>
+              </div>
+            </div>
+            <div class="compose-bg-tool-row">
+              <button class="compose-bg-tool-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.classList.toggle('open')">Paint &amp; Fill ▸</button>
+              <div style="display:none;margin-top:6px">
+                <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+                  <button id="btn-toggle-mask" onclick="toggleMaskMode()" style="flex:1;min-width:100px;padding:5px 8px;background:none;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;font-size:11px;cursor:pointer">🖌 Paint Mask</button>
+                  <button onclick="clearMask()" style="padding:5px 8px;background:none;color:#aaa;border:1px solid #2a2a2a;border-radius:4px;font-size:11px;cursor:pointer" title="Clear mask">🗑 Clear</button>
+                </div>
+                <div class="compose-slider-row" style="margin-bottom:6px">
+                  <span class="compose-slider-label">Brush</span>
+                  <input type="range" id="mask-brush-size" min="10" max="200" value="40" oninput="_maskBrushSize=+this.value;document.getElementById('mask-brush-val').textContent=this.value">
+                  <span class="compose-slider-val" id="mask-brush-val">40</span>
+                </div>
+                <p style="font-size:10px;color:#666;margin:0 0 4px">Paint over the region you want to change, then describe the replacement below.</p>
+                <textarea id="inpaint-prompt" placeholder="What should appear in the painted region…" class="compose-tool-textarea"></textarea>
+                <button id="btn-apply-inpaint" onclick="applyInpaint()" class="compose-tool-btn-purple">✦ Apply to Region</button>
               </div>
             </div>
             <div class="compose-bg-tool-row">

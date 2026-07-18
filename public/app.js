@@ -257,11 +257,52 @@ async function sbUpsertMeta(proj) {
 async function sbUpsertData(id, stripped, imgs) {
   const proj = projects.find(p => p.id === id);
   try {
-    await getSB().from('projects').upsert({
+    const { error } = await getSB().from('projects').upsert({
       id, name: proj?.name || 'Untitled', updated_at: Date.now(),
       data: stripped, images: imgs
     }, { onConflict: 'id' });
-  } catch(e) { console.warn('sb upsert data:', e.message); }
+    if (error) throw error;
+  } catch(e) {
+    console.warn('sb upsert data:', e.message);
+    showToast('Cloud sync failed — data saved locally only.', true);
+  }
+}
+
+// Replace any base64 / dataUrl blobs with null so they don't bloat the Supabase payload.
+// CDN URLs (https://...) are kept as-is.
+// An "image object" is any object with a dataUrl or base64 key — treated atomically, not recursed into.
+function stripBase64ForSync(imgs) {
+  if (!imgs) return imgs;
+  function isImgObj(v) {
+    return v && typeof v === 'object' && !Array.isArray(v) && ('dataUrl' in v || 'base64' in v);
+  }
+  function cleanImgObj(v) {
+    if (!v) return v;
+    const out = { ...v };
+    out.base64 = null;
+    if (out.cdnUrl) out.dataUrl = out.cdnUrl; // use CDN URL for cross-device display
+    else if (typeof out.dataUrl === 'string' && out.dataUrl.startsWith('data:')) out.dataUrl = null;
+    return out;
+  }
+  function cleanVal(v) {
+    if (!v) return v;
+    if (typeof v === 'string') return v.startsWith('data:') ? null : v;
+    if (isImgObj(v)) return cleanImgObj(v);
+    if (Array.isArray(v)) return v.map(cleanVal);
+    if (typeof v === 'object') return cleanEntry(v);
+    return v;
+  }
+  function cleanEntry(obj) {
+    if (!obj) return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = cleanVal(v);
+    return out;
+  }
+  return {
+    chars: Object.fromEntries(Object.entries(imgs.chars || {}).map(([id, v]) => [id, cleanEntry(v)])),
+    locs:  Object.fromEntries(Object.entries(imgs.locs  || {}).map(([id, v]) => [id, cleanEntry(v)])),
+    shots: Object.fromEntries(Object.entries(imgs.shots || {}).map(([id, v]) => [id, cleanEntry(v)])),
+  };
 }
 
 async function sbGetData(id) {
@@ -361,34 +402,65 @@ function mergeImages(data, imgs) {
   return { ...data, characters, locations, shots };
 }
 
+// When loading from Supabase, fill in any base64 images (referenceImage etc.) that
+// didn't sync (because stripBase64ForSync removed them) from the local IDB copy.
+function mergeLocalIntoSbImages(sbImgs, localImgs) {
+  if (!localImgs) return sbImgs || {};
+  if (!sbImgs) return localImgs;
+  function mergeEntry(sb, local) {
+    if (!local) return sb || {};
+    if (!sb) return local;
+    const out = { ...sb };
+    for (const [k, v] of Object.entries(local)) {
+      if (out[k] == null && v != null) out[k] = v; // fill in missing fields from local
+      else if (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object') {
+        out[k] = mergeEntry(out[k], v);
+      }
+    }
+    return out;
+  }
+  return {
+    chars: Object.fromEntries(Object.entries(localImgs.chars || {}).map(([id, v]) => [id, mergeEntry((sbImgs.chars || {})[id], v)])),
+    locs:  Object.fromEntries(Object.entries(localImgs.locs  || {}).map(([id, v]) => [id, mergeEntry((sbImgs.locs  || {})[id], v)])),
+    shots: Object.fromEntries(Object.entries(localImgs.shots || {}).map(([id, v]) => [id, mergeEntry((sbImgs.shots || {})[id], v)])),
+  };
+}
+
+// Thin wrapper: given already-parsed saved data + imgs, produce { stripped, imgs } for sbUpsertData
+function _buildPayloadFromSaved(data, imgs) {
+  return { stripped: data, imgs: imgs || {} };
+}
+
 // ── persistence ───────────────────────────────────────────────────────────
 // ── project management ────────────────────────────────────────────────────
 function projectDataKey(id)     { return `sg-data-${id}`; }
 function projectVersionsKey(id) { return `sg-versions-${id}`; }
 
 async function loadProjects() {
-  // Load local projects first
+  // Load local projects immediately so UI is never blank
   let localProjects = [];
   try {
     const saved = localStorage.getItem('sg-projects');
     if (saved) { const p = JSON.parse(saved); localProjects = Array.isArray(p) ? p : []; }
   } catch {}
+  projects = localProjects;
+  renderProjectsView();
 
-  // Try Supabase
+  // Try Supabase in background — only update if it returns something useful
   const sbProjects = await sbGetProjects();
   if (sbProjects !== null) {
     if (sbProjects.length === 0 && localProjects.length > 0) {
       // First time using Supabase: migrate local projects up
       projects = localProjects;
       await migrateLocalProjectsToSupabase();
-    } else {
+    } else if (sbProjects.length > 0) {
       projects = sbProjects;
       localStorage.setItem('sg-projects', JSON.stringify(projects));
+      renderProjectsView();
     }
-  } else {
-    // Supabase unavailable, use local
-    projects = localProjects;
+    // If sbProjects is empty and localProjects is also empty, nothing to do
   }
+  // Supabase unavailable → already showing localProjects, nothing to do
 }
 
 async function migrateLocalProjectsToSupabase() {
@@ -424,7 +496,8 @@ function createProject() {
   openProject(id);
 }
 
-function openProject(id) {
+async function openProject(id) {
+  clearTimeout(_saveTimer); // prevent any pending debounced save from writing empty data to the new project
   currentProjectId = id;
   versions = []; currentVersionLabel = null; editsSinceVersion = 0;
   characters = []; locations = []; shots = [];
@@ -434,14 +507,19 @@ function openProject(id) {
     { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
   ];
   selectedStyleId = 'style-photo';
-  // Update project's updatedAt
   const proj = projects.find(p => p.id === id);
   if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
-  loadData();
   document.getElementById('view-projects').style.display = 'none';
   document.getElementById('view-editor').style.display = 'block';
   renderHeader();
   initSectionNav();
+  const overlay = document.getElementById('data-loading-overlay');
+  if (overlay) overlay.style.display = 'flex';
+  try {
+    await loadData();
+  } finally {
+    if (overlay) overlay.style.display = 'none';
+  }
 }
 
 function backToProjects() {
@@ -640,22 +718,28 @@ async function loadData() {
     let saved = null;
     let imgs = null;
 
-    // Try Supabase first
+    // Read local data as baseline before touching Supabase
+    const localSaved = localStorage.getItem(key);
+    let localImgs = null;
+    try { localImgs = await idbGet(key); } catch {}
+    const localCharCount = (() => { try { return JSON.parse(localSaved)?.characters?.length || 0; } catch { return 0; } })();
+
+    // Try Supabase — only trust it if it has actual content, or local is also empty
     if (currentProjectId) {
       const sbRow = await sbGetData(currentProjectId);
-      if (sbRow?.data) {
+      const sbCharCount = sbRow?.data?.characters?.length || 0;
+      if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
         saved = JSON.stringify(sbRow.data);
-        imgs = sbRow.images;
-        // Update local cache
+        imgs = sbRow.images || {};
         try { localStorage.setItem(key, saved); } catch {}
-        try { if (imgs) await idbSet(key, imgs); } catch {}
+        try { await idbSet(key, imgs); } catch {}
       }
     }
 
-    // Fall back to localStorage/IDB
+    // Fall back to local if Supabase unavailable or had less data
     if (!saved) {
-      saved = localStorage.getItem(key);
-      try { imgs = await idbGet(key); } catch {}
+      saved = localSaved;
+      imgs = localImgs;
     }
 
     if (saved) {
@@ -699,12 +783,18 @@ async function loadData() {
 }
 
 async function prefetchCharBgRemovals() {
-  const pending = characters.filter(c => c.images?.length && !c.bgRemovedImage);
+  const pending = characters.filter(c => (c.images?.length || c.referenceImage) && !c.bgRemovedImage);
   for (const c of pending) {
     try {
-      const data = await apiFetch('/api/remove-background', { imageUrl: c.images[0] });
+      let imageUrl = charDefaultImage(c) || c.images[0];
+      if (imageUrl?.startsWith('data:')) {
+        const b64 = imageUrl.split(',')[1];
+        const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: 'image/jpeg' });
+        imageUrl = uploaded.url;
+      }
+      const data = await apiFetch('/api/remove-background', { imageUrl });
       const bgRemovedUrl = data.url;
-      if (bgRemovedUrl && bgRemovedUrl !== c.images[0]) {
+      if (bgRemovedUrl) {
         c.bgRemovedImage = bgRemovedUrl;
         autoSave();
         renderShots(); // refresh previews as each one completes
@@ -714,7 +804,7 @@ async function prefetchCharBgRemovals() {
 }
 
 function _buildPayload() {
-  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null };
+  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, savedAt: Date.now() };
 }
 
 async function _persistData(key) {
@@ -733,8 +823,10 @@ async function _persistData(key) {
     } catch(e2) { console.error('localStorage save failed:', e2.message); }
   }
   try { await idbSet(key, imgs); } catch(e) { console.warn('IDB save failed:', e.message); }
-  // Sync to Supabase (fire and forget)
-  if (currentProjectId) sbUpsertData(currentProjectId, stripped, imgs);
+  // Sync to Supabase (fire and forget) — only if we have real content to avoid overwriting with empty state
+  if (currentProjectId && (characters.length > 0 || locations.length > 0 || shots.length > 0)) {
+    sbUpsertData(currentProjectId, stripped, imgs);
+  }
 }
 
 function saveData() {
@@ -1211,6 +1303,11 @@ function locDefaultImage(l) {
   return l.useRefAsDefault ? (l.referenceImage?.dataUrl || null) : (l.selectedImage || l.images?.[0] || null);
 }
 
+function charDefaultImage(c) {
+  if (!c) return null;
+  return c.useRefAsDefault ? (c.referenceImage?.dataUrl || null) : (c.images?.[0] || null);
+}
+
 function deleteAllCharacters() {
   if (!confirm('Delete all characters?')) return;
   syncFromDOM();
@@ -1254,9 +1351,17 @@ function handleShotRefUpload(id, input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    syncFromDOM();
-    const shot = shots.find(s => s.id === id);
-    if (shot) { shot.refImage = { dataUrl: e.target.result, mediaType: file.type }; autoSave(); renderShots(); }
+    const img = new Image();
+    img.onload = () => {
+      syncFromDOM();
+      const { dataUrl, base64 } = resizeForUpload(img);
+      const shot = shots.find(s => s.id === id);
+      if (shot) {
+        shot.refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+        autoSave(); renderShots();
+      }
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -1325,7 +1430,10 @@ const LOC_ANGLES = ['Wide establishing shot', 'Reverse angle wide shot', '3/4 le
 function locAngleRowHTML(l) {
   if (!l.shotAngles) l.shotAngles = {};
   if (!l.customViews) l.customViews = [];
-  const stdRows = LOC_ANGLES.map(angle => {
+  const stdRows = LOC_ANGLES.filter(angle => {
+    const entry = l.shotAngles?.[angle] || {};
+    return entry.image || entry.prompt?.trim() || entry.refImage;
+  }).map(angle => {
     const key = angle.replace(/\s+/g, '-');
     const entry = l.shotAngles?.[angle] || {};
     const img = entry.image;
@@ -1759,7 +1867,7 @@ function renderShots() {
 }
 
 function charRowHTML(c) {
-  const frontUrl = c.images?.[0] || null;
+  const frontUrl = charDefaultImage(c);
   const frontHTML = frontUrl
     ? `<img src="${esc(frontUrl)}" alt="Front">`
     : `<span class="placeholder">·</span>`;
@@ -1777,8 +1885,9 @@ function charRowHTML(c) {
     <td data-label="Description"><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
     <td data-label="Reference Image">
       <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="triggerImageUpload('${c.id}')">${refImgHTML}</div>
+        <div class="ref-img-preview" onclick="${c.referenceImage ? `toggleCharUseRef('${c.id}')` : `triggerImageUpload('${c.id}')`}">${refImgHTML}</div>
         <input type="file" id="file-${c.id}" class="hidden" accept="image/*" onchange="handleImageUpload('${c.id}', this)">
+        ${c.referenceImage ? `<button onclick="toggleCharUseRef('${c.id}')" style="background:${c.useRefAsDefault ? '#1a2a1a' : 'none'};border:1px solid ${c.useRefAsDefault ? '#4ade80' : '#2a2a2a'};border-radius:4px;color:${c.useRefAsDefault ? '#4ade80' : '#666'};font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-top:4px">${c.useRefAsDefault ? '📷 Using Ref as Default' : '📷 Use Ref as Default'}</button>` : ''}
       </div>
     </td>
     <td data-label="Prompt">
@@ -1981,7 +2090,7 @@ function shotRowHTML(s, idx) {
             ? shotCharsWithImg.map((c, i) => {
                 const total = shotCharsWithImg.length;
                 const leftPct = ((i + 1) / (total + 1)) * 100;
-                const imgSrc = c.bgRemovedImage || c.images[0];
+                const imgSrc = c.bgRemovedImage || charDefaultImage(c) || c.images[0];
                 return `<img src="${esc(imgSrc)}" class="final-preview-char-overlay" style="left:${leftPct}%;transform:translateX(-50%)">`;
               }).join('')
             : '';
@@ -2603,6 +2712,18 @@ async function generateShotSequence() {
 }
 
 // ── image upload ──────────────────────────────────────────────────────────
+// Resize to max 800px on longest side at 75% JPEG to keep base64 under ~200KB for Supabase sync.
+function resizeForUpload(imgEl, maxPx = 800) {
+  const scale = Math.min(1, maxPx / Math.max(imgEl.width, imgEl.height));
+  const w = Math.round(imgEl.width * scale);
+  const h = Math.round(imgEl.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(imgEl, 0, 0, w, h);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+  return { dataUrl, base64: dataUrl.split(',')[1] };
+}
+
 function triggerImageUpload(id) { document.getElementById(`file-${id}`).click(); }
 function handleImageUpload(id, input) {
   const file = input.files[0]; if (!file) return;
@@ -2610,15 +2731,23 @@ function handleImageUpload(id, input) {
   reader.onload = e => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width; canvas.height = img.height;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      const base64 = dataUrl.split(',')[1];
+      const { dataUrl, base64 } = resizeForUpload(img);
       const char = characters.find(c => c.id === id);
       if (char) char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
       const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
-      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
+      if (preview) {
+        preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
+        preview.onclick = () => toggleCharUseRef(id);
+        const cell = preview.closest('.ref-img-cell');
+        if (cell && !cell.querySelector('.use-ref-btn')) {
+          const btn = document.createElement('button');
+          btn.className = 'use-ref-btn';
+          btn.style.cssText = 'background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-top:4px';
+          btn.textContent = '📷 Use Ref as Default';
+          btn.onclick = () => toggleCharUseRef(id);
+          cell.appendChild(btn);
+        }
+      }
       autoSave();
     };
     img.src = e.target.result;
@@ -2630,7 +2759,12 @@ function removeRefImage(id, event) {
   const char = characters.find(c => c.id === id);
   if (char) char.referenceImage = null;
   const preview = document.querySelector(`#characters-body tr[data-id="${id}"] .ref-img-preview`);
-  if (preview) preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
+  if (preview) {
+    preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
+    preview.onclick = () => triggerImageUpload(id);
+    const cell = preview.closest('.ref-img-cell');
+    if (cell) { const b = cell.querySelector('.use-ref-btn'); if (b) b.remove(); }
+  }
   autoSave();
 }
 
@@ -2642,16 +2776,28 @@ function handleLocImageUpload(id, input) {
   reader.onload = e => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width; canvas.height = img.height;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      const base64 = dataUrl.split(',')[1];
+      const { dataUrl, base64 } = resizeForUpload(img);
       const loc = locations.find(l => l.id === id);
-      if (loc) loc.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+      if (loc) {
+        loc.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+        if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
+      }
       const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
-      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
+      if (preview) {
+        preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
+        preview.onclick = () => toggleLocUseRef(id);
+        const cell = preview.closest('.ref-img-cell');
+        if (cell && !cell.querySelector('.use-ref-btn')) {
+          const btn = document.createElement('button');
+          btn.className = 'use-ref-btn';
+          btn.style.cssText = 'background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-top:4px';
+          btn.textContent = '📷 Use Ref as Default View';
+          btn.onclick = () => toggleLocUseRef(id);
+          cell.appendChild(btn);
+        }
+      }
       autoSave();
+      renderLocations();
     };
     img.src = e.target.result;
   };
@@ -2662,7 +2808,12 @@ function removeLocRefImage(id, event) {
   const loc = locations.find(l => l.id === id);
   if (loc) loc.referenceImage = null;
   const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
-  if (preview) preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
+  if (preview) {
+    preview.innerHTML = `<div class="upload-hint">Click to<br>upload</div>`;
+    preview.onclick = () => triggerLocImageUpload(id);
+    const cell = preview.closest('.ref-img-cell');
+    if (cell) { const b = cell.querySelector('.use-ref-btn'); if (b) b.remove(); }
+  }
   autoSave();
 }
 
@@ -2808,17 +2959,19 @@ function handleCharAngleRefUpload(charId, angle, input) {
   const file = input.files?.[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const dataUrl = e.target.result;
-    const base64 = dataUrl.split(',')[1];
-    const char = characters.find(c => c.id === charId);
-    if (!char) return;
-    if (!char.angles) char.angles = {};
-    if (!char.angles[angle]) char.angles[angle] = {};
-    char.angles[angle].refImage = { dataUrl, base64, mediaType: file.type };
-    autoSave(); renderCharacters();
-    // Re-open the angle row
-    const row = document.getElementById(`char-angles-${charId}`);
-    if (row) row.style.display = '';
+    const img = new Image();
+    img.onload = () => {
+      const { dataUrl, base64 } = resizeForUpload(img);
+      const char = characters.find(c => c.id === charId);
+      if (!char) return;
+      if (!char.angles) char.angles = {};
+      if (!char.angles[angle]) char.angles[angle] = {};
+      char.angles[angle].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+      autoSave(); renderCharacters();
+      const row = document.getElementById(`char-angles-${charId}`);
+      if (row) row.style.display = '';
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -2846,14 +2999,18 @@ function handleLocAngleRefUpload(locId, angle, input) {
   const file = input.files?.[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const dataUrl = e.target.result;
-    const base64 = dataUrl.split(',')[1];
-    const loc = locations.find(l => l.id === locId);
-    if (!loc) return;
-    if (!loc.shotAngles) loc.shotAngles = {};
-    if (!loc.shotAngles[angle]) loc.shotAngles[angle] = {};
-    loc.shotAngles[angle].refImage = { dataUrl, base64, mediaType: file.type };
-    autoSave(); renderLocations();
+    const img = new Image();
+    img.onload = () => {
+      const { dataUrl, base64 } = resizeForUpload(img);
+      const loc = locations.find(l => l.id === locId);
+      if (!loc) return;
+      if (!loc.shotAngles) loc.shotAngles = {};
+      if (!loc.shotAngles[angle]) loc.shotAngles[angle] = {};
+      loc.shotAngles[angle].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+      if (!loc.shotAngles[angle].image) loc.shotAngles[angle].useRef = true;
+      autoSave(); renderLocations();
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -2877,12 +3034,16 @@ function handleLocCustomRefUpload(locId, idx, input) {
   const file = input.files?.[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const dataUrl = e.target.result;
-    const base64 = dataUrl.split(',')[1];
-    const loc = locations.find(l => l.id === locId);
-    if (!loc?.customViews?.[idx]) return;
-    loc.customViews[idx].refImage = { dataUrl, base64, mediaType: file.type };
-    autoSave(); renderLocations();
+    const img = new Image();
+    img.onload = () => {
+      const { dataUrl, base64 } = resizeForUpload(img);
+      const loc = locations.find(l => l.id === locId);
+      if (!loc?.customViews?.[idx]) return;
+      loc.customViews[idx].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+      if (!loc.customViews[idx].image) loc.customViews[idx].useRef = true;
+      autoSave(); renderLocations();
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -3079,9 +3240,12 @@ async function generateLocImages(id) {
   }
   try {
     const data = await apiFetch('/api/generate-shot-images', { prompt, stylePrompt, locImageUrls });
-    const imgs = data.images.slice(0, 1);
-    if (loc) { loc.images = imgs; loc.useRefAsDefault = false; }
-    grid.innerHTML = imageSlots(imgs, 1);
+    const newImgs = data.images.slice(0, 1);
+    if (loc) {
+      loc.images = [...(loc.images || []), ...newImgs.filter(u => !(loc.images || []).includes(u))];
+      loc.useRefAsDefault = false;
+    }
+    grid.innerHTML = imageSlots(loc.images, loc.images.length);
     autoSave();
     renderLocations();
     showToast('Default view generated.');
@@ -3093,7 +3257,6 @@ function toggleLocUseRef(id) {
   const loc = locations.find(l => l.id === id);
   if (!loc || !loc.referenceImage) return;
   loc.useRefAsDefault = !loc.useRefAsDefault;
-  // Swap what's shown in the images grid
   const grid = document.getElementById(`loc-imgs-${id}`);
   if (grid) {
     if (loc.useRefAsDefault) {
@@ -3102,8 +3265,41 @@ function toggleLocUseRef(id) {
       grid.innerHTML = loc.images?.length ? imageSlots(loc.images, 1) : emptySlots(1);
     }
   }
+  const row = document.querySelector(`#locations-body tr[data-id="${id}"]`);
+  if (row) {
+    const btn = row.querySelector('.use-ref-btn');
+    if (btn) {
+      const on = loc.useRefAsDefault;
+      btn.style.background = on ? '#1a2a1a' : 'none';
+      btn.style.borderColor = on ? '#4ade80' : '#2a2a2a';
+      btn.style.color = on ? '#4ade80' : '#666';
+      btn.textContent = on ? '📷 Using Ref as Default View' : '📷 Use Ref as Default View';
+    }
+  }
   autoSave();
-  renderLocations();
+}
+
+function toggleCharUseRef(id) {
+  const char = characters.find(c => c.id === id);
+  if (!char || !char.referenceImage) return;
+  char.useRefAsDefault = !char.useRefAsDefault;
+  const slot = document.getElementById(`char-front-${id}`);
+  if (slot) {
+    const img = charDefaultImage(char);
+    slot.innerHTML = img ? `<img src="${esc(img)}" alt="Front">` : `<span class="placeholder">·</span>`;
+  }
+  const row = document.querySelector(`#characters-body tr[data-id="${id}"]`);
+  if (row) {
+    const btn = row.querySelector('.use-ref-btn');
+    if (btn) {
+      const on = char.useRefAsDefault;
+      btn.style.background = on ? '#1a2a1a' : 'none';
+      btn.style.borderColor = on ? '#4ade80' : '#2a2a2a';
+      btn.style.color = on ? '#4ade80' : '#666';
+      btn.textContent = on ? '📷 Using Ref as Default' : '📷 Use Ref as Default';
+    }
+  }
+  autoSave();
 }
 
 // ── generate character prompt ─────────────────────────────────────────────
@@ -3134,6 +3330,7 @@ async function generateCharPrompt(id) {
 
 // ── generate character images ─────────────────────────────────────────────
 function proxyUrl(url) {
+  if (!url || url.startsWith('data:')) return url;
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
@@ -3347,8 +3544,9 @@ async function generateMissingLocImages() {
     if (grid) grid.innerHTML = '<span class="spinner"></span>';
     try {
       const data = await apiFetch('/api/generate-images', { prompt, stylePrompt: getStylePrompt() });
-      loc.images = data.images || [];
-      if (grid) grid.innerHTML = loc.images.map(url => `<img src="${esc(url)}" class="loc-thumb" onclick="setLocThumb('${loc.id}','${esc(url)}')">`).join('');
+      const newImgs = (data.images || []).filter(u => !(loc.images || []).includes(u));
+      loc.images = [...(loc.images || []), ...newImgs];
+      if (grid) grid.innerHTML = imageSlots(loc.images, loc.images.length);
     } catch(e) {
       console.error('image gen failed for', loc.name, e);
       if (grid) grid.innerHTML = '';
@@ -3548,9 +3746,19 @@ async function generateShotImages(id) {
       const b64 = shot.refImage.dataUrl.split(',')[1];
       const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: shot.refImage.mediaType });
       locImageUrls = [uploaded.url];
-    } catch(e) { locImageUrls = locations.filter(l => l.id === locationId2).map(l => l.selectedImage || l.images?.[0]).filter(Boolean); }
+    } catch(e) { locImageUrls = []; }
   } else {
-    locImageUrls = locations.filter(l => l.id === locationId2).map(l => l.selectedImage || l.images?.[0]).filter(Boolean);
+    const loc2 = locations.find(l => l.id === locationId2);
+    const locImg = loc2 ? locDefaultImage(loc2) : null;
+    if (locImg?.startsWith('data:')) {
+      try {
+        const b64 = locImg.split(',')[1];
+        const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: 'image/jpeg' });
+        locImageUrls = [uploaded.url];
+      } catch(e) { locImageUrls = []; }
+    } else {
+      locImageUrls = locImg ? [locImg] : [];
+    }
   }
 
   const grid = document.getElementById(`shot-imgs-${id}`);
@@ -3558,8 +3766,10 @@ async function generateShotImages(id) {
   grid.innerHTML = loadingSlots(2);
   try {
     const data = await apiFetch('/api/generate-shot-images', { prompt: imagePrompt, charImageUrls, locImageUrls, stylePrompt: getStylePrompt() });
-    if (shot) shot.images = data.images;
-    grid.innerHTML = imageSlots(data.images, 2);
+    if (shot) shot.images = [...(shot.images || []), ...data.images.filter(u => !(shot.images || []).includes(u))];
+    grid.innerHTML = imageSlots(shot.images, shot.images.length);
+    addImagesToLocation(locationId2, data.images);
+    if (_compose?.shotId === id) refreshShotBgThumbs();
     autoSave();
     showToast(`${data.images.length} image${data.images.length !== 1 ? 's' : ''} generated.`);
   } catch(e) { grid.innerHTML = emptySlots(2); showToast('Error: ' + e.message, true); }
@@ -3771,6 +3981,10 @@ try {
 const COMPOSE_W = 1280, COMPOSE_H = 720;
 let _compose = null;   // { shotId, layers[], selectedIdx, dragging }
 let _composeDrag = null; // { layerIdx, startCx, startCy, startMx, startMy }
+let _maskCanvas = null, _maskCtx = null, _maskOverlayCanvas = null;
+let _maskMode = false, _maskPainting = false, _maskBrushSize = 40;
+let _lastMaskX = null, _lastMaskY = null;
+let _maskCursorX = null, _maskCursorY = null;
 
 // Rule-of-thirds positions by label
 const COMPOSE_POSITIONS = {
@@ -3807,7 +4021,7 @@ function buildComposeLocThumbs(shot) {
 
   // Build pairs for 2-col grid — each location gets a "wrap" spanning both cols
   thumbContainer.innerHTML = locations.map(l => {
-    const views = [{ key: 'default', label: 'Default', img: l.images?.[0] || null }];
+    const views = [{ key: 'default', label: 'Default', img: locDefaultImage(l) }];
     LOC_ANGLES.forEach(a => { const img = l.shotAngles?.[a]?.image; if (img) views.push({ key: `angle-${a}`, label: a.replace('establishing shot','est.').replace(' shot',''), img }); });
     (l.customViews || []).forEach(cv => { if (cv.image) views.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img: cv.image }); });
 
@@ -3858,7 +4072,7 @@ function onLocBgViewChange(locId, viewKey) {
   if (!loc) return;
   let imgUrl = null;
   if (viewKey === 'default') {
-    imgUrl = loc.images?.[0] || null;
+    imgUrl = locDefaultImage(loc);
   } else if (viewKey.startsWith('angle-')) {
     imgUrl = loc.shotAngles?.[viewKey.slice(6)]?.image || null;
   } else if (viewKey.startsWith('custom-')) {
@@ -3933,6 +4147,8 @@ async function applyBgOnlyPrompt() {
     loadComposeBackground(newUrl);
     _compose.bgUrl = newUrl;
     saveComposeLayers();
+    addImagesToLocation(_compose.locationId, [newUrl]);
+    addUrlToShotImages(newUrl);
     showToast('Background updated.');
   } catch(e) { showToast('Error: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '✦ Apply to background'; } }
@@ -3977,6 +4193,7 @@ function syncComposeLocationToRow(locationId) {
   const shot = shots.find(s => s.id === _compose.shotId);
   if (!shot) return;
   shot.locationId = locationId;
+  _compose.locationId = locationId;
   const row = document.querySelector(`#shots-body tr[data-id="${_compose.shotId}"]`);
   if (row) { const s = row.querySelector('.field-loc-select'); if (s) s.value = locationId; }
   const finalCell = document.getElementById(`final-img-${_compose.shotId}`);
@@ -4010,29 +4227,35 @@ function openCompose(shotId) {
   const shot = shots.find(s => s.id === shotId);
   if (!shot) return;
 
-  _compose = { shotId, layers: [], selectedIdx: -1, globalLighting: shot.composeMeta?.globalLighting || 'none', globalLightingDir: shot.composeMeta?.globalLightingDir || 'none', bgSeparation: shot.composeMeta?.bgSeparation ?? 0, bgKey: null, bgUrl: null, bgMask: null, bgMaskUrl: shot.composeMeta?.bgMaskUrl || null, bgColor: shot.composeMeta?.bgColor || null, globalContrast: shot.composeMeta?.globalContrast ?? 100, globalSaturation: shot.composeMeta?.globalSaturation ?? 100, bgScale: shot.composeMeta?.bgScale ?? 1, bgOffsetX: shot.composeMeta?.bgOffsetX ?? 0, bgOffsetY: shot.composeMeta?.bgOffsetY ?? 0, history: [], undoStack: [] };
+  _compose = { shotId, locationId: shot.locationId || null, layers: [], selectedIdx: -1, bgSelected: false, globalLighting: shot.composeMeta?.globalLighting || 'none', globalLightingDir: shot.composeMeta?.globalLightingDir || 'none', bgSeparation: shot.composeMeta?.bgSeparation ?? 0, bgKey: null, bgUrl: null, bgMask: null, bgMaskUrl: shot.composeMeta?.bgMaskUrl || null, bgColor: shot.composeMeta?.bgColor || null, globalContrast: shot.composeMeta?.globalContrast ?? 100, globalSaturation: shot.composeMeta?.globalSaturation ?? 100, bgScale: shot.composeMeta?.bgScale ?? 1, bgOffsetX: shot.composeMeta?.bgOffsetX ?? 0, bgOffsetY: shot.composeMeta?.bgOffsetY ?? 0, history: [], undoStack: [] };
   const canvas = document.getElementById('compose-canvas');
   canvas.width = COMPOSE_W; canvas.height = COMPOSE_H;
 
-  // Background = selected location's image
-  const bgLoc = locations.find(l => l.id === shot.locationId && l.images?.length);
-  loadComposeBackground(bgLoc?.images?.[0] || shot.images?.[0] || null);
+  // Background — restore previously chosen bg URL, else fall back to location default
+  const bgLoc = locations.find(l => l.id === shot.locationId);
+  const savedBgUrl = shot.composeMeta?.bgUrl || null;
+  loadComposeBackground(savedBgUrl || locDefaultImage(bgLoc) || shot.images?.[0] || null);
 
-  // Restore previously saved layers
-  if (shot.composeLayers?.length) {
+  // Restore previously saved layers (Array.isArray check so empty array [] skips auto-place)
+  if (Array.isArray(shot.composeLayers)) {
     restoreComposeLayers(shot.composeLayers);
   } else {
     // Auto-place default character images for characters assigned to this shot
     const shotChars = (shot.characterIds || [])
       .map(id => characters.find(c => c.id === id))
-      .filter(c => c && c.images?.length);
+      .filter(c => c && (charDefaultImage(c) || c.images?.length));
     if (shotChars.length) {
       // Spread characters horizontally across the lower portion of the canvas
       shotChars.forEach((c, i) => {
         const total = shotChars.length;
         const cx = COMPOSE_W * ((i + 1) / (total + 1));
         const cy = COMPOSE_H * 0.65;
-        addComposeLayerUrl(c.images[0], c.name || 'Character', c.id, { cx, cy });
+        const defaultImg = charDefaultImage(c);
+        if (c.bgRemovedImage && !defaultImg?.startsWith('data:')) {
+          addComposeLayerUrlDirect(c.bgRemovedImage, c.name || 'Character', c.id, { cx, cy });
+        } else {
+          addComposeLayerUrl(defaultImg || c.images[0], c.name || 'Character', c.id, { cx, cy });
+        }
       });
     }
   }
@@ -4059,9 +4282,10 @@ function openCompose(shotId) {
     if (shotImgs.length) {
       shotBgThumbs.innerHTML = shotImgs.map((url, i) => {
         const key = `shot-img-${i}`;
-        return `<div class="compose-bg-card" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
+        return `<div class="compose-bg-card" style="position:relative" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
           <img src="${esc(proxyUrl(url))}" crossorigin="anonymous">
           <span class="compose-bg-card-label">Image ${i + 1}</span>
+          <button class="comp-thumb-delete" onclick="event.stopPropagation();removeShotBgImage('${esc(url)}')" title="Remove">✕</button>
         </div>`;
       }).join('');
       if (shotBgEmpty) shotBgEmpty.style.display = 'none';
@@ -4457,6 +4681,25 @@ async function compAddShotImgToStage(idx) {
   await addComposeLayerUrl(url, `Generated Image ${idx + 1}`, null);
 }
 
+function addComposeLayerUrlDirect(url, label, charId = null, dropPos = null) {
+  if (!_compose) return;
+  const pos = dropPos || { cx: COMPOSE_W / 2, cy: COMPOSE_H * 0.65 };
+  const imgEl = new Image();
+  imgEl.crossOrigin = 'anonymous';
+  imgEl.onload = () => {
+    const scale = 0.40;
+    const h = COMPOSE_H * scale;
+    const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
+    _compose.layers.push({ imgEl, imgUrl: url, label, charId, cx: pos.cx, cy: pos.cy, scale, w, h, opacity: 1, contrast: 100, saturation: 100 });
+    _compose.selectedIdx = _compose.layers.length - 1;
+    updateComposeLayerPanel();
+    renderCompose();
+    saveComposeLayers();
+    if (charId) refreshCompCharCard(charId);
+  };
+  imgEl.src = proxyUrl(url);
+}
+
 async function addComposeLayerUrl(url, label, charId = null, dropPos = null) {
   if (!_compose) return;
   const pos = dropPos || { cx: COMPOSE_W / 2, cy: COMPOSE_H * 0.65 };
@@ -4467,7 +4710,14 @@ async function addComposeLayerUrl(url, label, charId = null, dropPos = null) {
   showToast('Removing background…');
 
   try {
-    const data = await apiFetch('/api/remove-background', { imageUrl: url });
+    // fal-ai birefnet requires an https URL — upload data URLs to CDN first
+    let imageUrl = url;
+    if (url && url.startsWith('data:')) {
+      const b64 = url.split(',')[1];
+      const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: 'image/jpeg' });
+      imageUrl = uploaded.url;
+    }
+    const data = await apiFetch('/api/remove-background', { imageUrl });
     const bgRemovedUrl = data.url || url;
 
     // Cache bg-removed URL on the character so the shot preview can use it
@@ -4539,6 +4789,7 @@ function saveComposeLayers() {
   shot.composeMeta.bgScale = _compose.bgScale ?? 1;
   shot.composeMeta.bgOffsetX = _compose.bgOffsetX ?? 0;
   shot.composeMeta.bgOffsetY = _compose.bgOffsetY ?? 0;
+  shot.composeMeta.bgUrl = _compose.bgUrl || null;
   autoSave();
 }
 
@@ -4740,11 +4991,197 @@ async function restoreComposeLayers(savedLayers) {
   }
 }
 
+// Add AI-generated image URLs to the associated location's images list
+function addImagesToLocation(locationId, imageUrls) {
+  if (!locationId || !imageUrls?.length) return;
+  const loc = locations.find(l => l.id === locationId);
+  if (!loc) return;
+  if (!loc.images) loc.images = [];
+  const newUrls = imageUrls.filter(u => u && !loc.images.includes(u));
+  if (!newUrls.length) return;
+  loc.images.push(...newUrls);
+  autoSave();
+  // Refresh the location's image grid in the DOM if visible
+  const grid = document.getElementById(`loc-imgs-${locationId}`);
+  if (grid) grid.innerHTML = imageSlots(loc.images, loc.images.length);
+}
+
+// ── Inpaint mask painting ─────────────────────────────────────────────────────
+function toggleMaskMode() {
+  if (!_compose) return;
+  _maskMode = !_maskMode;
+  if (_maskMode && !_maskCanvas) {
+    _maskCanvas = document.createElement('canvas');
+    _maskCanvas.width = COMPOSE_W; _maskCanvas.height = COMPOSE_H;
+    _maskCtx = _maskCanvas.getContext('2d');
+    _maskCtx.fillStyle = '#000';
+    _maskCtx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
+  }
+  updateMaskOverlay();
+  const btn = document.getElementById('btn-toggle-mask');
+  if (btn) {
+    btn.style.background = _maskMode ? '#1a0a2a' : 'none';
+    btn.style.borderColor = _maskMode ? '#a78bfa' : '#2a2a2a';
+    btn.style.color = _maskMode ? '#a78bfa' : '#aaa';
+    btn.textContent = _maskMode ? '🖌 Painting (ON)' : '🖌 Paint Mask';
+  }
+  renderCompose();
+}
+
+function clearMask() {
+  if (!_maskCtx) return;
+  _maskCtx.fillStyle = '#000';
+  _maskCtx.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
+  updateMaskOverlay();
+  renderCompose();
+}
+
+function updateMaskOverlay() {
+  if (!_maskCanvas) return;
+  if (!_maskOverlayCanvas) {
+    _maskOverlayCanvas = document.createElement('canvas');
+    _maskOverlayCanvas.width = COMPOSE_W; _maskOverlayCanvas.height = COMPOSE_H;
+  }
+  const mc = _maskOverlayCanvas.getContext('2d');
+  mc.clearRect(0, 0, COMPOSE_W, COMPOSE_H);
+  mc.fillStyle = 'rgb(255, 60, 60)';
+  mc.fillRect(0, 0, COMPOSE_W, COMPOSE_H);
+  mc.globalCompositeOperation = 'destination-in';
+  mc.drawImage(_maskCanvas, 0, 0);
+  mc.globalCompositeOperation = 'source-over';
+  // Set resulting pixels to 50% opacity
+  const id = mc.getImageData(0, 0, COMPOSE_W, COMPOSE_H);
+  for (let i = 3; i < id.data.length; i += 4) id.data[i] = Math.round(id.data[i] * 0.5);
+  mc.putImageData(id, 0, 0);
+}
+
+function paintMask(x, y) {
+  if (!_maskCtx) return;
+  _maskCtx.fillStyle = '#fff';
+  _maskCtx.strokeStyle = '#fff';
+  _maskCtx.lineWidth = _maskBrushSize;
+  _maskCtx.lineCap = 'round';
+  _maskCtx.lineJoin = 'round';
+  if (_lastMaskX !== null) {
+    _maskCtx.beginPath();
+    _maskCtx.moveTo(_lastMaskX, _lastMaskY);
+    _maskCtx.lineTo(x, y);
+    _maskCtx.stroke();
+  }
+  _maskCtx.beginPath();
+  _maskCtx.arc(x, y, _maskBrushSize / 2, 0, Math.PI * 2);
+  _maskCtx.fill();
+  _lastMaskX = x; _lastMaskY = y;
+  updateMaskOverlay();
+  renderCompose();
+}
+
+async function applyInpaint() {
+  if (!_compose || !_maskCanvas) { showToast('Enable Paint Mask and draw a region first.', true); return; }
+  const prompt = document.getElementById('inpaint-prompt')?.value.trim();
+  if (!prompt) { showToast('Enter a prompt describing the replacement.', true); return; }
+
+  const btn = document.getElementById('btn-apply-inpaint');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+  try {
+    captureUndoState();
+    // Export canvas without mask overlay (hide mask temporarily)
+    const wasMaskMode = _maskMode;
+    _maskMode = false;
+    const savedIdx = _compose.selectedIdx;
+    _compose.selectedIdx = -1;
+    renderCompose();
+    const imageB64 = document.getElementById('compose-canvas').toDataURL('image/jpeg', 0.92).split(',')[1];
+    _compose.selectedIdx = savedIdx;
+    _maskMode = wasMaskMode;
+    renderCompose();
+
+    const maskB64 = _maskCanvas.toDataURL('image/png').split(',')[1];
+
+    const [imageData, maskData] = await Promise.all([
+      apiFetch('/api/upload-reference', { base64: imageB64, mediaType: 'image/jpeg' }),
+      apiFetch('/api/upload-reference', { base64: maskB64, mediaType: 'image/png' })
+    ]);
+
+    const data = await apiFetch('/api/inpaint', { imageUrl: imageData.url, maskUrl: maskData.url, prompt });
+    if (!data.url) throw new Error('No image returned');
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      _compose.bgImg = img;
+      _compose.bgUrl = data.url;
+      _compose.bgColor = null;
+      _compose.bgScale = 1;
+      _compose.bgOffsetX = 0;
+      _compose.bgOffsetY = 0;
+      clearMask();
+      _maskMode = false;
+      const maskBtn = document.getElementById('btn-toggle-mask');
+      if (maskBtn) { maskBtn.style.background='none'; maskBtn.style.borderColor='#2a2a2a'; maskBtn.style.color='#aaa'; maskBtn.textContent='🖌 Paint Mask'; }
+      syncBgPanZoomSliders();
+      renderCompose();
+      saveComposeLayers();
+      addImagesToLocation(_compose.locationId, [data.url]);
+      addUrlToShotImages(data.url);
+      showToast('Inpaint applied.');
+    };
+    img.onerror = () => showToast('Failed to load inpainted image.', true);
+    img.src = proxyUrl(data.url);
+  } catch(e) {
+    showToast('Inpaint failed: ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Apply to Region'; }
+  }
+}
+
 function closeCompose() {
+  if (!_compose) return;
   saveComposeLayers();
+
+  // Auto-save current canvas state as the shot's final image (fire-and-forget)
+  const shotId = _compose.shotId;
+  const canvas = document.getElementById('compose-canvas');
+  if (canvas && shotId) {
+    const savedIdx = _compose.selectedIdx;
+    _compose.selectedIdx = -1;
+    renderCompose();
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    _compose.selectedIdx = savedIdx;
+    renderCompose();
+    const base64 = dataUrl.split(',')[1];
+    apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg' }).then(data => {
+      const url = data.url;
+      const shot = shots.find(s => s.id === shotId);
+      if (!shot || !url) return;
+      shot.finalImage = url;
+      // Update shot row preview
+      const cell = document.getElementById(`final-img-${shotId}`);
+      if (cell) {
+        const locPreview = cell.querySelector('.final-image-loc-preview');
+        if (locPreview) {
+          let badge = locPreview.querySelector('.final-image-badge');
+          if (!badge) { badge = document.createElement('div'); badge.className = 'final-image-badge'; locPreview.appendChild(badge); }
+          badge.textContent = '✎ Final';
+          let img = locPreview.querySelector('.final-image-preview');
+          if (!img) { img = document.createElement('img'); img.className = 'final-image-preview'; locPreview.insertBefore(img, locPreview.firstChild); }
+          img.src = url;
+          const empty = locPreview.querySelector('.final-image-loc-empty');
+          if (empty) empty.remove();
+          // Remove character overlays — final image already includes them composited
+          locPreview.querySelectorAll('.final-preview-char-overlay').forEach(el => el.remove());
+        }
+      }
+      autoSave();
+    }).catch(() => {}); // silently ignore upload failures
+  }
+
   document.getElementById('compose-modal').classList.remove('open');
   _compose = null;
   _composeDrag = null;
+  _maskCanvas = null; _maskCtx = null; _maskOverlayCanvas = null;
+  _maskMode = false; _maskPainting = false;
+  _lastMaskX = null; _lastMaskY = null; _maskCursorX = null; _maskCursorY = null;
 }
 
 function updateComposeHeader() {
@@ -5110,7 +5547,7 @@ function compLayerEditHTML(layer, idx) {
     <div class="compose-section-title" style="margin:8px 0 6px">Layer Settings</div>
     <div class="compose-slider-row">
       <span class="compose-slider-label">Size</span>
-      <input type="range" id="compose-scale-slider" min="5" max="100" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
+      <input type="range" id="compose-scale-slider" min="5" max="300" value="30" oninput="setComposeLayerScale(this.value)" onmousedown="captureUndoState()">
       <span class="compose-slider-val" id="compose-scale-val">30%</span>
     </div>
     <div class="compose-slider-row">
@@ -5206,6 +5643,13 @@ function renderCompose() {
     }
   }
 
+  // Background selection indicator
+  if (_compose.bgSelected && _compose.selectedIdx < 0) {
+    ctx.strokeStyle = '#818cf8';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, COMPOSE_W - 4, COMPOSE_H - 4);
+  }
+
   // Rule-of-thirds overlay (subtle)
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1;
@@ -5298,6 +5742,22 @@ function renderCompose() {
     oc2.drawImage(canvas, 0, 0);
     ctx.clearRect(0, 0, COMPOSE_W, COMPOSE_H);
     ctx.drawImage(off2, 0, 0);
+  }
+
+  // Inpaint mask overlay — red tint where mask is white
+  if (_maskMode && _maskOverlayCanvas) {
+    ctx.drawImage(_maskOverlayCanvas, 0, 0);
+  }
+
+  // Brush cursor when in mask mode
+  if (_maskMode && _maskCursorX !== null) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(_maskCursorX, _maskCursorY, _maskBrushSize / 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -5487,6 +5947,50 @@ function flipComposeLayerH() {
   layer.imgUrl = dataUrl;
 }
 
+// Add a URL to the current shot's image list and refresh the AI Generated Backgrounds panel
+function addUrlToShotImages(url) {
+  if (!url || !_compose) return;
+  const shot = shots.find(s => s.id === _compose.shotId);
+  if (!shot) return;
+  if (!shot.images) shot.images = [];
+  if (shot.images.includes(url)) return;
+  shot.images.push(url);
+  refreshShotBgThumbs();
+  autoSave();
+}
+
+function refreshShotBgThumbs() {
+  if (!_compose) return;
+  const shot = shots.find(s => s.id === _compose.shotId);
+  const shotImgs = shot?.images || [];
+  const thumbs = document.getElementById('compose-shot-bg-thumbs');
+  const empty = document.getElementById('compose-shot-bg-empty');
+  if (!thumbs) return;
+  if (shotImgs.length) {
+    thumbs.innerHTML = shotImgs.map((url, i) => {
+      const key = `shot-img-${i}`;
+      return `<div class="compose-bg-card" style="position:relative" data-bg-key="${esc(key)}" onclick="selectComposeBg('${esc(key)}','${esc(url)}',null)">
+        <img src="${esc(proxyUrl(url))}" crossorigin="anonymous">
+        <span class="compose-bg-card-label">Image ${i + 1}</span>
+        <button class="comp-thumb-delete" onclick="event.stopPropagation();removeShotBgImage('${esc(url)}')" title="Remove">✕</button>
+      </div>`;
+    }).join('');
+    if (empty) empty.style.display = 'none';
+  } else {
+    thumbs.innerHTML = '';
+    if (empty) empty.style.display = '';
+  }
+}
+
+function removeShotBgImage(url) {
+  if (!_compose) return;
+  const shot = shots.find(s => s.id === _compose.shotId);
+  if (!shot) return;
+  shot.images = (shot.images || []).filter(u => u !== url);
+  autoSave();
+  refreshShotBgThumbs();
+}
+
 // ── run prompt on whole image ─────────────────────────────────────────────
 async function applyComposePrompt() {
   const prompt = document.getElementById('compose-prompt-input')?.value.trim();
@@ -5506,6 +6010,8 @@ async function applyComposePrompt() {
       img.crossOrigin = 'anonymous';
       img.onload = () => { _compose.bgImg = img; _compose.bgUrl = url; _compose.bgColor = null; renderCompose(); saveComposeLayers(); };
       img.src = proxyUrl(url);
+      addImagesToLocation(_compose.locationId, [url]);
+      addUrlToShotImages(url);
     }
   } catch(e) { showToast('Prompt failed: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '✦ Apply Prompt'; } }
@@ -5632,8 +6138,14 @@ function getCornerHit(layer, x, y) {
 
 document.getElementById('compose-canvas').addEventListener('mousedown', e => {
   if (!_compose) return;
-  captureUndoState();
   const { x, y } = composeCanvasCoords(e);
+  if (_maskMode) {
+    _maskPainting = true;
+    _lastMaskX = null; _lastMaskY = null;
+    paintMask(x, y);
+    return;
+  }
+  captureUndoState();
   // Check corner handles on selected layer first
   if (_compose.selectedIdx >= 0) {
     const sel = _compose.layers[_compose.selectedIdx];
@@ -5655,25 +6167,34 @@ document.getElementById('compose-canvas').addEventListener('mousedown', e => {
     if (l.loading) continue;
     if (x >= l.cx - l.w/2 && x <= l.cx + l.w/2 && y >= l.cy - l.h/2 && y <= l.cy + l.h/2) {
       _compose.selectedIdx = i;
+      _compose.bgSelected = false;
       _composeDrag = { layerIdx: i, startCx: l.cx, startCy: l.cy, startMx: x, startMy: y };
       updateComposeLayerPanel();
       renderCompose();
       return;
     }
   }
-  // Clicked empty space — drag background if one is loaded, else deselect
+  // Clicked empty space — select background (for scroll-zoom), start bg drag
+  _compose.selectedIdx = -1;
+  _compose.bgSelected = true;
+  updateComposeLayerPanel();
   if (_compose.bgImg && !_compose.bgColor) {
     _bgDrag = { startOx: _compose.bgOffsetX ?? 0, startOy: _compose.bgOffsetY ?? 0, startMx: x, startMy: y };
-  } else {
-    _compose.selectedIdx = -1;
-    updateComposeLayerPanel();
-    renderCompose();
   }
+  renderCompose();
+});
+
+document.getElementById('compose-canvas').addEventListener('mousemove', e => {
+  if (!_compose) return;
+  const { x, y } = composeCanvasCoords(e);
+  _maskCursorX = x; _maskCursorY = y;
+  if (_maskMode) { if (_maskPainting) paintMask(x, y); else renderCompose(); return; }
 });
 
 document.addEventListener('mousemove', e => {
   if (!_compose) return;
   const { x, y } = composeCanvasCoords(e);
+  if (_maskMode) return;
   if (_composeResize) {
     const layer = _compose.layers[_composeResize.layerIdx];
     if (!layer) return;
@@ -5710,6 +6231,7 @@ document.addEventListener('mousemove', e => {
 });
 
 document.addEventListener('mouseup', () => {
+  if (_maskPainting) { _maskPainting = false; _lastMaskX = null; _lastMaskY = null; return; }
   if (_composeDrag || _composeResize) saveComposeLayers();
   if (_bgDrag) saveComposeLayers();
   _composeDrag = null;
@@ -5717,13 +6239,32 @@ document.addEventListener('mouseup', () => {
   _bgDrag = null;
 });
 
+document.getElementById('compose-canvas').addEventListener('mouseleave', () => {
+  _maskCursorX = null; _maskCursorY = null;
+  if (_maskMode) renderCompose();
+});
+
 // ── Background scroll-to-zoom ─────────────────────────────────────────────────
 document.getElementById('compose-canvas').addEventListener('wheel', e => {
-  if (!_compose || !_compose.bgImg) return;
+  if (!_compose) return;
   e.preventDefault();
   const delta = e.deltaY > 0 ? -0.05 : 0.05;
-  _compose.bgScale = Math.max(0.1, Math.min(5, (_compose.bgScale ?? 1) + delta));
-  syncBgPanZoomSliders();
+  const sel = _compose.selectedIdx >= 0 ? _compose.layers[_compose.selectedIdx] : null;
+  if (sel && !sel.loading) {
+    // Resize selected character layer
+    sel.scale = Math.max(0.05, sel.scale + delta);
+    sel.h = COMPOSE_H * sel.scale;
+    sel.w = sel.h * (sel.imgEl.naturalWidth / sel.imgEl.naturalHeight);
+    const scaleSlider = document.getElementById('compose-scale-slider');
+    const scaleVal = document.getElementById('compose-scale-val');
+    const pct = Math.round(sel.scale * 100);
+    if (scaleSlider) scaleSlider.value = pct;
+    if (scaleVal) scaleVal.textContent = pct + '%';
+  } else if (_compose.bgImg && !_compose.bgColor) {
+    // Resize background
+    _compose.bgScale = Math.max(0.1, Math.min(5, (_compose.bgScale ?? 1) + delta));
+    syncBgPanZoomSliders();
+  }
   renderCompose();
   saveComposeLayers();
 }, { passive: false });
