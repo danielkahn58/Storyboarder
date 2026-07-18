@@ -219,6 +219,7 @@ let currentProjectId = null;
 let versions = []; // { id, label, parentLabel, data, timestamp }
 let currentVersionLabel = null;
 let editsSinceVersion = 0;
+let _lastAutoSnapshotTime = 0;
 const AUTO_VERSION_EVERY = 100;
 
 let lastScriptText = null;
@@ -303,6 +304,52 @@ function stripBase64ForSync(imgs) {
     locs:  Object.fromEntries(Object.entries(imgs.locs  || {}).map(([id, v]) => [id, cleanEntry(v)])),
     shots: Object.fromEntries(Object.entries(imgs.shots || {}).map(([id, v]) => [id, cleanEntry(v)])),
   };
+}
+
+async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
+  try {
+    const strippedImgs = stripBase64ForSync(imgs);
+    await getSB().from('project_snapshots').insert({
+      project_id: projectId,
+      label: label || null,
+      auto: isAuto,
+      data: stripped,
+      images: strippedImgs,
+      created_at: Date.now()
+    });
+    // Prune auto-snapshots older than 30 days, keep max 200 total
+    if (isAuto) {
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      getSB().from('project_snapshots')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('auto', true)
+        .lt('created_at', cutoff);
+    }
+  } catch(e) { console.warn('snapshot save failed:', e.message); }
+}
+
+async function sbGetSnapshots(projectId) {
+  try {
+    const { data, error } = await getSB().from('project_snapshots')
+      .select('id,label,auto,created_at,data,images')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return data || [];
+  } catch(e) { console.warn('snapshot fetch failed:', e.message); return []; }
+}
+
+async function sbRestoreSnapshot(snapshotId) {
+  try {
+    const { data, error } = await getSB().from('project_snapshots')
+      .select('data,images')
+      .eq('id', snapshotId)
+      .single();
+    if (error) throw error;
+    return data;
+  } catch(e) { console.warn('snapshot restore failed:', e.message); return null; }
 }
 
 async function sbGetData(id) {
@@ -498,6 +545,7 @@ function createProject() {
 
 async function openProject(id) {
   clearTimeout(_saveTimer); // prevent any pending debounced save from writing empty data to the new project
+  _lastAutoSnapshotTime = 0;
   currentProjectId = id;
   versions = []; currentVersionLabel = null; editsSinceVersion = 0;
   characters = []; locations = []; shots = [];
@@ -826,6 +874,12 @@ async function _persistData(key) {
   // Sync to Supabase (fire and forget) — only if we have real content to avoid overwriting with empty state
   if (currentProjectId && (characters.length > 0 || locations.length > 0 || shots.length > 0)) {
     sbUpsertData(currentProjectId, stripped, imgs);
+    // Auto-snapshot every 10 minutes
+    const now = Date.now();
+    if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
+      _lastAutoSnapshotTime = now;
+      sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
+    }
   }
 }
 
@@ -963,7 +1017,10 @@ function createVersion(isAuto = false) {
   editsSinceVersion = 0;
   saveVersionMeta();
   renderVersionUI();
-  if (!isAuto) {
+  // Save named versions to Supabase snapshots table
+  if (!isAuto && currentProjectId) {
+    const { stripped, imgs } = extractImages(_buildPayload());
+    sbSaveSnapshot(currentProjectId, label, false, stripped, imgs);
     const btn = document.getElementById('btn-new-version');
     if (btn) { btn.classList.add('saved-flash'); setTimeout(() => btn.classList.remove('saved-flash'), 1500); }
   }
@@ -1055,9 +1112,54 @@ function renderVersionUI() {
       </select>
     ` : ''}
     <button id="btn-new-version" class="btn-new-version" onclick="createVersion()">+ New Version</button>
+    <button class="btn-cloud-restore" onclick="openCloudRestore()" title="Restore from cloud backup">☁ Restore</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
     <span id="version-edit-count" class="version-edit-count">${editsSinceVersion > 0 ? `${editsSinceVersion}/${AUTO_VERSION_EVERY}` : ''}</span>
   `;
+}
+
+async function openCloudRestore() {
+  if (!currentProjectId) return;
+  const modal = document.getElementById('cloud-restore-modal');
+  const list = document.getElementById('cloud-restore-list');
+  if (!modal || !list) return;
+  list.innerHTML = '<p style="color:#888;padding:16px">Loading snapshots…</p>';
+  modal.style.display = 'flex';
+  const snapshots = await sbGetSnapshots(currentProjectId);
+  if (!snapshots.length) {
+    list.innerHTML = '<p style="color:#888;padding:16px">No cloud snapshots found.</p>';
+    return;
+  }
+  list.innerHTML = snapshots.map(s => `
+    <div class="restore-item">
+      <div class="restore-item-info">
+        <span class="restore-item-label">${s.auto ? '⟳ Auto-save' : `📌 v${s.label}`}</span>
+        <span class="restore-item-time">${new Date(s.created_at).toLocaleString()}</span>
+        <span class="restore-item-counts">${s.data?.characters?.length || 0} chars · ${s.data?.locations?.length || 0} locs · ${s.data?.shots?.length || 0} shots</span>
+      </div>
+      <button class="restore-item-btn" onclick="restoreCloudSnapshot('${s.id}')">Restore</button>
+    </div>
+  `).join('');
+}
+
+async function restoreCloudSnapshot(snapshotId) {
+  if (!confirm('Restore this snapshot? Your current state will be saved as a new version first.')) return;
+  // Save current state first
+  createVersion(false);
+  const row = await sbRestoreSnapshot(snapshotId);
+  if (!row) { showToast('Failed to load snapshot.', true); return; }
+  const merged = mergeImages(row.data, row.images);
+  characters = merged.characters || [];
+  locations = merged.locations || [];
+  shots = merged.shots || [];
+  visualStyles = merged.visualStyles || visualStyles;
+  selectedStyleId = merged.selectedStyleId || selectedStyleId;
+  charGenRules = merged.charGenRules || '';
+  locationGenRules = merged.locationGenRules || '';
+  autoSave();
+  renderAll();
+  document.getElementById('cloud-restore-modal').style.display = 'none';
+  showToast('Snapshot restored.');
 }
 
 function syncFromDOM() {
