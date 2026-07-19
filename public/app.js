@@ -310,45 +310,22 @@ function stripBase64ForSync(imgs) {
 async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
   try {
     const strippedImgs = stripBase64ForSync(imgs);
-    await getSB().from('project_snapshots').insert({
-      project_id: projectId,
-      label: label || null,
-      auto: isAuto,
-      data: stripped,
-      images: strippedImgs,
-      created_at: Date.now()
+    await apiFetch('/api/snapshots', {
+      projectId, label: label || null, auto: isAuto, data: stripped, images: strippedImgs
     });
-    // Prune auto-snapshots older than 30 days, keep max 200 total
-    if (isAuto) {
-      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      getSB().from('project_snapshots')
-        .delete()
-        .eq('project_id', projectId)
-        .eq('auto', true)
-        .lt('created_at', cutoff);
-    }
   } catch(e) { console.warn('snapshot save failed:', e.message); }
 }
 
 async function sbGetSnapshots(projectId) {
   try {
-    const { data, error } = await getSB().from('project_snapshots')
-      .select('id,label,auto,created_at,data,images')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (error) throw error;
+    const data = await apiFetch(`/api/snapshots/${projectId}`, null, 'GET');
     return data || [];
   } catch(e) { console.warn('snapshot fetch failed:', e.message); return []; }
 }
 
-async function sbRestoreSnapshot(snapshotId) {
+async function sbRestoreSnapshot(snapshotId, projectId) {
   try {
-    const { data, error } = await getSB().from('project_snapshots')
-      .select('data,images')
-      .eq('id', snapshotId)
-      .single();
-    if (error) throw error;
+    const data = await apiFetch(`/api/snapshots/${projectId}/${snapshotId}`, null, 'GET');
     return data;
   } catch(e) { console.warn('snapshot restore failed:', e.message); return null; }
 }
@@ -1211,7 +1188,7 @@ async function restoreCloudSnapshot(snapshotId) {
   if (!confirm('Restore this snapshot? Your current state will be saved as a new version first.')) return;
   // Save current state first
   createVersion(false);
-  const row = await sbRestoreSnapshot(snapshotId);
+  const row = await sbRestoreSnapshot(snapshotId, currentProjectId);
   if (!row) { showToast('Failed to load snapshot.', true); return; }
   const merged = mergeImages(row.data, row.images);
   characters = merged.characters || [];
@@ -4126,14 +4103,17 @@ async function generateCharVariant(shotId, charId) {
 }
 
 // ── utilities ─────────────────────────────────────────────────────────────
-async function apiFetch(url, body) {
+async function apiFetch(url, body, method) {
   // Auto-inject projectId into generation endpoints so images get meaningful storage paths
   const generationEndpoints = ['/api/generate-images', '/api/generate-shot-images', '/api/generate-char-variant',
     '/api/apply-expression', '/api/apply-prompt', '/api/remove-background', '/api/relight-image', '/api/inpaint'];
-  const enriched = (currentProjectId && generationEndpoints.some(e => url.includes(e)))
+  const isGet = method === 'GET' || body === null;
+  const enriched = (!isGet && currentProjectId && generationEndpoints.some(e => url.includes(e)))
     ? { projectId: currentProjectId, ...body }
     : body;
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enriched) });
+  const res = await fetch(url, isGet
+    ? { method: 'GET' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enriched) });
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { throw new Error(text || `HTTP ${res.status}`); }

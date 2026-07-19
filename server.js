@@ -1276,6 +1276,46 @@ app.post('/api/inpaint', async (req, res) => {
 });
 
 // Manual backup trigger (auth-protected)
+app.post('/api/snapshots', async (req, res) => {
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  const { projectId, label, auto, data, images } = req.body;
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  try {
+    const { error } = await sbAdmin.from('project_snapshots').insert({
+      project_id: projectId, label: label || null, auto: !!auto, data, images, created_at: Date.now()
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    if (auto) {
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      sbAdmin.from('project_snapshots').delete().eq('project_id', projectId).eq('auto', true).lt('created_at', cutoff);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/snapshots/:projectId', async (req, res) => {
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  try {
+    const { data, error } = await sbAdmin.from('project_snapshots')
+      .select('id,label,auto,created_at,data,images')
+      .eq('project_id', req.params.projectId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/snapshots/:projectId/:snapshotId', async (req, res) => {
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  try {
+    const { data, error } = await sbAdmin.from('project_snapshots')
+      .select('data,images').eq('id', req.params.snapshotId).single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/backup', async (req, res) => {
   runBackup().catch(e => log('error', 'manual backup error', { error: e.message }));
   res.json({ message: 'Backup started in background' });
