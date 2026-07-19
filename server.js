@@ -40,19 +40,24 @@ if (AUTH_ENABLED) {
   passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL || '/auth/google/callback'
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || '/auth/google/callback',
+    accessType: 'offline',
+    prompt: 'consent',
   }, (accessToken, refreshToken, profile, done) => {
     const email = profile.emails?.[0]?.value?.toLowerCase();
     if (!email || !ALLOWED_EMAILS.includes(email)) {
       return done(null, false, { message: 'Email not allowed' });
     }
+    // Store tokens for Drive backup use
+    if (refreshToken) process.env._GOOGLE_REFRESH_TOKEN = refreshToken;
+    if (accessToken)  process.env._GOOGLE_ACCESS_TOKEN  = accessToken;
     return done(null, { id: profile.id, email, name: profile.displayName });
   }));
 
   passport.serializeUser((user, done) => done(null, user));
   passport.deserializeUser((user, done) => done(null, user));
 
-  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.file'] }));
 
   app.get('/auth/google/callback',
     passport.authenticate('google', { failureRedirect: '/login.html' }),
@@ -129,18 +134,17 @@ async function persistImages(falUrls, prefix) {
 // ── Google Drive backup ───────────────────────────────────────────────────────
 
 async function getDriveClient() {
-  let key;
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  } else {
-    const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH || './service-account.json';
-    key = JSON.parse(fs.readFileSync(path.resolve(keyPath), 'utf-8'));
-  }
-  const auth = new google.auth.GoogleAuth({
-    credentials: key,
-    scopes: ['https://www.googleapis.com/auth/drive.file']
-  });
-  return google.drive({ version: 'v3', auth });
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_CALLBACK_URL || '/auth/google/callback'
+  );
+  // Use stored tokens from the last login session
+  const refreshToken = process.env._GOOGLE_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
+  const accessToken  = process.env._GOOGLE_ACCESS_TOKEN  || process.env.GOOGLE_ACCESS_TOKEN;
+  if (!refreshToken && !accessToken) throw new Error('No Google OAuth tokens available — sign in to the app first');
+  oauth2Client.setCredentials({ refresh_token: refreshToken, access_token: accessToken });
+  return google.drive({ version: 'v3', auth: oauth2Client });
 }
 
 async function runBackup() {
