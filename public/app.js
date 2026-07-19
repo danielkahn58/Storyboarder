@@ -2858,7 +2858,7 @@ function handleImageUpload(id, input) {
       // Upload to Supabase Storage in background for permanent URL
       try {
         const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: id });
-        if (r.url && char) { char.referenceImage = { ...char.referenceImage, url: r.url }; }
+        if (r.url && char) { char.referenceImage = { ...char.referenceImage, url: r.url, dataUrl: r.url }; }
       } catch(e) { console.warn('ref upload failed', e); }
       const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
@@ -2911,7 +2911,7 @@ function handleLocImageUpload(id, input) {
       // Upload to Supabase Storage in background for permanent URL
       try {
         const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'locs', entityId: id });
-        if (r.url && loc) { loc.referenceImage = { ...loc.referenceImage, url: r.url }; }
+        if (r.url && loc) { loc.referenceImage = { ...loc.referenceImage, url: r.url, dataUrl: r.url }; }
       } catch(e) { console.warn('loc ref upload failed', e); }
       const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
