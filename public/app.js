@@ -689,12 +689,28 @@ function renderProjectsView() {
   `;
 }
 
+let _authUser = null;
+async function loadAuthUser() {
+  try {
+    const r = await fetch('/auth/me');
+    if (r.ok) _authUser = await r.json();
+  } catch(e) {}
+}
+
+function userBadgeHTML() {
+  if (!_authUser) return '';
+  return `<div style="display:flex;align-items:center;gap:8px;border-left:1px solid #222;padding-left:12px;margin-left:4px;">
+    <span style="font-size:12px;color:#555;">${esc(_authUser.email)}</span>
+    <a href="/auth/logout" style="font-size:12px;color:#444;text-decoration:none;border:1px solid #222;border-radius:5px;padding:5px 10px;transition:all 0.15s;" onmouseover="this.style.color='#aaa';this.style.borderColor='#444'" onmouseout="this.style.color='#444';this.style.borderColor='#222'">Sign out</a>
+  </div>`;
+}
+
 function renderHeader() {
   const el = document.getElementById('main-header');
   if (!el) return;
   if (!currentProjectId) {
     // Projects view header
-    el.innerHTML = `<div class="header-main"><h1>Storyboard Generator</h1><div></div></div>`;
+    el.innerHTML = `<div class="header-main"><h1>Storyboard Generator</h1>${userBadgeHTML()}</div>`;
     return;
   }
   const proj = projects.find(p => p.id === currentProjectId);
@@ -712,6 +728,7 @@ function renderHeader() {
         <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
+        ${userBadgeHTML()}
       </div>
     </div>
     <nav class="section-nav">
@@ -753,6 +770,7 @@ function promptRenameCurrentProject() {
 }
 
 async function initApp() {
+  await loadAuthUser();
   renderHeader();
   renderProjectsView(); // show loading state immediately
   await loadProjects();
