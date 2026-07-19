@@ -2890,13 +2890,14 @@ function handleImageUpload(id, input) {
       const char = characters.find(c => c.id === id);
       if (char) char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
       // Upload to Supabase Storage in background for permanent URL
+      let displayUrl = dataUrl;
       try {
         const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: id });
-        if (r.url && char) { char.referenceImage = { ...char.referenceImage, url: r.url, dataUrl: r.url }; }
+        if (r.url && char) { char.referenceImage = { ...char.referenceImage, url: r.url, dataUrl: r.url }; displayUrl = r.url; }
       } catch(e) { console.warn('ref upload failed', e); }
       const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
-        preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
+        preview.innerHTML = `<img src="${displayUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
         preview.onclick = () => toggleCharUseRef(id);
         const cell = preview.closest('.ref-img-cell');
         if (cell && !cell.querySelector('.use-ref-btn')) {
@@ -2943,13 +2944,14 @@ function handleLocImageUpload(id, input) {
         if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
       }
       // Upload to Supabase Storage in background for permanent URL
+      let displayUrl = dataUrl;
       try {
         const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'locs', entityId: id });
-        if (r.url && loc) { loc.referenceImage = { ...loc.referenceImage, url: r.url, dataUrl: r.url }; }
+        if (r.url && loc) { loc.referenceImage = { ...loc.referenceImage, url: r.url, dataUrl: r.url }; displayUrl = r.url; }
       } catch(e) { console.warn('loc ref upload failed', e); }
       const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
-        preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
+        preview.innerHTML = `<img src="${displayUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
         preview.onclick = () => toggleLocUseRef(id);
         const cell = preview.closest('.ref-img-cell');
         if (cell && !cell.querySelector('.use-ref-btn')) {
