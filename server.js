@@ -722,6 +722,31 @@ Respond with ONLY a JSON object mapping each angle name exactly to its prompt st
   }
 });
 
+// Re-upload an existing URL (e.g. expiring fal.media) to Supabase Storage
+app.post('/api/reupload-ref', async (req, res) => {
+  const { url, projectId, entityType, entityId } = req.body;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return res.status(502).json({ error: `fetch failed: ${response.status}` });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const prefix = (projectId && entityType && entityId)
+      ? `projects/${projectId}/${entityType}/${entityId}`
+      : `projects/${projectId || 'unassigned'}/refs`;
+    const storagePath = `${prefix}/${Date.now()}-ref.jpg`;
+    const { error } = await sbAdmin.storage.from('images').upload(storagePath, buffer, {
+      contentType, upsert: true
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+    res.json({ url: publicUrl });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/upload-reference', async (req, res) => {
   const { base64, mediaType, projectId, entityType, entityId } = req.body;
   if (!base64) return res.status(400).json({ error: 'base64 required' });

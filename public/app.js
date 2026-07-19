@@ -857,6 +857,29 @@ async function loadData() {
   renderVersionUI();
   restoreAudio();
   prefetchCharBgRemovals();
+  migrateRefImages();
+}
+
+// Silently re-upload any ref images still on fal.media to Supabase Storage
+async function migrateRefImages() {
+  const isFal = url => typeof url === 'string' && (url.includes('fal.media') || url.includes('fal.run'));
+  const migrate = async (entity, entityType) => {
+    const ref = entity.referenceImage;
+    if (!ref) return;
+    const src = ref.url || (typeof ref.dataUrl === 'string' && !ref.dataUrl.startsWith('data:') ? ref.dataUrl : null);
+    if (!src || !isFal(src)) return;
+    try {
+      const r = await apiFetch('/api/reupload-ref', {
+        url: src, projectId: currentProjectId, entityType, entityId: entity.id
+      });
+      if (r.url) {
+        entity.referenceImage = { ...ref, url: r.url, dataUrl: r.url };
+        autoSave();
+      }
+    } catch (e) { console.warn('migrateRefImages failed for', entity.id, e); }
+  };
+  for (const c of characters) await migrate(c, 'chars');
+  for (const l of locations) await migrate(l, 'locs');
 }
 
 async function prefetchCharBgRemovals() {
