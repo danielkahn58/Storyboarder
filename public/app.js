@@ -4067,7 +4067,13 @@ async function generateCharVariant(shotId, charId) {
 
 // ── utilities ─────────────────────────────────────────────────────────────
 async function apiFetch(url, body) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // Auto-inject projectId into generation endpoints so images get meaningful storage paths
+  const generationEndpoints = ['/api/generate-images', '/api/generate-shot-images', '/api/generate-char-variant',
+    '/api/apply-expression', '/api/apply-prompt', '/api/remove-background', '/api/relight-image', '/api/inpaint'];
+  const enriched = (currentProjectId && generationEndpoints.some(e => url.includes(e)))
+    ? { projectId: currentProjectId, ...body }
+    : body;
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enriched) });
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { throw new Error(text || `HTTP ${res.status}`); }

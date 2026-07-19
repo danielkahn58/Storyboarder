@@ -5,6 +5,10 @@ const passport = require('passport');
 const { Strategy: GoogleStrategy } = require('passport-google-oauth20');
 const Anthropic = require('@anthropic-ai/sdk');
 const { fal } = require('@fal-ai/client');
+const { createClient } = require('@supabase/supabase-js');
+const { google } = require('googleapis');
+const cron = require('node-cron');
+const archiver = require('archiver');
 const JSZip = require('jszip');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
@@ -86,6 +90,107 @@ function log(level, message, data) {
   const line = JSON.stringify(entry);
   console.log(line);
   fs.appendFileSync(LOG_FILE, line + '\n');
+}
+
+// ── Supabase server client ────────────────────────────────────────────────────
+
+const sbAdmin = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY)
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+  : null;
+
+// Download a URL and upload to Supabase Storage. Returns permanent public URL.
+async function persistImage(falUrl, storagePath) {
+  if (!sbAdmin || !falUrl) return falUrl;
+  try {
+    const res = await fetch(falUrl);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const ext = storagePath.split('.').pop() || 'jpg';
+    const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const { error } = await sbAdmin.storage.from('images').upload(storagePath, buf, {
+      contentType, upsert: true
+    });
+    if (error) throw error;
+    const { data } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+    return data.publicUrl;
+  } catch (e) {
+    log('warn', 'persistImage failed — keeping fal URL', { falUrl, error: e.message });
+    return falUrl; // fall back to fal URL rather than failing the request
+  }
+}
+
+// Persist an array of image URLs to Storage under a given prefix.
+async function persistImages(falUrls, prefix) {
+  if (!sbAdmin) return falUrls;
+  const ts = Date.now();
+  return Promise.all(falUrls.map((url, i) => persistImage(url, `${prefix}/${ts}-${i}.jpg`)));
+}
+
+// ── Google Drive backup ───────────────────────────────────────────────────────
+
+async function getDriveClient() {
+  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH || './service-account.json';
+  const key = JSON.parse(fs.readFileSync(path.resolve(keyPath), 'utf-8'));
+  const auth = new google.auth.GoogleAuth({
+    credentials: key,
+    scopes: ['https://www.googleapis.com/auth/drive.file']
+  });
+  return google.drive({ version: 'v3', auth });
+}
+
+async function runBackup() {
+  if (!sbAdmin) { log('warn', 'backup skipped — no Supabase admin client'); return; }
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!folderId) { log('warn', 'backup skipped — no GOOGLE_DRIVE_FOLDER_ID'); return; }
+
+  log('info', 'backup started');
+  const t0 = Date.now();
+  try {
+    // Fetch all data from Supabase
+    const [{ data: projects }, { data: snapshots }] = await Promise.all([
+      sbAdmin.from('projects').select('*'),
+      sbAdmin.from('project_snapshots').select('*').order('created_at', { ascending: false })
+    ]);
+
+    // List all images in Storage
+    const { data: storageFiles } = await sbAdmin.storage.from('images').list('projects', { limit: 10000, recursive: true });
+
+    // Build zip in memory
+    const zip = new JSZip();
+    zip.file('projects.json', JSON.stringify(projects || [], null, 2));
+    zip.file('snapshots.json', JSON.stringify(snapshots || [], null, 2));
+    zip.file('storage-index.json', JSON.stringify(storageFiles || [], null, 2));
+
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+    // Upload to Google Drive
+    const drive = await getDriveClient();
+    const date = new Date().toISOString().split('T')[0];
+    const filename = `storyboarder-backup-${date}.zip`;
+
+    await drive.files.create({
+      requestBody: { name: filename, parents: [folderId] },
+      media: { mimeType: 'application/zip', body: require('stream').Readable.from(zipBuf) }
+    });
+
+    // Delete backups older than 30 days
+    const { data: oldFiles } = await drive.files.list({
+      q: `'${folderId}' in parents and name contains 'storyboarder-backup' and trashed = false`,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'createdTime desc'
+    });
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const f of (oldFiles?.files || [])) {
+      if (new Date(f.createdTime).getTime() < cutoff) {
+        await drive.files.delete({ fileId: f.id });
+        log('info', 'backup pruned old file', { name: f.name });
+      }
+    }
+
+    log('info', 'backup complete', { ms: Date.now() - t0, projects: projects?.length, snapshots: snapshots?.length });
+  } catch (e) {
+    log('error', 'backup failed', { error: e.message, ms: Date.now() - t0 });
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -626,14 +731,16 @@ app.post('/api/upload-reference', async (req, res) => {
 });
 
 app.post('/api/generate-images', async (req, res) => {
-  const { prompt, stylePrompt } = req.body;
+  const { prompt, stylePrompt, projectId, entityType, entityId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   log('info', 'generate-images started', { prompt_chars: prompt.length });
   const t0 = Date.now();
   try {
     const images = await generateImages(prompt, stylePrompt);
-    log('info', 'generate-images done', { count: images.length, ms: Date.now() - t0 });
-    res.json({ images });
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const persisted = await persistImages(images, prefix);
+    log('info', 'generate-images done', { count: persisted.length, ms: Date.now() - t0 });
+    res.json({ images: persisted });
   } catch (e) {
     log('error', 'generate-images failed', { error: e.message, ms: Date.now() - t0 });
     res.status(500).json({ error: e.message });
@@ -641,7 +748,7 @@ app.post('/api/generate-images', async (req, res) => {
 });
 
 app.post('/api/generate-shot-images', async (req, res) => {
-  const { prompt, referenceImageUrls, stylePrompt, charImageUrls, locImageUrls } = req.body;
+  const { prompt, referenceImageUrls, stylePrompt, charImageUrls, locImageUrls, projectId, entityType, entityId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
 
   // Build ref list — prefer explicit char/loc split, fall back to combined array
@@ -677,8 +784,10 @@ app.post('/api/generate-shot-images', async (req, res) => {
     } else {
       images = await generateImages(finalPrompt, stylePrompt);
     }
-    log('info', 'generate-shot-images done', { count: images.length, ms: Date.now() - t0 });
-    res.json({ images });
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const persisted = await persistImages(images, prefix);
+    log('info', 'generate-shot-images done', { count: persisted.length, ms: Date.now() - t0 });
+    res.json({ images: persisted });
   } catch (e) {
     log('error', 'generate-shot-images failed', { error: e.message, ms: Date.now() - t0 });
     res.status(500).json({ error: e.message });
@@ -839,7 +948,7 @@ app.post('/api/create-talking-video', async (req, res) => {
 });
 
 app.post('/api/generate-char-variant', async (req, res) => {
-  const { prompt, referenceImageUrls, stylePrompt } = req.body;
+  const { prompt, referenceImageUrls, stylePrompt, projectId, entityId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   const refs = Array.isArray(referenceImageUrls) ? referenceImageUrls.filter(Boolean) : [];
   if (!refs.length) return res.status(400).json({ error: 'at least one character reference image required' });
@@ -857,7 +966,9 @@ app.post('/api/generate-char-variant', async (req, res) => {
         safety_tolerance: '6',
       }
     });
-    const url = result?.data?.images?.[0]?.url ?? null;
+    const falUrl = result?.data?.images?.[0]?.url ?? null;
+    const prefix = (projectId && entityId) ? `projects/${projectId}/chars/${entityId}` : `projects/unassigned`;
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}.jpg`);
     log('info', 'generate-char-variant done', { url, ms: Date.now() - t0 });
     res.json({ url });
   } catch (e) {
@@ -867,7 +978,7 @@ app.post('/api/generate-char-variant', async (req, res) => {
 });
 
 app.post('/api/apply-expression', async (req, res) => {
-  const { imageUrl, expression } = req.body;
+  const { imageUrl, expression, projectId, entityId } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   const PROMPTS = {
     happy:     'Change only the facial expression to happy and smiling, keeping everything else identical — same character, same pose, same outfit, same art style, same background.',
@@ -882,7 +993,9 @@ app.post('/api/apply-expression', async (req, res) => {
     const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
       input: { prompt, image_url: imageUrl, aspect_ratio: '1:1', num_images: 1, safety_tolerance: '6' }
     });
-    const imageResultUrl = result?.data?.images?.[0]?.url || null;
+    const falUrl = result?.data?.images?.[0]?.url || null;
+    const prefix = (projectId && entityId) ? `projects/${projectId}/chars/${entityId}` : `projects/unassigned`;
+    const imageResultUrl = await persistImage(falUrl, `${prefix}/${Date.now()}.jpg`);
     res.json({ imageUrl: imageResultUrl });
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -890,13 +1003,15 @@ app.post('/api/apply-expression', async (req, res) => {
 });
 
 app.post('/api/apply-prompt', async (req, res) => {
-  const { imageUrl, prompt } = req.body;
+  const { imageUrl, prompt, projectId, entityType, entityId } = req.body;
   if (!imageUrl || !prompt) return res.status(400).json({ error: 'imageUrl and prompt required' });
   try {
     const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
       input: { prompt, image_url: imageUrl, aspect_ratio: '16:9', num_images: 1, safety_tolerance: '6' }
     });
-    const url = result?.data?.images?.[0]?.url ?? null;
+    const falUrl = result?.data?.images?.[0]?.url ?? null;
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}.jpg`);
     res.json({ url });
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -904,13 +1019,15 @@ app.post('/api/apply-prompt', async (req, res) => {
 });
 
 app.post('/api/remove-background', async (req, res) => {
-  const { imageUrl } = req.body;
+  const { imageUrl, projectId, entityType, entityId } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   try {
     const result = await fal.subscribe('fal-ai/birefnet', {
       input: { image_url: imageUrl, output_format: 'png', refine_foreground: true }
     });
-    const url = result?.data?.image?.url || null;
+    const falUrl = result?.data?.image?.url || null;
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}-nobg.png`);
     res.json({ url });
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -952,7 +1069,8 @@ app.post('/api/relight-image', async (req, res) => {
         enable_safety_checker: false,
       }
     });
-    const url = result?.data?.images?.[0]?.url || null;
+    const falUrl = result?.data?.images?.[0]?.url || null;
+    const url = await persistImage(falUrl, `projects/unassigned/${Date.now()}-relight.jpg`);
     res.json({ url });
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -1086,7 +1204,7 @@ ${input}`
 });
 
 app.post('/api/inpaint', async (req, res) => {
-  const { imageUrl, maskUrl, prompt } = req.body;
+  const { imageUrl, maskUrl, prompt, projectId, entityType, entityId } = req.body;
   if (!imageUrl || !maskUrl || !prompt) return res.status(400).json({ error: 'imageUrl, maskUrl, prompt required' });
   log('info', 'inpaint started', { prompt_chars: prompt.length });
   const t0 = Date.now();
@@ -1094,14 +1212,28 @@ app.post('/api/inpaint', async (req, res) => {
     const result = await fal.subscribe('fal-ai/flux-pro/v1/fill', {
       input: { image_url: imageUrl, mask_url: maskUrl, prompt, num_images: 1, output_format: 'jpeg', safety_tolerance: '5' }
     });
-    const url = result?.data?.images?.[0]?.url || null;
-    if (!url) throw new Error('No image returned');
+    const falUrl = result?.data?.images?.[0]?.url || null;
+    if (!falUrl) throw new Error('No image returned');
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}-inpaint.jpg`);
     log('info', 'inpaint done', { url, ms: Date.now() - t0 });
     res.json({ url });
   } catch(e) {
     log('error', 'inpaint failed', { error: e.message, ms: Date.now() - t0 });
     res.status(500).json({ error: e.message });
   }
+});
+
+// Manual backup trigger (auth-protected)
+app.post('/api/admin/backup', async (req, res) => {
+  runBackup().catch(e => log('error', 'manual backup error', { error: e.message }));
+  res.json({ message: 'Backup started in background' });
+});
+
+// Nightly backup at 2am
+cron.schedule('0 2 * * *', () => {
+  log('info', 'cron backup triggered');
+  runBackup();
 });
 
 const PORT = process.env.PORT || 3000;
