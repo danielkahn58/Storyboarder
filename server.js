@@ -723,15 +723,32 @@ Respond with ONLY a JSON object mapping each angle name exactly to its prompt st
 });
 
 app.post('/api/upload-reference', async (req, res) => {
-  const { base64, mediaType } = req.body;
+  const { base64, mediaType, projectId, entityType, entityId } = req.body;
   if (!base64) return res.status(400).json({ error: 'base64 required' });
   log('info', 'upload-reference started', { mediaType });
   const t0 = Date.now();
   try {
     const buffer = Buffer.from(base64, 'base64');
+    // Upload to Supabase Storage for permanent URL (fallback to fal if Supabase unavailable)
+    if (sbAdmin) {
+      const prefix = (projectId && entityType && entityId)
+        ? `projects/${projectId}/${entityType}/${entityId}`
+        : `projects/${projectId || 'unassigned'}/refs`;
+      const storagePath = `${prefix}/${Date.now()}-ref.jpg`;
+      const { error } = await sbAdmin.storage.from('images').upload(storagePath, buffer, {
+        contentType: mediaType || 'image/jpeg', upsert: true
+      });
+      if (!error) {
+        const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+        log('info', 'upload-reference done (supabase)', { url: publicUrl, ms: Date.now() - t0 });
+        return res.json({ url: publicUrl });
+      }
+      log('warn', 'upload-reference supabase failed, falling back to fal', { error: error.message });
+    }
+    // Fallback: fal.storage (temporary, expires)
     const blob = new Blob([buffer], { type: mediaType || 'image/jpeg' });
     const url = await fal.storage.upload(blob);
-    log('info', 'upload-reference done', { url, ms: Date.now() - t0 });
+    log('info', 'upload-reference done (fal fallback)', { url, ms: Date.now() - t0 });
     res.json({ url });
   } catch (e) {
     log('error', 'upload-reference failed', { error: e.message, ms: Date.now() - t0 });
@@ -1237,6 +1254,16 @@ app.post('/api/inpaint', async (req, res) => {
 app.post('/api/admin/backup', async (req, res) => {
   runBackup().catch(e => log('error', 'manual backup error', { error: e.message }));
   res.json({ message: 'Backup started in background' });
+});
+
+// One-time token retrieval — remove after getting token for Railway
+app.get('/api/admin/token', (req, res) => {
+  if (!req.isAuthenticated || !req.isAuthenticated()) return res.status(401).json({ error: 'not authenticated' });
+  res.json({
+    refresh_token: process.env._GOOGLE_REFRESH_TOKEN || null,
+    access_token: process.env._GOOGLE_ACCESS_TOKEN || null,
+    note: 'Copy refresh_token to Railway as GOOGLE_REFRESH_TOKEN, then delete this endpoint'
+  });
 });
 
 // Nightly backup at 2am

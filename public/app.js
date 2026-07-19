@@ -281,7 +281,8 @@ function stripBase64ForSync(imgs) {
     if (!v) return v;
     const out = { ...v };
     out.base64 = null;
-    if (out.cdnUrl) out.dataUrl = out.cdnUrl; // use CDN URL for cross-device display
+    const cdn = out.cdnUrl || out.url; // use Supabase/CDN URL for cross-device display
+    if (cdn) out.dataUrl = cdn;
     else if (typeof out.dataUrl === 'string' && out.dataUrl.startsWith('data:')) out.dataUrl = null;
     return out;
   }
@@ -2850,10 +2851,15 @@ function handleImageUpload(id, input) {
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
       const { dataUrl, base64 } = resizeForUpload(img);
       const char = characters.find(c => c.id === id);
       if (char) char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
+      // Upload to Supabase Storage in background for permanent URL
+      try {
+        const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: id });
+        if (r.url && char) { char.referenceImage = { ...char.referenceImage, url: r.url }; }
+      } catch(e) { console.warn('ref upload failed', e); }
       const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
         preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
@@ -2895,13 +2901,18 @@ function handleLocImageUpload(id, input) {
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
       const { dataUrl, base64 } = resizeForUpload(img);
       const loc = locations.find(l => l.id === id);
       if (loc) {
         loc.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
         if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
       }
+      // Upload to Supabase Storage in background for permanent URL
+      try {
+        const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'locs', entityId: id });
+        if (r.url && loc) { loc.referenceImage = { ...loc.referenceImage, url: r.url }; }
+      } catch(e) { console.warn('loc ref upload failed', e); }
       const preview = document.querySelector(`#locations-body tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
         preview.innerHTML = `<img src="${dataUrl}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${id}', event)">✕</button>`;
