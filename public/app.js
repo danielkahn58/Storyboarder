@@ -866,10 +866,26 @@ async function migrateRefImages() {
     entity.images = newImages;
   };
 
+  const migrateUrl = async (url, entityType, entityId) => {
+    if (!isFal(url)) return url;
+    try {
+      const r = await apiFetch('/api/reupload-ref', { url, projectId: currentProjectId, entityType, entityId });
+      if (r.url) { changed = true; return r.url; }
+    } catch (e) { console.warn('migrateRefImages url failed', e); }
+    return url;
+  };
+
   for (const c of characters) { await migrateRef(c, 'chars'); await migrateImages(c, 'chars'); }
   for (const l of locations) { await migrateRef(l, 'locs'); await migrateImages(l, 'locs'); }
 
-  if (changed) { renderCharacters(); renderLocations(); autoSave(); }
+  for (const s of shots) {
+    s.images = await Promise.all((s.images || []).map(u => migrateUrl(u, 'shots', s.id)));
+    if (isFal(s.finalImage)) s.finalImage = await migrateUrl(s.finalImage, 'shots', s.id);
+    if (isFal(s.refImage?.dataUrl)) { const u = await migrateUrl(s.refImage.dataUrl, 'shots', s.id); s.refImage = { ...s.refImage, dataUrl: u }; }
+    if (isFal(s.composeMeta?.bgUrl)) { const u = await migrateUrl(s.composeMeta.bgUrl, 'shots', s.id); s.composeMeta = { ...s.composeMeta, bgUrl: u }; }
+  }
+
+  if (changed) { renderCharacters(); renderLocations(); renderShots(); autoSave(); }
 }
 
 async function prefetchCharBgRemovals() {
