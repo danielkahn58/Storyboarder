@@ -129,8 +129,13 @@ async function persistImages(falUrls, prefix) {
 // ── Google Drive backup ───────────────────────────────────────────────────────
 
 async function getDriveClient() {
-  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH || './service-account.json';
-  const key = JSON.parse(fs.readFileSync(path.resolve(keyPath), 'utf-8'));
+  let key;
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  } else {
+    const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH || './service-account.json';
+    key = JSON.parse(fs.readFileSync(path.resolve(keyPath), 'utf-8'));
+  }
   const auth = new google.auth.GoogleAuth({
     credentials: key,
     scopes: ['https://www.googleapis.com/auth/drive.file']
