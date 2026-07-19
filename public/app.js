@@ -548,6 +548,7 @@ async function openProject(id) {
   clearTimeout(_saveTimer); // prevent any pending debounced save from writing empty data to the new project
   _lastAutoSnapshotTime = 0;
   currentProjectId = id;
+  localStorage.setItem('sg-last-project', id);
   versions = []; currentVersionLabel = null; editsSinceVersion = 0;
   characters = []; locations = []; shots = [];
   visualStyles = [
@@ -573,6 +574,8 @@ async function openProject(id) {
 
 function backToProjects() {
   clearTimeout(_saveTimer); // prevent debounced save firing after project is cleared
+  localStorage.removeItem('sg-last-project');
+  localStorage.removeItem('sg-last-tab');
   autoSave();
   currentProjectId = null;
   document.getElementById('view-editor').style.display = 'none';
@@ -776,6 +779,13 @@ async function initApp() {
   renderProjectsView(); // show loading state immediately
   await loadProjects();
   renderProjectsView(); // re-render once projects are loaded from Supabase
+  // Restore last session: reopen the project and tab the user was on
+  const lastProject = localStorage.getItem('sg-last-project');
+  const lastTab = localStorage.getItem('sg-last-tab');
+  if (lastProject && projects.find(p => p.id === lastProject)) {
+    await openProject(lastProject);
+    if (lastTab) switchMainTab(lastTab);
+  }
 }
 
 async function loadData() {
@@ -1650,6 +1660,7 @@ function toggleAvScriptImages() {
 const MAIN_TABS = ['config', 'characters', 'locations', 'shots', 'avscript', 'animatic'];
 
 function switchMainTab(tab) {
+  if (currentProjectId) localStorage.setItem('sg-last-tab', tab);
   // shots / avscript / animatic all live inside tab-shots
   const panelKey = ['shots','avscript','animatic'].includes(tab) ? 'shots' : tab;
   MAIN_TABS.forEach(t => {
