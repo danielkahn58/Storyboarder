@@ -874,6 +874,7 @@ async function migrateRefImages() {
       });
       if (r.url) {
         entity.referenceImage = { ...ref, url: r.url, dataUrl: r.url };
+        renderCharacters(); renderLocations();
         autoSave();
       }
     } catch (e) { console.warn('migrateRefImages failed for', entity.id, e); }
