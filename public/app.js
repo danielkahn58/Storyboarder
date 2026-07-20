@@ -2535,6 +2535,10 @@ async function handleAudioUpload(input) {
   const statusEl = document.getElementById('audio-upload-status');
   const transcriptBox = document.getElementById('audio-transcript');
   await _saveAudio(file);
+  // Clear stale transcript immediately so old results aren't visible during transcription
+  _audioTranscript = [];
+  await _saveTranscript([]);
+  if (transcriptBox) { transcriptBox.value = ''; transcriptBox.style.display = 'none'; }
   _setAudioSrc(URL.createObjectURL(file));
   try {
     const sampleRate = 16000;
