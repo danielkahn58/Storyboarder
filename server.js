@@ -1011,6 +1011,37 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
   }
 });
 
+app.post('/api/detect-subject', async (req, res) => {
+  const { imageUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
+  try {
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error(`fetch failed: ${imgRes.status}`);
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    const base64 = buf.toString('base64');
+    const ct = imgRes.headers.get('content-type') || 'image/jpeg';
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 128,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: ct, data: base64 } },
+          { type: 'text', text: 'Identify the main subject (person, character, or focal object) in this image. Return ONLY a JSON object with the bounding box as normalized coordinates (0.0–1.0): {"x": left, "y": top, "w": width, "h": height}. No explanation, no markdown, just the JSON.' }
+        ]
+      }]
+    });
+    const text = msg.content[0]?.text?.trim() || '';
+    const match = text.match(/\{[^}]+\}/);
+    if (!match) throw new Error('No JSON in response');
+    const box = JSON.parse(match[0]);
+    res.json({ box });
+  } catch(e) {
+    // Fall back to center of frame
+    res.json({ box: { x: 0.25, y: 0.1, w: 0.5, h: 0.8 } });
+  }
+});
+
 app.post('/api/create-talking-video', async (req, res) => {
   const { imageUrl, audioUrl } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });

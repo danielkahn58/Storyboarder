@@ -5812,6 +5812,133 @@ async function createTalkingVideo() {
   }
 }
 
+// Wire up duration slider label
+document.addEventListener('DOMContentLoaded', () => {
+  const slider = document.getElementById('motion-duration');
+  const label = document.getElementById('motion-duration-label');
+  if (slider && label) slider.addEventListener('input', () => { label.textContent = slider.value + 's'; });
+});
+
+async function createMotionVideo(preset) {
+  const statusEl = document.getElementById('motion-video-status');
+  const btns = document.querySelectorAll('.btn-motion-preset');
+  const shot = shots.find(s => s.id === _compose?.shotId);
+  const durationSecs = parseInt(document.getElementById('motion-duration')?.value || '4', 10);
+
+  btns.forEach(b => b.disabled = true);
+  const setStatus = t => { if (statusEl) statusEl.textContent = t; };
+
+  try {
+    // Get the composed image as a data URL from the canvas
+    const canvas = document.getElementById('compose-canvas');
+    const savedIdx = _compose.selectedIdx;
+    _compose.selectedIdx = -1;
+    renderCompose();
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    _compose.selectedIdx = savedIdx;
+    renderCompose();
+
+    // Upload image so server can fetch it for Claude vision
+    setStatus('Detecting subject…');
+    const uploadData = await apiFetch('/api/upload-reference', { base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
+    const imageUrl = uploadData.url;
+    const { box } = await apiFetch('/api/detect-subject', { imageUrl });
+
+    // Compute Ken Burns start/end viewport rects in image-normalized coords
+    // Each rect: { cx, cy, scale } where scale is zoom level (1 = full image)
+    setStatus('Rendering motion…');
+    const subjectCx = box.x + box.w / 2;
+    const subjectCy = box.y + box.h / 2;
+    let startRect, endRect;
+
+    if (preset === 'zoom-in') {
+      startRect = { cx: 0.5, cy: 0.5, scale: 1.0 };
+      endRect   = { cx: subjectCx, cy: subjectCy, scale: 1.35 };
+    } else if (preset === 'zoom-out') {
+      startRect = { cx: subjectCx, cy: subjectCy, scale: 1.35 };
+      endRect   = { cx: 0.5, cy: 0.5, scale: 1.0 };
+    } else if (preset === 'pan-left') {
+      // Start left-of-subject, end right-of-subject
+      startRect = { cx: Math.max(0.3, subjectCx - 0.2), cy: subjectCy, scale: 1.15 };
+      endRect   = { cx: Math.min(0.7, subjectCx + 0.2), cy: subjectCy, scale: 1.15 };
+    } else { // pan-right
+      startRect = { cx: Math.min(0.7, subjectCx + 0.2), cy: subjectCy, scale: 1.15 };
+      endRect   = { cx: Math.max(0.3, subjectCx - 0.2), cy: subjectCy, scale: 1.15 };
+    }
+
+    // Render frames onto an offscreen canvas using MediaRecorder
+    const W = 1024, H = 576;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = W; offscreen.height = H;
+    const ctx = offscreen.getContext('2d');
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = dataUrl; });
+    const imgW = img.naturalWidth, imgH = img.naturalHeight;
+
+    const fps = 30;
+    const totalFrames = durationSecs * fps;
+
+    const stream = offscreen.captureStream(fps);
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 4_000_000 });
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.start();
+
+    // Ease in-out interpolation
+    const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+    for (let f = 0; f < totalFrames; f++) {
+      const t = ease(f / (totalFrames - 1));
+      const cx = startRect.cx + (endRect.cx - startRect.cx) * t;
+      const cy = startRect.cy + (endRect.cy - startRect.cy) * t;
+      const scale = startRect.scale + (endRect.scale - startRect.scale) * t;
+
+      // Viewport in image pixels
+      const vpW = imgW / scale;
+      const vpH = imgH / scale;
+      const vpX = cx * imgW - vpW / 2;
+      const vpY = cy * imgH - vpH / 2;
+      // Clamp to image bounds
+      const sx = Math.max(0, Math.min(imgW - vpW, vpX));
+      const sy = Math.max(0, Math.min(imgH - vpH, vpY));
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(img, sx, sy, vpW, vpH, 0, 0, W, H);
+
+      // Yield to allow MediaRecorder to process
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    recorder.stop();
+    await new Promise(r => { recorder.onstop = r; });
+
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const videoUrl = URL.createObjectURL(blob);
+
+    // Save to shot and display
+    if (shot) { shot.videoUrl = videoUrl; _compose.videoUrl = videoUrl; autoSave(); }
+    const sideVid = document.getElementById('compose-video-player');
+    if (sideVid) { sideVid.src = videoUrl; sideVid.style.display = ''; }
+    switchComposeView('video');
+    setStatus('Motion video ready.');
+    showToast('Motion video created!');
+
+    // Offer download
+    const a = document.createElement('a');
+    a.href = videoUrl;
+    a.download = `shot-motion-${preset}.webm`;
+    a.click();
+  } catch(e) {
+    setStatus('Error: ' + e.message);
+    showToast('Motion video failed: ' + e.message, true);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
