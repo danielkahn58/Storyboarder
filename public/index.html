@@ -560,8 +560,9 @@
 
   /* ── Mobile ── */
   @media (max-width: 768px) {
+    html, body { overflow-x: hidden; max-width: 100vw; }
     /* ── Nav & header ── */
-    .table-wrap { padding: 8px 12px; }
+    .table-wrap { padding: 8px 12px; overflow-x: hidden; }
     .header-main { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
     .header-main > div:first-child { min-width: 0; flex: 1 1 0; overflow: hidden; }
     .header-main > div:first-child .header-project-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 140px; }
