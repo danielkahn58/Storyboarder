@@ -85,6 +85,8 @@ if (AUTH_ENABLED) {
 app.use(express.static('public', { etag: false, lastModified: false, setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const OpenAI = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 fal.config({ credentials: process.env.FAL_KEY });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -1196,15 +1198,36 @@ app.post('/api/apply-expression', async (req, res) => {
 app.post('/api/apply-prompt', async (req, res) => {
   const { imageUrl, prompt, projectId, entityType, entityId } = req.body;
   if (!imageUrl || !prompt) return res.status(400).json({ error: 'imageUrl and prompt required' });
+  const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+  log('info', 'apply-prompt started', { prompt, imageUrl });
   try {
-    const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
-      input: { prompt, image_url: imageUrl, aspect_ratio: '16:9', num_images: 1, safety_tolerance: '6' }
+    // Use GPT-Image-2 for structural/spatial edits — better instruction following than Kontext
+    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set');
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error(`Could not fetch image: ${imgRes.status}`);
+    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpeg';
+    const { toFile } = require('openai');
+    const imageFile = await toFile(imgBuf, `image.${ext}`, { type: contentType });
+    const response = await openai.images.edit({
+      model: 'gpt-image-2',
+      image: imageFile,
+      prompt,
+      n: 1,
+      size: '1536x1024',
     });
-    const falUrl = result?.data?.images?.[0]?.url ?? null;
-    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
-    const url = await persistImage(falUrl, `${prefix}/${Date.now()}.jpg`);
-    res.json({ url });
+    const b64 = response.data?.[0]?.b64_json;
+    if (!b64) throw new Error('No image returned from GPT-Image-2');
+    const outBuf = Buffer.from(b64, 'base64');
+    const storagePath = `${prefix}/${Date.now()}-gpt-edit.jpg`;
+    const { error: uploadErr } = await sbAdmin.storage.from('images').upload(storagePath, outBuf, { contentType: 'image/jpeg', upsert: true });
+    if (uploadErr) throw uploadErr;
+    const { data: pub } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+    log('info', 'apply-prompt done', { url: pub.publicUrl });
+    res.json({ url: pub.publicUrl });
   } catch(e) {
+    log('error', 'apply-prompt failed', { error: e.message });
     res.status(500).json({ error: e.message });
   }
 });
