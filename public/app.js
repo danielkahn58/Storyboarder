@@ -3868,8 +3868,8 @@ async function generateCharFrontProfile(id) {
     const fullPrompt = getCharFullPrompt(charDesc || '');
     let frontUrl = null;
     if (hasLora) {
-      // Path 1: trained LoRA — appearance comes from weights, so only pass pose/framing
-      const loraPrompt = 'front profile portrait, facing camera, neutral expression, full body';
+      // Path 1: trained LoRA — use framing boilerplate but not the appearance description
+      const loraPrompt = CHAR_BOILERPLATE + ' Front profile, facing camera, neutral expression.';
       const data = await apiFetch('/api/generate-from-lora', { prompt: loraPrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
       frontUrl = data.images?.[0] || null;
     } else if (hasRef) {
