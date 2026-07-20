@@ -837,53 +837,95 @@ async function loadData() {
   migrateRefImages();
 }
 
-// Silently re-upload any ref images still on fal.media to Supabase Storage
+// Migrate any non-Supabase images (fal.media URLs or base64 data URIs) to Supabase Storage
 async function migrateRefImages() {
   const isFal = url => typeof url === 'string' && (url.includes('fal.media') || url.includes('fal.run'));
+  const isBase64 = url => typeof url === 'string' && url.startsWith('data:image');
+  const needsMigration = url => isFal(url) || isBase64(url);
+
+  // Count total images needing migration
+  const collectUrls = () => {
+    const urls = [];
+    for (const c of characters) {
+      const ref = c.referenceImage;
+      const src = ref?.url || (ref?.dataUrl && !isBase64(ref.dataUrl) ? ref.dataUrl : ref?.dataUrl);
+      if (src && needsMigration(src)) urls.push(1);
+      for (const u of (c.images || [])) if (needsMigration(u)) urls.push(1);
+    }
+    for (const l of locations) {
+      const ref = l.referenceImage;
+      const src = ref?.url || (ref?.dataUrl && !isBase64(ref.dataUrl) ? ref.dataUrl : ref?.dataUrl);
+      if (src && needsMigration(src)) urls.push(1);
+      for (const u of (l.images || [])) if (needsMigration(u)) urls.push(1);
+    }
+    for (const s of shots) {
+      for (const u of (s.images || [])) if (needsMigration(u)) urls.push(1);
+      if (needsMigration(s.finalImage)) urls.push(1);
+      if (needsMigration(s.refImage?.dataUrl)) urls.push(1);
+      if (needsMigration(s.composeMeta?.bgUrl)) urls.push(1);
+    }
+    return urls.length;
+  };
+
+  const total = collectUrls();
+  if (total === 0) return;
+
+  let done = 0;
   let changed = false;
+
+  // Progress banner
+  let banner = document.getElementById('migrate-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'migrate-banner';
+    banner.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px 18px;font-size:12px;color:#aaa;z-index:9999;display:flex;align-items:center;gap:10px;min-width:240px;box-shadow:0 4px 16px rgba(0,0,0,0.5)';
+    document.body.appendChild(banner);
+  }
+  const updateBanner = () => {
+    banner.innerHTML = `<span style="color:#4ade80">↑</span> Uploading images to cloud: <b style="color:#e8e8e8">${done}/${total}</b>`;
+  };
+  updateBanner();
+
+  const uploadUrl = async (url, entityType, entityId) => {
+    try {
+      let r;
+      if (isBase64(url)) {
+        const [meta, b64] = url.split(',');
+        const mediaType = meta.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
+        r = await apiFetch('/api/upload-reference', { base64: b64, mediaType, projectId: currentProjectId, entityType, entityId });
+      } else {
+        r = await apiFetch('/api/reupload-ref', { url, projectId: currentProjectId, entityType, entityId });
+      }
+      if (r.url) { changed = true; done++; updateBanner(); return r.url; }
+    } catch (e) { console.warn('migrate failed', entityType, entityId, e); }
+    return url;
+  };
 
   const migrateRef = async (entity, entityType) => {
     const ref = entity.referenceImage;
     if (!ref) return;
-    const src = ref.url || (typeof ref.dataUrl === 'string' && !ref.dataUrl.startsWith('data:') ? ref.dataUrl : null);
-    if (!src || !isFal(src)) return;
-    try {
-      const r = await apiFetch('/api/reupload-ref', { url: src, projectId: currentProjectId, entityType, entityId: entity.id });
-      if (r.url) { entity.referenceImage = { ...ref, url: r.url, dataUrl: r.url }; changed = true; }
-    } catch (e) { console.warn('migrateRefImages ref failed for', entity.id, e); }
+    const src = ref.url && needsMigration(ref.url) ? ref.url : (needsMigration(ref.dataUrl) ? ref.dataUrl : null);
+    if (!src) return;
+    const newUrl = await uploadUrl(src, entityType, entity.id);
+    if (newUrl !== src) entity.referenceImage = { ...ref, url: newUrl, dataUrl: newUrl, base64: null };
   };
 
-  const migrateImages = async (entity, entityType) => {
+  const migrateImageArr = async (entity, entityType) => {
     if (!entity.images?.length) return;
-    const newImages = await Promise.all(entity.images.map(async url => {
-      if (!isFal(url)) return url;
-      try {
-        const r = await apiFetch('/api/reupload-ref', { url, projectId: currentProjectId, entityType, entityId: entity.id });
-        if (r.url) { changed = true; return r.url; }
-      } catch (e) { console.warn('migrateRefImages images failed for', entity.id, e); }
-      return url;
-    }));
-    entity.images = newImages;
+    entity.images = await Promise.all(entity.images.map(u => needsMigration(u) ? uploadUrl(u, entityType, entity.id) : u));
   };
 
-  const migrateUrl = async (url, entityType, entityId) => {
-    if (!isFal(url)) return url;
-    try {
-      const r = await apiFetch('/api/reupload-ref', { url, projectId: currentProjectId, entityType, entityId });
-      if (r.url) { changed = true; return r.url; }
-    } catch (e) { console.warn('migrateRefImages url failed', e); }
-    return url;
-  };
-
-  for (const c of characters) { await migrateRef(c, 'chars'); await migrateImages(c, 'chars'); }
-  for (const l of locations) { await migrateRef(l, 'locs'); await migrateImages(l, 'locs'); }
-
+  for (const c of characters) { await migrateRef(c, 'chars'); await migrateImageArr(c, 'chars'); }
+  for (const l of locations) { await migrateRef(l, 'locs'); await migrateImageArr(l, 'locs'); }
   for (const s of shots) {
-    s.images = await Promise.all((s.images || []).map(u => migrateUrl(u, 'shots', s.id)));
-    if (isFal(s.finalImage)) s.finalImage = await migrateUrl(s.finalImage, 'shots', s.id);
-    if (isFal(s.refImage?.dataUrl)) { const u = await migrateUrl(s.refImage.dataUrl, 'shots', s.id); s.refImage = { ...s.refImage, dataUrl: u }; }
-    if (isFal(s.composeMeta?.bgUrl)) { const u = await migrateUrl(s.composeMeta.bgUrl, 'shots', s.id); s.composeMeta = { ...s.composeMeta, bgUrl: u }; }
+    s.images = await Promise.all((s.images || []).map(u => needsMigration(u) ? uploadUrl(u, 'shots', s.id) : u));
+    if (needsMigration(s.finalImage)) s.finalImage = await uploadUrl(s.finalImage, 'shots', s.id);
+    if (needsMigration(s.refImage?.dataUrl)) { const u = await uploadUrl(s.refImage.dataUrl, 'shots', s.id); s.refImage = { ...s.refImage, dataUrl: u }; }
+    if (needsMigration(s.composeMeta?.bgUrl)) { const u = await uploadUrl(s.composeMeta.bgUrl, 'shots', s.id); s.composeMeta = { ...s.composeMeta, bgUrl: u }; }
   }
+
+  banner.innerHTML = `<span style="color:#4ade80">✓</span> <b style="color:#e8e8e8">${done}</b> images uploaded to cloud`;
+  setTimeout(() => banner.remove(), 3000);
 
   if (changed) { renderCharacters(); renderLocations(); renderShots(); autoSave(); }
 }
