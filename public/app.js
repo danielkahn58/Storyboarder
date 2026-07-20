@@ -2561,7 +2561,7 @@ async function handleAudioUpload(input) {
     const fullText = _audioTranscript.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
     if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
     if (statusEl) { statusEl.textContent = `Transcribed ${_audioTranscript.length} words`; statusEl.className = 'upload-status done'; }
-    matchTranscriptToShots();
+    await matchTranscriptToShots();
   } catch(e) {
     if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.className = 'upload-status error'; }
     showToast('Transcription failed: ' + e.message, true);
