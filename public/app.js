@@ -378,9 +378,9 @@ async function idbGet(key) {
 function extractImages(data) {
   const imgs = { chars: {}, locs: {}, shots: {} };
   const chars = (data.characters || []).map(c => {
-    imgs.chars[c.id] = { images: c.images, referenceImage: c.referenceImage, expressionCache: c.expressionCache,
+    imgs.chars[c.id] = { images: c.images, referenceImage: c.referenceImage, refImages: c.refImages || [], expressionCache: c.expressionCache,
       angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {} };
-    return { ...c, images: [], referenceImage: null, expressionCache: {},
+    return { ...c, images: [], referenceImage: null, refImages: [], expressionCache: {},
       angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt, useRef: v.useRef || false }])) : {} };
   });
   const locs = (data.locations || []).map(l => {
@@ -408,7 +408,7 @@ function mergeImages(data, imgs) {
       angles[k] = { ...(angles[k] || {}), image: v.image, refImage: v.refImage || null };
     }
     return { ...c, images: ci.images || [], referenceImage: ci.referenceImage || null,
-      expressionCache: ci.expressionCache || {}, angles };
+      refImages: ci.refImages || [], expressionCache: ci.expressionCache || {}, angles };
   });
   const locations = (data.locations || []).map(l => {
     const li = imgs.locs?.[l.id] || {};
@@ -915,7 +915,17 @@ async function migrateRefImages() {
     entity.images = await Promise.all(entity.images.map(u => needsMigration(u) ? uploadUrl(u, entityType, entity.id) : u));
   };
 
-  for (const c of characters) { await migrateRef(c, 'chars'); await migrateImageArr(c, 'chars'); }
+  const migrateRefImages = async (entity, entityType) => {
+    if (!entity.refImages?.length) return;
+    entity.refImages = await Promise.all(entity.refImages.map(async ref => {
+      const src = ref.url && needsMigration(ref.url) ? ref.url : (needsMigration(ref.dataUrl) ? ref.dataUrl : null);
+      if (!src) return ref;
+      const newUrl = await uploadUrl(src, entityType, entity.id);
+      return newUrl !== src ? { ...ref, url: newUrl, dataUrl: newUrl, base64: null } : ref;
+    }));
+  };
+
+  for (const c of characters) { await migrateRef(c, 'chars'); await migrateImageArr(c, 'chars'); await migrateRefImages(c, 'chars'); }
   for (const l of locations) { await migrateRef(l, 'locs'); await migrateImageArr(l, 'locs'); }
   for (const s of shots) {
     s.images = await Promise.all((s.images || []).map(u => needsMigration(u) ? uploadUrl(u, 'shots', s.id) : u));
@@ -1147,7 +1157,7 @@ function loadVersion(label) {
   const prevChars = characters; const prevLocs = locations; const prevShots = shots;
   characters = (d.characters || []).map(vc => {
     const cur = prevChars.find(c => c.id === vc.id) || {};
-    return { ...newCharacter(), images: cur.images || [], referenceImage: cur.referenceImage || null, ...vc };
+    return { ...newCharacter(), images: cur.images || [], referenceImage: cur.referenceImage || null, refImages: cur.refImages || [], ...vc };
   });
   locations = (d.locations || []).map(vl => {
     const cur = prevLocs.find(l => l.id === vl.id) || {};
@@ -1484,7 +1494,7 @@ const ANGLE_DESC = {
   '3/4 Right':      'three-quarter profile turned slightly to the right, full body, solid flat white background, no shadows, no gradients',
 };
 
-function newCharacter() { return { id: genId(), name: '', reference: '', referenceImage: null, prompt: '', images: [], angles: {}, expressionCache: {} }; }
+function newCharacter() { return { id: genId(), name: '', reference: '', referenceImage: null, refImages: [], selectedRefImageId: null, loraUrl: null, loraStatus: 'idle', loraTriggerWord: null, prompt: '', images: [], angles: {}, expressionCache: {} }; }
 
 function addCharacter() {
   syncFromDOM(); characters.push(newCharacter()); renderCharacters(); renderShots(); autoSave();
@@ -1507,7 +1517,11 @@ function locDefaultImage(l) {
 
 function charDefaultImage(c) {
   if (!c) return null;
-  return c.useRefAsDefault ? (c.referenceImage?.dataUrl || null) : (c.images?.[0] || null);
+  if (c.selectedRefImageId) {
+    const sel = (c.refImages || []).find(r => r.id === c.selectedRefImageId);
+    if (sel) return sel.url || sel.dataUrl;
+  }
+  return c.images?.[0] || null;
 }
 
 function deleteAllCharacters() {
@@ -2069,14 +2083,38 @@ function renderShots() {
   shots.forEach(s => { if (s._suggestions && Object.keys(s._suggestions).length) renderShotSuggestionFlags(s.id); });
 }
 
+function charRefGalleryHTML(c) {
+  const refs = c.refImages || [];
+  const thumbs = refs.map(r => {
+    const src = r.url || r.dataUrl || '';
+    const isSelected = r.id === c.selectedRefImageId;
+    return `<div style="position:relative;flex-shrink:0">
+      <img src="${esc(src)}" onclick="selectCharRefImage('${c.id}','${r.id}')" title="${isSelected ? 'Default view (click to deselect)' : 'Click to use as default view'}"
+        style="width:52px;height:52px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid ${isSelected ? '#4ade80' : '#2a2a2a'};display:block">
+      <button onclick="removeCharRefImage('${c.id}','${r.id}',event)" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:15px;height:15px;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>`;
+  }).join('');
+  const loraBtn = refs.length >= 2
+    ? `<button onclick="trainCharacterLora('${c.id}')" style="margin-top:4px;width:100%;background:${c.loraStatus === 'ready' ? '#162a1a' : c.loraStatus === 'training' ? '#1a1610' : 'none'};border:1px solid ${c.loraStatus === 'ready' ? '#4ade80' : c.loraStatus === 'training' ? '#a8830a' : '#2a2a2a'};border-radius:4px;color:${c.loraStatus === 'ready' ? '#4ade80' : c.loraStatus === 'training' ? '#d4a017' : '#666'};font-size:10px;padding:4px 6px;cursor:pointer;white-space:nowrap">
+        ${c.loraStatus === 'ready' ? '✓ Model Trained' : c.loraStatus === 'training' ? '⏳ Training…' : c.loraStatus === 'error' ? '⚠ Retry Training' : '🧠 Train Character Model'}
+      </button>` : '';
+  return `<div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start">
+      ${thumbs}
+      <label style="width:52px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed #2a2a2a;border-radius:4px;cursor:pointer;color:#555;font-size:9px;gap:2px;flex-shrink:0">
+        <span style="font-size:16px;line-height:1">+</span><span>Add</span>
+        <input type="file" accept="image/*" multiple style="display:none" onchange="handleCharRefImagesUpload('${c.id}',this)">
+      </label>
+    </div>
+    ${loraBtn}
+  </div>`;
+}
+
 function charRowHTML(c) {
   const frontUrl = charDefaultImage(c);
   const frontHTML = frontUrl
     ? `<img src="${esc(frontUrl)}" alt="Front">`
     : `<span class="placeholder">·</span>`;
-  const refImgHTML = c.referenceImage
-    ? `<img src="${esc(c.referenceImage.dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${c.id}', event)">✕</button>`
-    : `<div class="upload-hint">Click to<br>upload</div>`;
   return `<tr data-id="${c.id}">
     <td>
       <div style="display:flex;flex-direction:column;gap:4px">
@@ -2086,12 +2124,7 @@ function charRowHTML(c) {
       </div>
     </td>
     <td data-label="Description"><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
-    <td data-label="Reference Image">
-      <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="${c.referenceImage ? `triggerImageUpload('${c.id}')` : `triggerImageUpload('${c.id}')`}">${refImgHTML}</div>
-        <input type="file" id="file-${c.id}" class="hidden" accept="image/*" onchange="handleImageUpload('${c.id}', this)">
-      </div>
-    </td>
+    <td data-label="Reference Images">${charRefGalleryHTML(c)}</td>
     <td data-label="Prompt">
       <div class="char-prompt-section">
         <span class="char-prompt-label">Character Description</span>
@@ -2120,7 +2153,6 @@ function charRowHTML(c) {
         <button class="btn btn-gen-prompt" onclick="generateCharPrompt('${c.id}')">Generate Prompt</button>
         <button class="btn btn-gen-images" onclick="generateCharFrontProfile('${c.id}')">Generate Front Profile</button>
         <button class="btn btn-gen-images" style="background:#162a2a;border-color:#254a4a;color:#4adede" onclick="generateCharAngles('${c.id}')">Generate Variations</button>
-        ${c.referenceImage ? `<button onclick="toggleCharUseRef('${c.id}')" style="background:${c.useRefAsDefault ? '#1a2a1a' : 'none'};border:1px solid ${c.useRefAsDefault ? '#4ade80' : '#2a2a2a'};border-radius:4px;color:${c.useRefAsDefault ? '#4ade80' : '#666'};font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap">${c.useRefAsDefault ? '📷 Using Ref as Default' : '📷 Use Ref as Default'}</button>` : ''}
         <button class="btn btn-delete" onclick="deleteCharacter('${c.id}')">Remove</button>
       </div>
     </td>
@@ -2977,6 +3009,60 @@ function removeRefImage(id, event) {
   autoSave();
 }
 
+// ── character multi-ref images ────────────────────────────────────────────
+async function handleCharRefImagesUpload(id, input) {
+  const files = Array.from(input.files); if (!files.length) return;
+  const char = characters.find(c => c.id === id); if (!char) return;
+  if (!char.refImages) char.refImages = [];
+  for (const file of files) {
+    const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(file); });
+    const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.src = dataUrl; });
+    const { dataUrl: resized, base64 } = resizeForUpload(img);
+    const refId = genId();
+    const ref = { id: refId, dataUrl: resized, base64, mediaType: 'image/jpeg' };
+    char.refImages.push(ref);
+    // Auto-select first upload as default
+    if (char.refImages.length === 1) char.selectedRefImageId = refId;
+    renderCharacters();
+    // Upload to Supabase in background
+    try {
+      const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: id });
+      if (r.url) { ref.url = r.url; ref.dataUrl = r.url; ref.base64 = null; renderCharacters(); }
+    } catch(e) { console.warn('ref upload failed', e); }
+    autoSave();
+  }
+}
+
+function selectCharRefImage(charId, refId) {
+  const char = characters.find(c => c.id === charId); if (!char) return;
+  char.selectedRefImageId = char.selectedRefImageId === refId ? null : refId;
+  renderCharacters(); autoSave();
+}
+
+function removeCharRefImage(charId, refId, event) {
+  event.stopPropagation();
+  const char = characters.find(c => c.id === charId); if (!char) return;
+  char.refImages = (char.refImages || []).filter(r => r.id !== refId);
+  if (char.selectedRefImageId === refId) char.selectedRefImageId = char.refImages[0]?.id || null;
+  if (char.loraStatus !== 'idle') { char.loraUrl = null; char.loraStatus = 'idle'; char.loraTriggerWord = null; }
+  renderCharacters(); autoSave();
+}
+
+async function trainCharacterLora(id) {
+  const char = characters.find(c => c.id === id); if (!char) return;
+  const urls = (char.refImages || []).map(r => r.url).filter(Boolean);
+  if (urls.length < 2) { showToast('Upload at least 2 ref images first.', true); return; }
+  char.loraStatus = 'training'; renderCharacters();
+  try {
+    const r = await apiFetch('/api/train-character-lora', { imageUrls: urls, triggerWord: `CHAR${id.slice(0,4).toUpperCase()}` });
+    char.loraUrl = r.loraUrl; char.loraStatus = 'ready'; char.loraTriggerWord = r.triggerWord;
+    showToast('Character model trained ✓');
+  } catch(e) {
+    char.loraStatus = 'error'; showToast('Training failed: ' + e.message, true);
+  }
+  renderCharacters(); autoSave();
+}
+
 // ── location image upload ─────────────────────────────────────────────────
 function triggerLocImageUpload(id) { document.getElementById(`locfile-${id}`).click(); }
 function handleLocImageUpload(id, input) {
@@ -3587,6 +3673,14 @@ function toggleCharAngles(id) {
   });
 }
 
+function getCharSelectedRefUrl(char) {
+  if (char.selectedRefImageId) {
+    const sel = (char.refImages || []).find(r => r.id === char.selectedRefImageId);
+    if (sel) return sel.url || sel.dataUrl;
+  }
+  return (char.refImages || [])[0]?.url || (char.refImages || [])[0]?.dataUrl || null;
+}
+
 async function generateCharFrontProfile(id) {
   syncFromDOM();
   const row = document.querySelector(`#characters-body tr[data-id="${id}"]`);
@@ -3594,8 +3688,10 @@ async function generateCharFrontProfile(id) {
   const btn = btns[0];
   const charDesc = row.querySelector('.field-prompt').value.trim();
   const char = characters.find(c => c.id === id);
-  const hasRef = !!(char?.referenceImage?.url || char?.referenceImage?.dataUrl);
-  if (!charDesc && !hasRef) { showToast('Add a character description or upload a reference image first.', true); return; }
+  const hasLora = char?.loraStatus === 'ready' && char?.loraUrl;
+  const selectedRef = getCharSelectedRefUrl(char);
+  const hasRef = !!selectedRef;
+  if (!charDesc && !hasRef && !hasLora) { showToast('Add a description or upload reference images first.', true); return; }
   if (!char.angles) char.angles = {};
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
   const frontSlot = document.getElementById(`char-front-${id}`);
@@ -3603,18 +3699,18 @@ async function generateCharFrontProfile(id) {
   try {
     const fullPrompt = getCharFullPrompt(charDesc || '');
     let frontUrl = null;
-    if (hasRef) {
-      const refSrc = char.referenceImage.url || char.referenceImage.dataUrl;
-      let refUrl = refSrc;
-      if (refSrc.startsWith('data:')) {
-        const uploaded = await apiFetch('/api/upload-reference', { base64: char.referenceImage.base64, mediaType: char.referenceImage.mediaType, projectId: currentProjectId, entityType: 'chars', entityId: id });
-        refUrl = uploaded.url || refSrc;
-      }
-      const frontData = await apiFetch('/api/generate-shot-images', { prompt: fullPrompt, stylePrompt: getStylePrompt(), charImageUrls: [refUrl] });
-      frontUrl = frontData.images?.[0] || null;
+    if (hasLora) {
+      // Path 1: trained LoRA — best identity consistency
+      const data = await apiFetch('/api/generate-from-lora', { prompt: fullPrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
+      frontUrl = data.images?.[0] || null;
+    } else if (hasRef) {
+      // Path 2: Kontext with selected ref image
+      const data = await apiFetch('/api/generate-shot-images', { prompt: fullPrompt, stylePrompt: getStylePrompt(), charImageUrls: [selectedRef] });
+      frontUrl = data.images?.[0] || null;
     } else {
-      const frontData = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
-      frontUrl = frontData.images?.[0] || null;
+      // Path 3: plain text-to-image
+      const data = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
+      frontUrl = data.images?.[0] || null;
     }
     char.images = frontUrl ? [frontUrl] : [];
     char.prompt = charDesc;
@@ -3635,8 +3731,10 @@ async function generateCharAngles(id) {
   const btn = btns[1];
   const char = characters.find(c => c.id === id);
   if (!char.angles) char.angles = {};
-  const refUrl = char.referenceImage?.dataUrl || char.images?.[0] || null;
-  if (!refUrl) { showToast('Generate a front profile first (or upload a reference image).', true); return; }
+  const hasLora = char?.loraStatus === 'ready' && char?.loraUrl;
+  const selectedRef = getCharSelectedRefUrl(char);
+  const refUrl = selectedRef || char.images?.[0] || null;
+  if (!hasLora && !refUrl) { showToast('Upload reference images or generate a front profile first.', true); return; }
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
   // Open angles panel so spinners are visible
   const angleRow = document.getElementById(`char-angles-${id}`);
@@ -3656,8 +3754,14 @@ async function generateCharAngles(id) {
       const anglePrompt = existingPrompt || buildAnglePrompt(char, angle);
       if (anglePromptField && !existingPrompt) anglePromptField.value = anglePrompt;
       try {
-        const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });
-        const url = varData.url || null;
+        let url = null;
+        if (hasLora) {
+          const data = await apiFetch('/api/generate-from-lora', { prompt: anglePrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
+          url = data.images?.[0] || null;
+        } else {
+          const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });
+          url = varData.url || null;
+        }
         if (!char.angles[angle]) char.angles[angle] = {};
         char.angles[angle].prompt = anglePrompt;
         char.angles[angle].image = url;

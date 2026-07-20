@@ -998,6 +998,65 @@ app.post('/api/create-talking-video', async (req, res) => {
   }
 });
 
+app.post('/api/train-character-lora', async (req, res) => {
+  const { imageUrls, triggerWord } = req.body;
+  if (!Array.isArray(imageUrls) || imageUrls.length < 2) return res.status(400).json({ error: 'at least 2 imageUrls required' });
+  log('info', 'train-character-lora started', { count: imageUrls.length });
+  const t0 = Date.now();
+  try {
+    const JSZipLib = require('jszip');
+    const zip = new JSZipLib();
+    await Promise.all(imageUrls.map(async (url, i) => {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`fetch failed for image ${i}: ${resp.status}`);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const ext = url.split('?')[0].split('.').pop().replace(/[^a-z]/g, '') || 'jpg';
+      zip.file(`image_${i + 1}.${ext}`, buf);
+    }));
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+    const zipBlob = new Blob([zipBuf], { type: 'application/zip' });
+    const zipUrl = await fal.storage.upload(zipBlob);
+    const trigger = triggerWord || 'CHARREF';
+    const result = await fal.subscribe('fal-ai/flux-lora-fast-training', {
+      input: { images_data_url: zipUrl, trigger_word: trigger, steps: 1000, multiresolution_training: true }
+    });
+    const loraUrl = result?.data?.diffusers_lora_file?.url ?? null;
+    if (!loraUrl) throw new Error('Training succeeded but no LoRA URL returned');
+    log('info', 'train-character-lora done', { loraUrl, ms: Date.now() - t0 });
+    res.json({ loraUrl, triggerWord: trigger });
+  } catch (e) {
+    log('error', 'train-character-lora failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/generate-from-lora', async (req, res) => {
+  const { prompt, loraUrl, triggerWord, stylePrompt, projectId, entityType, entityId } = req.body;
+  if (!prompt || !loraUrl) return res.status(400).json({ error: 'prompt and loraUrl required' });
+  log('info', 'generate-from-lora started', { prompt_chars: prompt.length });
+  const t0 = Date.now();
+  try {
+    const fullPrompt = stylePrompt ? `${prompt}. ${stylePrompt}` : prompt;
+    const result = await fal.subscribe('fal-ai/flux-lora', {
+      input: {
+        prompt: `${triggerWord || 'CHARREF'} ${fullPrompt}`,
+        loras: [{ path: loraUrl, scale: 1.0 }],
+        num_images: 1,
+        image_size: 'square_hd',
+        num_inference_steps: 28,
+      }
+    });
+    const falUrl = result?.data?.images?.[0]?.url ?? null;
+    const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}-lora.jpg`);
+    log('info', 'generate-from-lora done', { url, ms: Date.now() - t0 });
+    res.json({ images: [url] });
+  } catch (e) {
+    log('error', 'generate-from-lora failed', { error: e.message, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/generate-char-variant', async (req, res) => {
   const { prompt, referenceImageUrls, stylePrompt, projectId, entityId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
