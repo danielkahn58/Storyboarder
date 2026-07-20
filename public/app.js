@@ -2483,24 +2483,9 @@ async function restoreAudio() {
 }
 
 const WHISPER_LIMIT = 24 * 1024 * 1024; // 24MB
+const CHUNK_SECS = 600; // 10-minute chunks at 16kHz mono = ~19MB each
 
-async function compressAudioForWhisper(file) {
-  // Decode, mix to mono at 16kHz, encode as WAV — well under Whisper's 25MB limit
-  const ctx = new AudioContext();
-  const audioBuf = await ctx.decodeAudioData(await file.arrayBuffer());
-  await ctx.close();
-  // Resample to 16kHz mono via OfflineAudioContext
-  const sampleRate = 16000;
-  const duration = audioBuf.duration;
-  const frameCount = Math.ceil(duration * sampleRate);
-  const offline = new OfflineAudioContext(1, frameCount, sampleRate);
-  const src = offline.createBufferSource();
-  src.buffer = audioBuf;
-  src.connect(offline.destination);
-  src.start();
-  const rendered = await offline.startRendering();
-  // Write 16-bit PCM WAV
-  const pcm = rendered.getChannelData(0);
+function pcmToWavFile(pcm, sampleRate, offsetSecs) {
   const wavBuf = new ArrayBuffer(44 + pcm.length * 2);
   const view = new DataView(wavBuf);
   const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
@@ -2515,7 +2500,33 @@ async function compressAudioForWhisper(file) {
     const s = Math.max(-1, Math.min(1, pcm[i]));
     view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
   }
-  return new File([wavBuf], 'audio.wav', { type: 'audio/wav' });
+  return new File([wavBuf], `chunk_${offsetSecs}.wav`, { type: 'audio/wav' });
+}
+
+async function decodeToMono16k(file) {
+  const ctx = new AudioContext();
+  const audioBuf = await ctx.decodeAudioData(await file.arrayBuffer());
+  await ctx.close();
+  const sampleRate = 16000;
+  const frameCount = Math.ceil(audioBuf.duration * sampleRate);
+  const offline = new OfflineAudioContext(1, frameCount, sampleRate);
+  const src = offline.createBufferSource();
+  src.buffer = audioBuf;
+  src.connect(offline.destination);
+  src.start();
+  const rendered = await offline.startRendering();
+  return rendered.getChannelData(0); // Float32Array at 16kHz mono
+}
+
+async function transcribeChunk(pcm, sampleRate, offsetSecs) {
+  const file = pcmToWavFile(pcm, sampleRate, offsetSecs);
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/transcribe-audio', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  // Shift word timestamps by chunk offset
+  return (data.words || []).map(w => ({ word: w.word, start: w.start + offsetSecs, end: w.end + offsetSecs }));
 }
 
 async function handleAudioUpload(input) {
@@ -2525,19 +2536,21 @@ async function handleAudioUpload(input) {
   const transcriptBox = document.getElementById('audio-transcript');
   await _saveAudio(file);
   _setAudioSrc(URL.createObjectURL(file));
-  let uploadFile = file;
   try {
-    if (file.size > WHISPER_LIMIT) {
-      if (statusEl) { statusEl.textContent = 'Compressing audio…'; statusEl.className = 'upload-status loading'; }
-      uploadFile = await compressAudioForWhisper(file);
+    const sampleRate = 16000;
+    const chunkFrames = CHUNK_SECS * sampleRate;
+    if (statusEl) { statusEl.textContent = 'Decoding audio…'; statusEl.className = 'upload-status loading'; }
+    const pcm = await decodeToMono16k(file);
+    const totalChunks = Math.ceil(pcm.length / chunkFrames);
+    let allWords = [];
+    for (let i = 0; i < totalChunks; i++) {
+      const offsetSecs = i * CHUNK_SECS;
+      const chunk = pcm.slice(i * chunkFrames, (i + 1) * chunkFrames);
+      if (statusEl) { statusEl.textContent = `Transcribing${totalChunks > 1 ? ` part ${i + 1}/${totalChunks}` : ''}…`; statusEl.className = 'upload-status loading'; }
+      const words = await transcribeChunk(chunk, sampleRate, offsetSecs);
+      allWords = allWords.concat(words);
     }
-    if (statusEl) { statusEl.textContent = 'Transcribing…'; statusEl.className = 'upload-status loading'; }
-    const formData = new FormData();
-    formData.append('file', uploadFile);
-    const res = await fetch('/api/transcribe-audio', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    _audioTranscript = data.words || [];
+    _audioTranscript = allWords;
     await _saveTranscript(_audioTranscript);
     const fullText = _audioTranscript.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
     if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
