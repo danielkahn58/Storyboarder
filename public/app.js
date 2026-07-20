@@ -2088,9 +2088,8 @@ function charRowHTML(c) {
     <td data-label="Description"><div class="field-ref ref-rich" contenteditable="true" data-placeholder="Describe appearance, style, mood…" oninput="debouncedSave()">${c.reference || ''}</div></td>
     <td data-label="Reference Image">
       <div class="ref-img-cell">
-        <div class="ref-img-preview" onclick="${c.referenceImage ? `toggleCharUseRef('${c.id}')` : `triggerImageUpload('${c.id}')`}">${refImgHTML}</div>
+        <div class="ref-img-preview" onclick="${c.referenceImage ? `triggerImageUpload('${c.id}')` : `triggerImageUpload('${c.id}')`}">${refImgHTML}</div>
         <input type="file" id="file-${c.id}" class="hidden" accept="image/*" onchange="handleImageUpload('${c.id}', this)">
-        ${c.referenceImage ? `<button onclick="toggleCharUseRef('${c.id}')" style="background:${c.useRefAsDefault ? '#1a2a1a' : 'none'};border:1px solid ${c.useRefAsDefault ? '#4ade80' : '#2a2a2a'};border-radius:4px;color:${c.useRefAsDefault ? '#4ade80' : '#666'};font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-top:4px">${c.useRefAsDefault ? '📷 Using Ref as Default' : '📷 Use Ref as Default'}</button>` : ''}
       </div>
     </td>
     <td data-label="Prompt">
@@ -2103,7 +2102,7 @@ function charRowHTML(c) {
         <div class="char-prompt-static char-style-preview">${esc(getStylePrompt()) || '(no style selected)'}</div>
       </div>
     </td>
-    <td data-label="Generated Image">
+    <td data-label="Final Image">
       <div class="char-front-wrap">
         <div class="char-front-slot" id="char-front-${c.id}">${frontHTML}</div>
         <select class="expr-select" id="expr-${c.id}" onchange="applyCharExpression('${c.id}')">
@@ -2121,6 +2120,7 @@ function charRowHTML(c) {
         <button class="btn btn-gen-prompt" onclick="generateCharPrompt('${c.id}')">Generate Prompt</button>
         <button class="btn btn-gen-images" onclick="generateCharFrontProfile('${c.id}')">Generate Front Profile</button>
         <button class="btn btn-gen-images" style="background:#162a2a;border-color:#254a4a;color:#4adede" onclick="generateCharAngles('${c.id}')">Generate Variations</button>
+        ${c.referenceImage ? `<button onclick="toggleCharUseRef('${c.id}')" style="background:${c.useRefAsDefault ? '#1a2a1a' : 'none'};border:1px solid ${c.useRefAsDefault ? '#4ade80' : '#2a2a2a'};border-radius:4px;color:${c.useRefAsDefault ? '#4ade80' : '#666'};font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap">${c.useRefAsDefault ? '📷 Using Ref as Default' : '📷 Use Ref as Default'}</button>` : ''}
         <button class="btn btn-delete" onclick="deleteCharacter('${c.id}')">Remove</button>
       </div>
     </td>
@@ -2936,8 +2936,8 @@ function handleImageUpload(id, input) {
     img.onload = async () => {
       const { dataUrl, base64 } = resizeForUpload(img);
       const char = characters.find(c => c.id === id);
-      if (char) char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' };
-      // Upload to Supabase Storage in background for permanent URL
+      if (char) { char.referenceImage = { dataUrl, base64, mediaType: 'image/jpeg' }; char.useRefAsDefault = true; }
+      // Upload to Supabase Storage
       let displayUrl = dataUrl;
       try {
         const r = await apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: id });
@@ -2946,17 +2946,17 @@ function handleImageUpload(id, input) {
       const preview = document.querySelector(`tr[data-id="${id}"] .ref-img-preview`);
       if (preview) {
         preview.innerHTML = `<img src="${displayUrl}" alt="Reference"><button class="remove-img" onclick="removeRefImage('${id}', event)">✕</button>`;
-        preview.onclick = () => toggleCharUseRef(id);
-        const cell = preview.closest('.ref-img-cell');
-        if (cell && !cell.querySelector('.use-ref-btn')) {
-          const btn = document.createElement('button');
-          btn.className = 'use-ref-btn';
-          btn.style.cssText = 'background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-top:4px';
-          btn.textContent = '📷 Use Ref as Default';
-          btn.onclick = () => toggleCharUseRef(id);
-          cell.appendChild(btn);
-        }
+        preview.onclick = () => triggerImageUpload(id);
       }
+      // Remove background and set as Final Image
+      try {
+        const bgData = await apiFetch('/api/remove-background', { imageUrl: displayUrl });
+        if (bgData?.url && char) {
+          char.images = [bgData.url, ...(char.images || []).filter(u => u !== bgData.url)];
+          char.bgRemovedImage = bgData.url;
+          renderCharacters();
+        }
+      } catch(e) { console.warn('bg removal failed', e); }
       autoSave();
     };
     img.src = e.target.result;
