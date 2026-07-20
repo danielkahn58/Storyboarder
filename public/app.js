@@ -2482,18 +2482,58 @@ async function restoreAudio() {
   } catch(e) { console.warn('restoreAudio failed', e); }
 }
 
+const WHISPER_LIMIT = 24 * 1024 * 1024; // 24MB
+
+async function compressAudioForWhisper(file) {
+  // Decode, mix to mono at 16kHz, encode as WAV — well under Whisper's 25MB limit
+  const ctx = new AudioContext();
+  const audioBuf = await ctx.decodeAudioData(await file.arrayBuffer());
+  await ctx.close();
+  // Resample to 16kHz mono via OfflineAudioContext
+  const sampleRate = 16000;
+  const duration = audioBuf.duration;
+  const frameCount = Math.ceil(duration * sampleRate);
+  const offline = new OfflineAudioContext(1, frameCount, sampleRate);
+  const src = offline.createBufferSource();
+  src.buffer = audioBuf;
+  src.connect(offline.destination);
+  src.start();
+  const rendered = await offline.startRendering();
+  // Write 16-bit PCM WAV
+  const pcm = rendered.getChannelData(0);
+  const wavBuf = new ArrayBuffer(44 + pcm.length * 2);
+  const view = new DataView(wavBuf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true);
+  str(8, 'WAVE'); str(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, 'data'); view.setUint32(40, pcm.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
+  }
+  return new File([wavBuf], 'audio.wav', { type: 'audio/wav' });
+}
+
 async function handleAudioUpload(input) {
   const file = input.files[0];
   if (!file) return;
   const statusEl = document.getElementById('audio-upload-status');
-  const player = document.getElementById('audio-player');
   const transcriptBox = document.getElementById('audio-transcript');
-  if (statusEl) { statusEl.textContent = 'Transcribing…'; statusEl.className = 'upload-status loading'; }
   await _saveAudio(file);
   _setAudioSrc(URL.createObjectURL(file));
-  const formData = new FormData();
-  formData.append('file', file);
+  let uploadFile = file;
   try {
+    if (file.size > WHISPER_LIMIT) {
+      if (statusEl) { statusEl.textContent = 'Compressing audio…'; statusEl.className = 'upload-status loading'; }
+      uploadFile = await compressAudioForWhisper(file);
+    }
+    if (statusEl) { statusEl.textContent = 'Transcribing…'; statusEl.className = 'upload-status loading'; }
+    const formData = new FormData();
+    formData.append('file', uploadFile);
     const res = await fetch('/api/transcribe-audio', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
