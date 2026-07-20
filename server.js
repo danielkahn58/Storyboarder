@@ -386,6 +386,26 @@ app.post('/api/transcribe-audio', audioUpload.single('file'), async (req, res) =
   }
 });
 
+app.post('/api/fuzzy-match-timestamp', async (req, res) => {
+  const { lyric, transcript, prevTimestamp, nextTimestamp } = req.body;
+  if (!lyric || !transcript) return res.json({ timestamp: null });
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 64,
+      messages: [{
+        role: 'user',
+        content: `You are matching song lyrics to a timestamped transcript. The lyric for this shot is:\n"${lyric}"\n\nThe transcript excerpt (between timestamps ${prevTimestamp} and ${nextTimestamp}) is:\n${transcript}\n\nFind the timestamp where this lyric most likely appears. Reply with ONLY the timestamp in M:SS.s format (e.g. "1:23.4"), or "none" if you cannot find a reasonable match.`
+      }]
+    });
+    const text = msg.content[0]?.text?.trim() || '';
+    const match = text.match(/\d+:\d+(\.\d+)?/);
+    res.json({ timestamp: match ? match[0] : null });
+  } catch(e) {
+    res.json({ timestamp: null });
+  }
+});
+
 app.post('/api/parse-script', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   log('info', 'parse-script started', { name: req.file.originalname, size: req.file.size });

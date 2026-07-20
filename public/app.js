@@ -2288,6 +2288,8 @@ function shotRowHTML(s, idx) {
     </div></td>
     <td class="shot-card-timestamp" style="text-align:center">
       <input type="text" class="field-timestamp" placeholder="0:00" value="${esc(s.timestamp || '')}" data-shot-id="${esc(s.id)}" oninput="debouncedSave();onTimestampInput(this)" style="width:60px;font-size:11px;font-family:monospace;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:3px 5px">
+      ${s.timestampIssue === 'missing' ? `<div style="margin-top:3px;font-size:9px;color:#e05050;font-weight:600;line-height:1.2">Missing<br>Timestamp</div>` : ''}
+      ${s.timestampIssue === 'inaccurate' ? `<div style="margin-top:3px;font-size:9px;color:#f59e0b;font-weight:600;line-height:1.2">Timestamp<br>Inaccuracy</div>` : ''}
     </td>
     <td data-label="Audio">
       ${s.missingFromScript ? `<div class="missing-from-script-flag" style="margin-bottom:4px">Missing from script — <button onclick="deleteShot('${s.id}')" style="background:none;border:none;color:#e05050;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Delete?</button> — <button onclick="dismissShotMissingFlag('${s.id}')" style="background:none;border:none;color:#555;cursor:pointer;padding:0;font-size:10px;text-decoration:underline">Dismiss</button></div>` : ''}
@@ -2598,11 +2600,52 @@ function matchShotToTranscript(shot) {
   return false;
 }
 
-function matchTranscriptToShots() {
+// Try to find the best transcript match for a shot's lyric within a time window [minSecs, maxSecs].
+// Returns seconds if found, null otherwise. Uses relaxed matching — any word in the lyric can anchor.
+function fuzzyMatchInWindow(lyric, minSecs, maxSecs) {
+  if (!lyric?.trim() || !_audioTranscript?.length) return null;
+  const words = _audioTranscript;
+  const lyricWords = lyric.trim().toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+  let bestScore = 0, bestSecs = null;
+  for (let i = 0; i < words.length; i++) {
+    const ws = words[i].start;
+    if (ws < minSecs || ws > maxSecs) continue;
+    // Try each lyric word as the anchor
+    for (let li = 0; li < Math.min(lyricWords.length, 6); li++) {
+      const lw = lyricWords[li];
+      if (lw.length < 2) continue;
+      const tw = words[i].word.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (tw !== lw && !tw.startsWith(lw) && !lw.startsWith(tw)) continue;
+      // Score forward from this position
+      let score = 0;
+      for (let j = 0; j < Math.min(lyricWords.length - li, 5) && i + j < words.length; j++) {
+        const ta = words[i + j].word.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const la = lyricWords[li + j];
+        if (ta === la || (la.length > 2 && (ta.startsWith(la) || la.startsWith(ta)))) score++;
+        else if (j > 0) break;
+      }
+      if (score > bestScore) { bestScore = score; bestSecs = ws; }
+    }
+  }
+  return bestScore >= 1 ? bestSecs : null;
+}
+
+// Get a readable snippet of transcript words between minSecs and maxSecs for AI context
+function transcriptSnippet(minSecs, maxSecs) {
+  return (_audioTranscript || [])
+    .filter(w => w.start >= minSecs && w.start <= maxSecs)
+    .map(w => `[${formatTimestamp(w.start)}] ${w.word}`)
+    .join(' ');
+}
+
+async function matchTranscriptToShots() {
   if (!_audioTranscript?.length || !shots.length) return;
   syncFromDOM();
 
-  // First pass: direct transcript matches
+  // Clear previous timestamp issues
+  shots.forEach(s => { delete s.timestampIssue; });
+
+  // First pass: direct transcript matches (anywhere in audio)
   const directMatch = shots.map(shot => matchShotToTranscript(shot));
 
   // Build anchor list: shots that got a direct match, with their timestamp in seconds
@@ -2637,9 +2680,77 @@ function matchTranscriptToShots() {
     }
   }
 
-  renderShots();
-  autoSave();
-  showToast('Timestamps matched to shots.');
+  // Validation pass: check each shot's timestamp is monotonically between neighbors
+  const totalSecs = _audioTranscript[_audioTranscript.length - 1]?.start || 0;
+  const needsRepair = [];
+  shots.forEach((shot, idx) => {
+    const secs = parseTimestamp(shot.timestamp);
+    if (secs == null || isNaN(secs)) { needsRepair.push(idx); return; }
+    const prevSecs = idx > 0 ? parseTimestamp(shots[idx - 1].timestamp) ?? 0 : 0;
+    const nextSecs = idx < shots.length - 1 ? parseTimestamp(shots[idx + 1].timestamp) ?? totalSecs : totalSecs;
+    if (secs < prevSecs - 1 || secs > nextSecs + 1) needsRepair.push(idx);
+  });
+
+  if (needsRepair.length === 0) {
+    renderShots(); autoSave(); showToast('Timestamps matched to shots.'); return;
+  }
+
+  // Second pass: for shots needing repair, try fuzzy window search first
+  const statusEl = document.getElementById('audio-upload-status');
+  if (statusEl) { statusEl.textContent = `Fixing ${needsRepair.length} timestamp(s)…`; statusEl.className = 'upload-status loading'; }
+
+  const stillNeedsAI = [];
+  for (const idx of needsRepair) {
+    const shot = shots[idx];
+    const prevSecs = idx > 0 ? (parseTimestamp(shots[idx - 1].timestamp) ?? 0) : 0;
+    const nextSecs = idx < shots.length - 1 ? (parseTimestamp(shots[idx + 1].timestamp) ?? totalSecs) : totalSecs;
+    const minW = Math.max(0, prevSecs - 2);
+    const maxW = nextSecs + 2;
+
+    const found = fuzzyMatchInWindow(shot.lyric, minW, maxW);
+    if (found !== null) {
+      shot.timestamp = formatTimestamp(found);
+      shot.timestampIssue = null;
+    } else {
+      stillNeedsAI.push({ idx, prevSecs, nextSecs });
+    }
+  }
+
+  // Third pass: AI fallback for shots still unresolved
+  for (const { idx, prevSecs, nextSecs } of stillNeedsAI) {
+    const shot = shots[idx];
+    const snippet = transcriptSnippet(Math.max(0, prevSecs - 3), nextSecs + 3);
+    if (!snippet || !shot.lyric?.trim()) { shot.timestampIssue = 'missing'; continue; }
+    try {
+      const r = await apiFetch('/api/fuzzy-match-timestamp', {
+        lyric: shot.lyric,
+        transcript: snippet,
+        prevTimestamp: formatTimestamp(prevSecs),
+        nextTimestamp: formatTimestamp(nextSecs)
+      });
+      if (r?.timestamp) {
+        shot.timestamp = r.timestamp;
+        shot.timestampIssue = null;
+      } else {
+        shot.timestampIssue = 'missing';
+      }
+    } catch(e) {
+      shot.timestampIssue = 'missing';
+    }
+  }
+
+  // Final validation — mark any still-invalid as inaccurate
+  shots.forEach((shot, idx) => {
+    if (shot.timestampIssue) return;
+    const secs = parseTimestamp(shot.timestamp);
+    if (secs == null || isNaN(secs)) { shot.timestampIssue = 'missing'; return; }
+    const prevSecs = idx > 0 ? parseTimestamp(shots[idx - 1].timestamp) ?? 0 : 0;
+    const nextSecs = idx < shots.length - 1 ? parseTimestamp(shots[idx + 1].timestamp) ?? totalSecs : totalSecs;
+    if (secs < prevSecs - 1 || secs > nextSecs + 1) shot.timestampIssue = 'inaccurate';
+  });
+
+  if (statusEl) { statusEl.textContent = `${shots.length} shots timestamped`; statusEl.className = 'upload-status done'; }
+  renderShots(); autoSave(); showToast('Timestamps matched to shots.');
 }
 
 function retryTimestampForShot(shotId) {
