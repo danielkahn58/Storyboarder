@@ -124,6 +124,24 @@ async function persistImage(falUrl, storagePath) {
   }
 }
 
+// Persist any binary file URL (e.g. LoRA weights) to Supabase storage permanently.
+async function persistFile(url, storagePath, contentType) {
+  if (!sbAdmin || !url) return url;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const { error } = await sbAdmin.storage.from('images').upload(storagePath, buf, { contentType, upsert: true });
+    if (error) throw error;
+    const { data } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+    log('info', 'persistFile done', { storagePath, size: buf.length });
+    return data.publicUrl;
+  } catch (e) {
+    log('warn', 'persistFile failed — keeping original URL', { url, error: e.message });
+    return url;
+  }
+}
+
 // Persist an array of image URLs to Storage under a given prefix.
 async function persistImages(falUrls, prefix) {
   if (!sbAdmin) return falUrls;
@@ -1047,8 +1065,10 @@ app.post('/api/train-character-lora', async (req, res) => {
       onQueueUpdate: update => { if (update.status === 'IN_PROGRESS') log('info', 'lora-training progress', { logs: update.logs?.slice(-1) }); }
     });
     log('info', 'train-character-lora fal result', { data: JSON.stringify(result?.data).slice(0, 200) });
-    const loraUrl = result?.data?.diffusers_lora_file?.url ?? null;
-    if (!loraUrl) throw new Error('Training completed but no LoRA weights URL in response');
+    const falLoraUrl = result?.data?.diffusers_lora_file?.url ?? null;
+    if (!falLoraUrl) throw new Error('Training completed but no LoRA weights URL in response');
+    // Persist LoRA weights to Supabase — fal CDN URLs expire
+    const loraUrl = await persistFile(falLoraUrl, `loras/${trigger}-${Date.now()}.safetensors`, 'application/octet-stream');
     log('info', 'train-character-lora done', { loraUrl, ms: Date.now() - t0 });
     res.json({ loraUrl, triggerWord: trigger });
   } catch (e) {
@@ -1060,7 +1080,7 @@ app.post('/api/train-character-lora', async (req, res) => {
 app.post('/api/generate-from-lora', async (req, res) => {
   const { prompt, loraUrl, triggerWord, stylePrompt, projectId, entityType, entityId } = req.body;
   if (!prompt || !loraUrl) return res.status(400).json({ error: 'prompt and loraUrl required' });
-  log('info', 'generate-from-lora started', { prompt_chars: prompt.length });
+  log('info', 'generate-from-lora started', { prompt_chars: prompt.length, loraUrl, triggerWord });
   const t0 = Date.now();
   try {
     // For LoRA generation, trigger word must lead; appearance comes from the LoRA weights, not the prompt
