@@ -5908,8 +5908,8 @@ async function createMotionVideo(preset) {
       ctx.clearRect(0, 0, W, H);
       ctx.drawImage(img, sx, sy, vpW, vpH, 0, 0, W, H);
 
-      // Yield to allow MediaRecorder to process
-      await new Promise(r => setTimeout(r, 0));
+      // Pace to real time so captureStream captures each frame
+      await new Promise(r => setTimeout(r, 1000 / fps));
     }
 
     recorder.stop();
