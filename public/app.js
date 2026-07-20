@@ -3591,16 +3591,29 @@ async function generateCharFrontProfile(id) {
   const btns = row.querySelectorAll('.btn-gen-images');
   const btn = btns[0];
   const charDesc = row.querySelector('.field-prompt').value.trim();
-  if (!charDesc) { showToast('Add a character description first.', true); return; }
   const char = characters.find(c => c.id === id);
+  const hasRef = !!(char?.referenceImage?.url || char?.referenceImage?.dataUrl);
+  if (!charDesc && !hasRef) { showToast('Add a character description or upload a reference image first.', true); return; }
   if (!char.angles) char.angles = {};
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
   const frontSlot = document.getElementById(`char-front-${id}`);
   if (frontSlot) frontSlot.innerHTML = '<span class="spinner"></span>';
   try {
-    const fullPrompt = getCharFullPrompt(charDesc);
-    const frontData = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
-    const frontUrl = frontData.images?.[0] || null;
+    const fullPrompt = getCharFullPrompt(charDesc || '');
+    let frontUrl = null;
+    if (hasRef) {
+      const refSrc = char.referenceImage.url || char.referenceImage.dataUrl;
+      let refUrl = refSrc;
+      if (refSrc.startsWith('data:')) {
+        const uploaded = await apiFetch('/api/upload-reference', { base64: char.referenceImage.base64, mediaType: char.referenceImage.mediaType, projectId: currentProjectId, entityType: 'chars', entityId: id });
+        refUrl = uploaded.url || refSrc;
+      }
+      const frontData = await apiFetch('/api/generate-shot-images', { prompt: fullPrompt, stylePrompt: getStylePrompt(), charImageUrls: [refUrl] });
+      frontUrl = frontData.images?.[0] || null;
+    } else {
+      const frontData = await apiFetch('/api/generate-images', { prompt: fullPrompt, stylePrompt: '' });
+      frontUrl = frontData.images?.[0] || null;
+    }
     char.images = frontUrl ? [frontUrl] : [];
     char.prompt = charDesc;
     if (frontSlot) frontSlot.innerHTML = frontUrl ? `<img src="${esc(frontUrl)}" alt="Front">` : '<span class="placeholder">·</span>';
