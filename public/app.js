@@ -3868,8 +3868,9 @@ async function generateCharFrontProfile(id) {
     const fullPrompt = getCharFullPrompt(charDesc || '');
     let frontUrl = null;
     if (hasLora) {
-      // Path 1: trained LoRA — best identity consistency
-      const data = await apiFetch('/api/generate-from-lora', { prompt: fullPrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
+      // Path 1: trained LoRA — appearance comes from weights, so only pass pose/framing
+      const loraPrompt = 'front profile portrait, facing camera, neutral expression, full body';
+      const data = await apiFetch('/api/generate-from-lora', { prompt: loraPrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
       frontUrl = data.images?.[0] || null;
     } else if (hasRef) {
       // Path 2: Kontext with selected ref image
@@ -3924,7 +3925,9 @@ async function generateCharAngles(id) {
       try {
         let url = null;
         if (hasLora) {
-          const data = await apiFetch('/api/generate-from-lora', { prompt: anglePrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
+          // For LoRA, only describe the pose/angle — appearance comes from the weights
+          const loraPosePrompt = anglePrompt.replace(/\b(wearing|dressed|hair|eyes|skin|outfit|clothes|tall|short|with [a-z]+ [a-z]+)\b.*/i, '').trim() || anglePrompt;
+          const data = await apiFetch('/api/generate-from-lora', { prompt: loraPosePrompt, loraUrl: char.loraUrl, triggerWord: char.loraTriggerWord, stylePrompt: getStylePrompt(), projectId: currentProjectId, entityType: 'chars', entityId: id });
           url = data.images?.[0] || null;
         } else {
           const varData = await apiFetch('/api/generate-char-variant', { prompt: anglePrompt, referenceImageUrls: [refUrl], stylePrompt: getStylePrompt() });

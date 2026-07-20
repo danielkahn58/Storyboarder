@@ -1063,14 +1063,17 @@ app.post('/api/generate-from-lora', async (req, res) => {
   log('info', 'generate-from-lora started', { prompt_chars: prompt.length });
   const t0 = Date.now();
   try {
-    const fullPrompt = stylePrompt ? `${prompt}. ${stylePrompt}` : prompt;
+    // For LoRA generation, trigger word must lead; appearance comes from the LoRA weights, not the prompt
+    const posePart = prompt || 'front profile portrait, facing camera, neutral expression';
+    const fullPrompt = stylePrompt ? `${posePart}. ${stylePrompt}` : posePart;
     const result = await fal.subscribe('fal-ai/flux-lora', {
       input: {
-        prompt: `${triggerWord || 'CHARREF'} ${fullPrompt}`,
-        loras: [{ path: loraUrl, scale: 1.0 }],
+        prompt: `${triggerWord || 'CHARREF'}, ${fullPrompt}`,
+        loras: [{ path: loraUrl, scale: 1.2 }],
         num_images: 1,
         image_size: 'square_hd',
-        num_inference_steps: 28,
+        num_inference_steps: 40,
+        guidance_scale: 3.5,
       }
     });
     const falUrl = result?.data?.images?.[0]?.url ?? null;
