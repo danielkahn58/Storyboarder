@@ -1001,32 +1001,39 @@ app.post('/api/create-talking-video', async (req, res) => {
 app.post('/api/train-character-lora', async (req, res) => {
   const { imageUrls, triggerWord } = req.body;
   if (!Array.isArray(imageUrls) || imageUrls.length < 2) return res.status(400).json({ error: 'at least 2 imageUrls required' });
-  log('info', 'train-character-lora started', { count: imageUrls.length });
+  // Filter out data: URIs — they can't be fetched by URL
+  const fetchableUrls = imageUrls.filter(u => u && !u.startsWith('data:'));
+  if (fetchableUrls.length < 2) return res.status(400).json({ error: 'at least 2 uploaded (non-base64) images required — upload images first' });
+  log('info', 'train-character-lora started', { count: fetchableUrls.length });
   const t0 = Date.now();
   try {
     const JSZipLib = require('jszip');
     const zip = new JSZipLib();
-    await Promise.all(imageUrls.map(async (url, i) => {
+    await Promise.all(fetchableUrls.map(async (url, i) => {
       const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`fetch failed for image ${i}: ${resp.status}`);
+      if (!resp.ok) throw new Error(`Could not fetch image ${i + 1} (${resp.status}): ${url}`);
       const buf = Buffer.from(await resp.arrayBuffer());
-      const ext = url.split('?')[0].split('.').pop().replace(/[^a-z]/g, '') || 'jpg';
-      zip.file(`image_${i + 1}.${ext}`, buf);
+      zip.file(`image_${i + 1}.jpg`, buf);
     }));
     const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
-    const zipBlob = new Blob([zipBuf], { type: 'application/zip' });
-    const zipUrl = await fal.storage.upload(zipBlob);
+    // fal.storage.upload needs a File-like object with a name for proper content-type detection
+    const zipFile = new File([zipBuf], 'training_images.zip', { type: 'application/zip' });
+    const zipUrl = await fal.storage.upload(zipFile);
+    log('info', 'train-character-lora zip uploaded', { zipUrl, ms: Date.now() - t0 });
     const trigger = triggerWord || 'CHARREF';
     const result = await fal.subscribe('fal-ai/flux-lora-fast-training', {
-      input: { images_data_url: zipUrl, trigger_word: trigger, steps: 1000, multiresolution_training: true }
+      input: { images_data_url: zipUrl, trigger_word: trigger, steps: 500, create_masks: true },
+      logs: true,
+      onQueueUpdate: update => { if (update.status === 'IN_PROGRESS') log('info', 'lora-training progress', { logs: update.logs?.slice(-1) }); }
     });
+    log('info', 'train-character-lora fal result', { data: JSON.stringify(result?.data).slice(0, 200) });
     const loraUrl = result?.data?.diffusers_lora_file?.url ?? null;
-    if (!loraUrl) throw new Error('Training succeeded but no LoRA URL returned');
+    if (!loraUrl) throw new Error('Training completed but no LoRA weights URL in response');
     log('info', 'train-character-lora done', { loraUrl, ms: Date.now() - t0 });
     res.json({ loraUrl, triggerWord: trigger });
   } catch (e) {
-    log('error', 'train-character-lora failed', { error: e.message, ms: Date.now() - t0 });
-    res.status(500).json({ error: e.message });
+    log('error', 'train-character-lora failed', { error: e.message, body: e.body, status: e.status, ms: Date.now() - t0 });
+    res.status(500).json({ error: e.body?.detail || e.message });
   }
 });
 
