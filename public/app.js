@@ -3546,6 +3546,8 @@ async function generateCharPrompt(id) {
 // ── generate character images ─────────────────────────────────────────────
 function proxyUrl(url) {
   if (!url || url.startsWith('data:')) return url;
+  // Supabase public storage URLs are already CORS-accessible — no proxy needed
+  if (url.includes('supabase.co/storage')) return url;
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
