@@ -2680,10 +2680,36 @@ async function matchTranscriptToShots() {
     }
   }
 
-  // Validation pass: check each shot's timestamp is monotonically between neighbors
+  const isInstrumental = s => /^\s*instrumental\s*$/i.test(s.lyric || '') || !s.lyric?.trim();
+
+  // Instrumental interpolation pass: for consecutive runs of instrumental/blank shots,
+  // space them evenly between the nearest timestamped neighbors.
   const totalSecs = _audioTranscript[_audioTranscript.length - 1]?.start || 0;
+  let i = 0;
+  while (i < shots.length) {
+    if (isInstrumental(shots[i])) {
+      // Find the run
+      let runEnd = i;
+      while (runEnd + 1 < shots.length && isInstrumental(shots[runEnd + 1])) runEnd++;
+      // Find bounding timestamps
+      const prevSecs = i > 0 ? (parseTimestamp(shots[i - 1].timestamp) ?? 0) : 0;
+      const nextSecs = runEnd < shots.length - 1 ? (parseTimestamp(shots[runEnd + 1].timestamp) ?? totalSecs) : totalSecs;
+      const span = runEnd - i + 1;
+      for (let j = i; j <= runEnd; j++) {
+        const t = prevSecs + (nextSecs - prevSecs) * ((j - i + 1) / (span + 1));
+        shots[j].timestamp = formatTimestamp(t);
+        delete shots[j].timestampIssue;
+      }
+      i = runEnd + 1;
+    } else {
+      i++;
+    }
+  }
+
+  // Validation pass: check each non-instrumental shot's timestamp is monotonically between neighbors
   const needsRepair = [];
   shots.forEach((shot, idx) => {
+    if (isInstrumental(shot)) return; // already handled above
     const secs = parseTimestamp(shot.timestamp);
     if (secs == null || isNaN(secs)) { needsRepair.push(idx); return; }
     const prevSecs = idx > 0 ? parseTimestamp(shots[idx - 1].timestamp) ?? 0 : 0;
