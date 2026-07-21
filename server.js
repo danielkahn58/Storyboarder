@@ -1235,9 +1235,18 @@ app.post('/api/apply-prompt', async (req, res) => {
       n: 1,
       size: '1536x1024',
     });
+    log('info', 'apply-prompt gpt response', { keys: Object.keys(response.data?.[0] || {}) });
     const b64 = response.data?.[0]?.b64_json;
-    if (!b64) throw new Error('No image returned from GPT-Image-2');
-    const outBuf = Buffer.from(b64, 'base64');
+    const responseUrl = response.data?.[0]?.url;
+    if (!b64 && !responseUrl) throw new Error(`No image returned from GPT-Image-2: ${JSON.stringify(response.data?.[0])}`);
+    let outBuf;
+    if (b64) {
+      outBuf = Buffer.from(b64, 'base64');
+    } else {
+      const r = await fetch(responseUrl);
+      if (!r.ok) throw new Error(`Failed to fetch GPT result: ${r.status}`);
+      outBuf = Buffer.from(await r.arrayBuffer());
+    }
     const storagePath = `${prefix}/${Date.now()}-gpt-edit.jpg`;
     const { error: uploadErr } = await sbAdmin.storage.from('images').upload(storagePath, outBuf, { contentType: 'image/jpeg', upsert: true });
     if (uploadErr) throw uploadErr;
