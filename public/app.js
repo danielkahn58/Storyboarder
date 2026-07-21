@@ -5838,131 +5838,276 @@ async function createTalkingVideo() {
   }
 }
 
-// Wire up duration slider label
-document.addEventListener('DOMContentLoaded', () => {
-  const slider = document.getElementById('motion-duration');
-  const label = document.getElementById('motion-duration-label');
-  if (slider && label) slider.addEventListener('input', () => { label.textContent = slider.value + 's'; });
-});
+// ── Motion video ─────────────────────────────────────────────────────────────
 
-async function createMotionVideo(preset) {
+let _motionConfig = {
+  preset: null,
+  zoomTarget: { x: 0.5, y: 0.35 },
+  zoomScale: 1.35,
+  panStart: { cx: 0.25, cy: 0.5, scale: 1.15 },
+  panEnd:   { cx: 0.75, cy: 0.5, scale: 1.15 },
+};
+let _motionImg = null;   // Image object of the composed frame
+let _motionDrag = null;  // active drag state
+
+function _getComposeDataUrl() {
+  const canvas = document.getElementById('compose-canvas');
+  const savedIdx = _compose.selectedIdx;
+  _compose.selectedIdx = -1;
+  renderCompose();
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  _compose.selectedIdx = savedIdx;
+  renderCompose();
+  return dataUrl;
+}
+
+async function selectMotionPreset(preset) {
+  _motionConfig.preset = preset;
+  document.querySelectorAll('.btn-motion-preset').forEach(b =>
+    b.classList.toggle('active', b.dataset.preset === preset));
+
+  const isZoom = preset === 'zoom-in' || preset === 'zoom-out';
+  const isPan  = preset === 'pan-left' || preset === 'pan-right';
+  document.getElementById('motion-zoom-controls').style.display = isZoom ? '' : 'none';
+  document.getElementById('motion-pan-controls').style.display  = isPan  ? '' : 'none';
+  document.getElementById('btn-generate-motion').style.display  = '';
+
+  const hint = document.getElementById('motion-canvas-hint');
+  if (isZoom) hint.textContent = 'Drag the yellow dot to set zoom target.';
+  if (isPan)  hint.textContent = 'Drag the blue (start) or green (end) frame to set pan path.';
+
+  // Default pan positions based on direction
+  if (preset === 'pan-left')  { _motionConfig.panStart = { cx: 0.25, cy: 0.5, scale: 1.15 }; _motionConfig.panEnd = { cx: 0.75, cy: 0.5, scale: 1.15 }; }
+  if (preset === 'pan-right') { _motionConfig.panStart = { cx: 0.75, cy: 0.5, scale: 1.15 }; _motionConfig.panEnd = { cx: 0.25, cy: 0.5, scale: 1.15 }; }
+
+  // Load preview image if needed
+  if (!_motionImg) {
+    const dataUrl = _getComposeDataUrl();
+    const img = new Image();
+    await new Promise(r => { img.onload = r; img.src = dataUrl; });
+    _motionImg = img;
+  }
+
+  const previewCanvas = document.getElementById('motion-preview-canvas');
+  previewCanvas.style.display = '';
+  hint.style.display = '';
+  _setupMotionCanvas(previewCanvas);
+  renderMotionPreview();
+}
+
+function _setupMotionCanvas(canvas) {
+  canvas.onpointerdown = e => {
+    const r = canvas.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width;
+    const py = (e.clientY - r.top) / r.height;
+    const preset = _motionConfig.preset;
+
+    if (preset === 'zoom-in' || preset === 'zoom-out') {
+      _motionDrag = { type: 'zoomTarget' };
+    } else {
+      // Determine which handle is closer
+      const distStart = Math.hypot(px - _motionConfig.panStart.cx, py - _motionConfig.panStart.cy);
+      const distEnd   = Math.hypot(px - _motionConfig.panEnd.cx,   py - _motionConfig.panEnd.cy);
+      _motionDrag = { type: distStart <= distEnd ? 'panStart' : 'panEnd' };
+    }
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  canvas.onpointermove = e => {
+    if (!_motionDrag) return;
+    const r = canvas.getBoundingClientRect();
+    const px = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const py = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    if (_motionDrag.type === 'zoomTarget') {
+      _motionConfig.zoomTarget = { x: px, y: py };
+    } else if (_motionDrag.type === 'panStart') {
+      _motionConfig.panStart.cx = px; _motionConfig.panStart.cy = py;
+    } else {
+      _motionConfig.panEnd.cx = px; _motionConfig.panEnd.cy = py;
+    }
+    renderMotionPreview();
+  };
+  canvas.onpointerup = () => { _motionDrag = null; };
+}
+
+function renderMotionPreview() {
+  const canvas = document.getElementById('motion-preview-canvas');
+  if (!canvas || !_motionImg) return;
+  const W = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  const H = Math.round(W * 9 / 16);
+  if (canvas.width !== W) { canvas.width = W; canvas.height = H; }
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(_motionImg, 0, 0, W, H);
+
+  const preset = _motionConfig.preset;
+
+  if (preset === 'zoom-in' || preset === 'zoom-out') {
+    const { x: tx, y: ty } = _motionConfig.zoomTarget;
+    const scale = _motionConfig.zoomScale;
+    const vw = W / scale, vh = H / scale;
+    const vx = Math.max(0, Math.min(W - vw, tx * W - vw / 2));
+    const vy = Math.max(0, Math.min(H - vh, ty * H - vh / 2));
+
+    const [startColor, endColor] = preset === 'zoom-in' ? ['#60a5fa','#4ade80'] : ['#4ade80','#60a5fa'];
+
+    // Dim area outside end viewport
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, W, vy);
+    ctx.fillRect(0, vy + vh, W, H - vy - vh);
+    ctx.fillRect(0, vy, vx, vh);
+    ctx.fillRect(vx + vw, vy, W - vx - vw, vh);
+
+    // Start frame (full image outline)
+    ctx.strokeStyle = startColor; ctx.lineWidth = 2; ctx.setLineDash([5,3]);
+    ctx.strokeRect(2, 2, W - 4, H - 4); ctx.setLineDash([]);
+    ctx.font = `bold ${Math.round(W * 0.035)}px sans-serif`;
+    ctx.fillStyle = startColor; ctx.fillText('START', 8, Math.round(W * 0.045));
+
+    // End frame
+    ctx.strokeStyle = endColor; ctx.lineWidth = 2;
+    ctx.strokeRect(vx, vy, vw, vh);
+    ctx.fillStyle = endColor; ctx.fillText('END', vx + 6, vy + Math.round(W * 0.045));
+
+    // Target dot + crosshair
+    const dx = tx * W, dy = ty * H;
+    ctx.strokeStyle = 'rgba(250,204,21,0.5)'; ctx.lineWidth = 1; ctx.setLineDash([2,3]);
+    ctx.beginPath(); ctx.moveTo(dx, 0); ctx.lineTo(dx, H); ctx.moveTo(0, dy); ctx.lineTo(W, dy); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(dx, dy, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(250,204,21,0.95)'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  } else if (preset === 'pan-left' || preset === 'pan-right') {
+    const drawVp = (vp, color, label) => {
+      const vw = W / vp.scale, vh = H / vp.scale;
+      const vx = Math.max(0, Math.min(W - vw, vp.cx * W - vw / 2));
+      const vy = Math.max(0, Math.min(H - vh, vp.cy * H - vh / 2));
+      ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+      ctx.strokeRect(vx, vy, vw, vh);
+      ctx.font = `bold ${Math.round(W * 0.035)}px sans-serif`;
+      ctx.fillStyle = color; ctx.fillText(label, vx + 6, vy + Math.round(W * 0.045));
+      // Center handle
+      ctx.beginPath(); ctx.arc(vp.cx * W, vp.cy * H, 7, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+    };
+    drawVp(_motionConfig.panStart, '#60a5fa', 'START');
+    drawVp(_motionConfig.panEnd,   '#4ade80', 'END');
+  }
+}
+
+function onMotionZoomScale(input) {
+  _motionConfig.zoomScale = parseFloat(input.value);
+  document.getElementById('motion-zoom-scale-label').textContent = _motionConfig.zoomScale.toFixed(2) + '×';
+  renderMotionPreview();
+}
+
+function onMotionPanScale(which, input) {
+  const val = parseFloat(input.value);
+  if (which === 'start') { _motionConfig.panStart.scale = val; document.getElementById('motion-pan-start-scale-label').textContent = val.toFixed(2) + '×'; }
+  else                   { _motionConfig.panEnd.scale   = val; document.getElementById('motion-pan-end-scale-label').textContent   = val.toFixed(2) + '×'; }
+  renderMotionPreview();
+}
+
+async function generateMotionVideo() {
+  const { preset } = _motionConfig;
+  if (!preset) return;
   const statusEl = document.getElementById('motion-video-status');
-  const btns = document.querySelectorAll('.btn-motion-preset');
-  const shot = shots.find(s => s.id === _compose?.shotId);
+  const genBtn   = document.getElementById('btn-generate-motion');
+  const shot     = shots.find(s => s.id === _compose?.shotId);
   const durationSecs = parseInt(document.getElementById('motion-duration')?.value || '4', 10);
-
-  btns.forEach(b => b.disabled = true);
   const setStatus = t => { if (statusEl) statusEl.textContent = t; };
 
+  if (genBtn) { genBtn.disabled = true; genBtn.textContent = '⏳ Rendering…'; }
+
   try {
-    // Get the composed image as a data URL from the canvas
-    const canvas = document.getElementById('compose-canvas');
-    const savedIdx = _compose.selectedIdx;
-    _compose.selectedIdx = -1;
-    renderCompose();
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    _compose.selectedIdx = savedIdx;
-    renderCompose();
+    const dataUrl = _getComposeDataUrl();
+    const img = _motionImg || (() => { throw new Error('No preview image'); })();
 
-    // Upload image so server can fetch it for Claude vision
-    setStatus('Detecting subject…');
-    const uploadData = await apiFetch('/api/upload-reference', { base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
-    const imageUrl = uploadData.url;
-    const { box } = await apiFetch('/api/detect-subject', { imageUrl });
-
-    // Compute Ken Burns start/end viewport rects in image-normalized coords
-    // Each rect: { cx, cy, scale } where scale is zoom level (1 = full image)
-    setStatus('Rendering motion…');
-    const subjectCx = box.x + box.w / 2;
-    const subjectCy = box.y + box.h / 2;
+    // Build start/end rects from config
     let startRect, endRect;
-
     if (preset === 'zoom-in') {
       startRect = { cx: 0.5, cy: 0.5, scale: 1.0 };
-      endRect   = { cx: subjectCx, cy: subjectCy, scale: 1.35 };
+      endRect   = { cx: _motionConfig.zoomTarget.x, cy: _motionConfig.zoomTarget.y, scale: _motionConfig.zoomScale };
     } else if (preset === 'zoom-out') {
-      startRect = { cx: subjectCx, cy: subjectCy, scale: 1.35 };
+      startRect = { cx: _motionConfig.zoomTarget.x, cy: _motionConfig.zoomTarget.y, scale: _motionConfig.zoomScale };
       endRect   = { cx: 0.5, cy: 0.5, scale: 1.0 };
-    } else if (preset === 'pan-left') {
-      // Start left-of-subject, end right-of-subject
-      startRect = { cx: Math.max(0.3, subjectCx - 0.2), cy: subjectCy, scale: 1.15 };
-      endRect   = { cx: Math.min(0.7, subjectCx + 0.2), cy: subjectCy, scale: 1.15 };
-    } else { // pan-right
-      startRect = { cx: Math.min(0.7, subjectCx + 0.2), cy: subjectCy, scale: 1.15 };
-      endRect   = { cx: Math.max(0.3, subjectCx - 0.2), cy: subjectCy, scale: 1.15 };
+    } else {
+      startRect = _motionConfig.panStart;
+      endRect   = _motionConfig.panEnd;
     }
 
-    // Render frames onto an offscreen canvas using MediaRecorder
     const W = 1024, H = 576;
     const offscreen = document.createElement('canvas');
     offscreen.width = W; offscreen.height = H;
     const ctx = offscreen.getContext('2d');
-
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = dataUrl; });
     const imgW = img.naturalWidth, imgH = img.naturalHeight;
-
-    const fps = 30;
-    const totalFrames = durationSecs * fps;
+    const fps = 30, totalFrames = durationSecs * fps;
+    const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
     const stream = offscreen.captureStream(fps);
     const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 4_000_000 });
     const chunks = [];
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
     recorder.start();
 
-    // Ease in-out interpolation
-    const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
     for (let f = 0; f < totalFrames; f++) {
-      const t = ease(f / (totalFrames - 1));
-      const cx = startRect.cx + (endRect.cx - startRect.cx) * t;
-      const cy = startRect.cy + (endRect.cy - startRect.cy) * t;
+      const t = ease(f / Math.max(1, totalFrames - 1));
+      const cx    = startRect.cx    + (endRect.cx    - startRect.cx)    * t;
+      const cy    = startRect.cy    + (endRect.cy    - startRect.cy)    * t;
       const scale = startRect.scale + (endRect.scale - startRect.scale) * t;
-
-      // Viewport in image pixels
-      const vpW = imgW / scale;
-      const vpH = imgH / scale;
-      const vpX = cx * imgW - vpW / 2;
-      const vpY = cy * imgH - vpH / 2;
-      // Clamp to image bounds
-      const sx = Math.max(0, Math.min(imgW - vpW, vpX));
-      const sy = Math.max(0, Math.min(imgH - vpH, vpY));
-
-      ctx.clearRect(0, 0, W, H);
+      const vpW = imgW / scale, vpH = imgH / scale;
+      const sx = Math.max(0, Math.min(imgW - vpW, cx * imgW - vpW / 2));
+      const sy = Math.max(0, Math.min(imgH - vpH, cy * imgH - vpH / 2));
       ctx.drawImage(img, sx, sy, vpW, vpH, 0, 0, W, H);
-
-      // Pace to real time so captureStream captures each frame
+      if (f % 15 === 0) setStatus(`Rendering… ${Math.round(f / totalFrames * 100)}%`);
       await new Promise(r => setTimeout(r, 1000 / fps));
     }
 
     recorder.stop();
     await new Promise(r => { recorder.onstop = r; });
-
     const blob = new Blob(chunks, { type: 'video/webm' });
-    const videoUrl = URL.createObjectURL(blob);
 
-    // Save to shot and display
-    if (shot) { shot.videoUrl = videoUrl; _compose.videoUrl = videoUrl; autoSave(); }
+    // Upload to Supabase for persistence
+    setStatus('Uploading…');
+    const b64 = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+    const uploadData = await apiFetch('/api/upload-video', { base64: b64, mediaType: 'video/webm', projectId: currentProjectId, shotId: shot?.id });
+    const videoUrl = uploadData.url;
+
+    if (shot) { shot.motionVideoUrl = videoUrl; autoSave(); }
+    _compose.motionVideoUrl = videoUrl;
+
     const sideVid = document.getElementById('compose-video-player');
     if (sideVid) { sideVid.src = videoUrl; sideVid.style.display = ''; }
     switchComposeView('video');
-    setStatus('Motion video ready.');
+    setStatus('Motion video saved.');
     showToast('Motion video created!');
-
-    // Offer download
-    const a = document.createElement('a');
-    a.href = videoUrl;
-    a.download = `shot-motion-${preset}.webm`;
-    a.click();
   } catch(e) {
     setStatus('Error: ' + e.message);
     showToast('Motion video failed: ' + e.message, true);
   } finally {
-    btns.forEach(b => b.disabled = false);
+    if (genBtn) { genBtn.disabled = false; genBtn.textContent = '▶ Generate Motion Video'; }
   }
+}
+
+// Clear cached preview image when compose tab is reopened so it reflects latest edits
+function resetMotionPreview() {
+  _motionImg = null;
+  _motionConfig.preset = null;
+  document.querySelectorAll('.btn-motion-preset').forEach(b => b.classList.remove('active'));
+  const pc = document.getElementById('motion-preview-canvas');
+  if (pc) pc.style.display = 'none';
+  const hint = document.getElementById('motion-canvas-hint');
+  if (hint) hint.style.display = 'none';
+  document.getElementById('motion-zoom-controls').style.display = 'none';
+  document.getElementById('motion-pan-controls').style.display  = 'none';
+  document.getElementById('btn-generate-motion').style.display  = 'none';
+  const statusEl = document.getElementById('motion-video-status');
+  if (statusEl) statusEl.textContent = '';
 }
 
 function fileToBase64(file) {
@@ -6106,8 +6251,16 @@ function switchComposeTab(tab) {
   const panel = document.getElementById(`compose-tabpanel-${tab}`);
   if (panel) panel.style.display = '';
   if (tab === 'layer') renderComposeLayerTab();
-  // Video tab: switch main view
-  switchComposeView(tab === 'video' && _compose?.videoUrl ? 'video' : 'image');
+  if (tab === 'video') {
+    resetMotionPreview();
+    // Restore persisted motion video if it exists
+    const shot = shots.find(s => s.id === _compose?.shotId);
+    if (shot?.motionVideoUrl) {
+      const sideVid = document.getElementById('compose-video-player');
+      if (sideVid) { sideVid.src = shot.motionVideoUrl; sideVid.style.display = ''; }
+    }
+  }
+  switchComposeView(tab === 'video' && (_compose?.videoUrl || _compose?.motionVideoUrl) ? 'video' : 'image');
 }
 
 function switchComposeView(mode) {
@@ -6118,7 +6271,8 @@ function switchComposeView(mode) {
     canvasWrap.style.display = 'none';
     videoView.style.display = 'flex';
     const vid = document.getElementById('compose-video-main');
-    if (vid && _compose?.videoUrl && vid.src !== _compose.videoUrl) vid.src = _compose.videoUrl;
+    const url = _compose?.videoUrl || _compose?.motionVideoUrl;
+    if (vid && url && vid.src !== url) vid.src = url;
   } else {
     canvasWrap.style.display = '';
     videoView.style.display = 'none';

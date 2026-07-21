@@ -787,6 +787,24 @@ app.post('/api/reupload-ref', async (req, res) => {
   }
 });
 
+app.post('/api/upload-video', async (req, res) => {
+  const { base64, mediaType, projectId, shotId } = req.body;
+  if (!base64) return res.status(400).json({ error: 'base64 required' });
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    const ext = (mediaType || 'video/webm').includes('mp4') ? 'mp4' : 'webm';
+    const storagePath = `projects/${projectId || 'unassigned'}/videos/${shotId || 'shot'}-${Date.now()}.${ext}`;
+    const { error } = await sbAdmin.storage.from('images').upload(storagePath, buffer, { contentType: mediaType || 'video/webm', upsert: true });
+    if (error) throw error;
+    const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+    log('info', 'upload-video done', { url: publicUrl, size: buffer.length });
+    res.json({ url: publicUrl });
+  } catch(e) {
+    log('error', 'upload-video failed', { error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/upload-reference', async (req, res) => {
   const { base64, mediaType, projectId, entityType, entityId } = req.body;
   if (!base64) return res.status(400).json({ error: 'base64 required' });

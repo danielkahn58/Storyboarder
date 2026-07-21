@@ -1388,18 +1388,48 @@
         <!-- ── Video tab ── -->
         <div class="compose-tab-panel" id="compose-tabpanel-video" style="display:none;padding:12px 10px;gap:10px">
           <div class="compose-section-title">Motion Video</div>
-          <p style="font-size:11px;color:#555;line-height:1.5;margin:0">AI detects the subject and animates a camera move on the still image.</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <button class="btn-motion-preset" onclick="createMotionVideo('zoom-in')">🔍 Zoom In</button>
-            <button class="btn-motion-preset" onclick="createMotionVideo('zoom-out')">🔎 Zoom Out</button>
-            <button class="btn-motion-preset" onclick="createMotionVideo('pan-left')">← Pan Left</button>
-            <button class="btn-motion-preset" onclick="createMotionVideo('pan-right')">Pan Right →</button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px">
+            <button class="btn-motion-preset" data-preset="zoom-in" onclick="selectMotionPreset('zoom-in')">🔍 Zoom In</button>
+            <button class="btn-motion-preset" data-preset="zoom-out" onclick="selectMotionPreset('zoom-out')">🔎 Zoom Out</button>
+            <button class="btn-motion-preset" data-preset="pan-left" onclick="selectMotionPreset('pan-left')">← Pan Left</button>
+            <button class="btn-motion-preset" data-preset="pan-right" onclick="selectMotionPreset('pan-right')">Pan Right →</button>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+
+          <!-- Visual preview canvas — shows start/end frames -->
+          <canvas id="motion-preview-canvas" style="display:none;width:100%;border-radius:4px;border:1px solid #222;cursor:crosshair;touch-action:none"></canvas>
+          <p id="motion-canvas-hint" style="display:none;font-size:9px;color:#555;margin:3px 0 0"></p>
+
+          <!-- Zoom controls -->
+          <div id="motion-zoom-controls" style="display:none;margin-top:6px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:10px;color:#555;white-space:nowrap;width:72px">Zoom amount</label>
+              <input type="range" id="motion-zoom-scale" min="1.1" max="2.5" step="0.05" value="1.35" oninput="onMotionZoomScale(this)" style="flex:1">
+              <span id="motion-zoom-scale-label" style="font-size:10px;color:#888;white-space:nowrap;width:28px">1.4×</span>
+            </div>
+          </div>
+
+          <!-- Pan controls -->
+          <div id="motion-pan-controls" style="display:none;margin-top:6px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:9px;color:#60a5fa;font-weight:600;width:40px">START</span>
+              <label style="font-size:10px;color:#555;white-space:nowrap">Frame size</label>
+              <input type="range" id="motion-pan-start-scale" min="1.0" max="2.0" step="0.05" value="1.15" oninput="onMotionPanScale('start',this)" style="flex:1">
+              <span id="motion-pan-start-scale-label" style="font-size:10px;color:#888;white-space:nowrap;width:28px">1.2×</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:9px;color:#4ade80;font-weight:600;width:40px">END</span>
+              <label style="font-size:10px;color:#555;white-space:nowrap">Frame size</label>
+              <input type="range" id="motion-pan-end-scale" min="1.0" max="2.0" step="0.05" value="1.15" oninput="onMotionPanScale('end',this)" style="flex:1">
+              <span id="motion-pan-end-scale-label" style="font-size:10px;color:#888;white-space:nowrap;width:28px">1.2×</span>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
             <label style="font-size:10px;color:#555;white-space:nowrap">Duration</label>
-            <input type="range" id="motion-duration" min="2" max="10" value="4" step="1" style="flex:1">
+            <input type="range" id="motion-duration" min="2" max="10" value="4" step="1" oninput="document.getElementById('motion-duration-label').textContent=this.value+'s'" style="flex:1">
             <span id="motion-duration-label" style="font-size:10px;color:#888;white-space:nowrap">4s</span>
           </div>
+          <button id="btn-generate-motion" onclick="generateMotionVideo()" style="display:none;margin-top:6px;background:#0f1a0f;border:1px solid #1e3a1e;color:#6ee7b7;font-size:11px;font-weight:600;padding:8px;border-radius:5px;cursor:pointer;width:100%">▶ Generate Motion Video</button>
           <div style="font-size:10px;color:#444;margin-top:2px" id="motion-video-status"></div>
 
           <div class="compose-section-title" style="margin-top:8px">Talking Video</div>
