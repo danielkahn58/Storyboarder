@@ -388,7 +388,7 @@ function extractImages(data) {
       shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {},
       customViews: (l.customViews || []).map(cv => ({ image: cv.image, refImage: cv.refImage || null })) };
     return { ...l, images: [], referenceImage: null,
-      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : {},
+      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt, useRef: v.useRef || false }])) : {},
       customViews: (l.customViews || []).map(cv => ({ ...cv, image: null, refImage: null })) };
   });
   const shots = (data.shots || []).map(s => {
@@ -1022,6 +1022,11 @@ function autoSave() {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
   }
+  // Keep current version snapshot in sync so switching away and back reflects latest state
+  if (currentVersionLabel) {
+    const v = versions.find(v => v.label === currentVersionLabel);
+    if (v) v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+  }
   editsSinceVersion++;
   if (editsSinceVersion >= AUTO_VERSION_EVERY) {
     createVersion(true);
@@ -1069,11 +1074,52 @@ function loadVersions() {
 }
 
 function stripImagesForVersion(data) {
-  // Remove all image data before storing in a version snapshot.
-  // Images are large and fal CDN URLs expire anyway — only text/prompts matter for versioning.
-  const stripChar = c => ({ id: c.id, name: c.name, reference: c.reference, prompt: c.prompt, attributes: c.attributes, angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt }])) : undefined });
-  const stripLoc  = l => ({ id: l.id, name: l.name, aliases: l.aliases || [], reference: l.reference, prompt: l.prompt, possibleDuplicate: l.possibleDuplicate, shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt }])) : undefined });
-  const stripShot = s => ({ id: s.id, lyric: s.lyric, description: s.description, imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt, shotSize: s.shotSize, shotAngle: s.shotAngle, shotMovement: s.shotMovement, characterIds: s.characterIds, locationId: s.locationId, characterDetails: s.characterDetails });
+  // Keep persistent HTTP URLs (Supabase); strip only base64/blob data which is large and ephemeral.
+  const isUrl = v => v && typeof v === 'string' && v.startsWith('http');
+
+  const stripChar = c => ({
+    id: c.id, name: c.name, reference: c.reference, prompt: c.prompt, attributes: c.attributes,
+    useRefAsDefault: c.useRefAsDefault || false,
+    selectedRefImageId: c.selectedRefImageId || null,
+    loraUrl: c.loraUrl || null,
+    loraStatus: c.loraStatus || 'idle',
+    loraTriggerWord: c.loraTriggerWord || null,
+    refImages: (c.refImages || []).map(r => ({ id: r.id, url: r.url || null })),
+    angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k, v]) => [k, {
+      prompt: v.prompt,
+      useRef: v.useRef || false,
+      image: isUrl(v.image) ? v.image : null,
+    }])) : undefined,
+  });
+
+  const stripLoc = l => ({
+    id: l.id, name: l.name, aliases: l.aliases || [], reference: l.reference,
+    prompt: l.prompt, possibleDuplicate: l.possibleDuplicate,
+    useRefAsDefault: l.useRefAsDefault || false,
+    selectedImage: isUrl(l.selectedImage) ? l.selectedImage : null,
+    shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k, v]) => [k, {
+      prompt: v.prompt,
+      useRef: v.useRef || false,
+      image: isUrl(v.image) ? v.image : null,
+    }])) : undefined,
+    customViews: (l.customViews || []).map(cv => ({
+      id: cv.id, name: cv.name || '', prompt: cv.prompt || '',
+      useRef: cv.useRef || false,
+      image: isUrl(cv.image) ? cv.image : null,
+    })),
+  });
+
+  const stripShot = s => ({
+    id: s.id, lyric: s.lyric, description: s.description,
+    imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt,
+    shotSize: s.shotSize, shotAngle: s.shotAngle, shotMovement: s.shotMovement,
+    characterIds: s.characterIds, locationId: s.locationId, characterDetails: s.characterDetails,
+    timestamp: s.timestamp || '',
+    timestampIssue: s.timestampIssue || null,
+    finalImage: isUrl(s.finalImage) ? s.finalImage : null,
+    videoUrl: isUrl(s.videoUrl) ? s.videoUrl : '',
+  });
+
   return {
     characters: (data.characters || []).map(stripChar),
     locations:  (data.locations  || []).map(stripLoc),
@@ -1152,24 +1198,49 @@ function loadVersion(label) {
     }
   }
   const d = v.data;
-  // Restore text/prompt data from the version, but preserve current images
-  // (version snapshots intentionally strip images to save space).
+  // Restore versioned state. Versions now store all fields including Supabase URLs.
+  // Only fall back to current in-memory data for base64/blob content not stored in versions.
   const prevChars = characters; const prevLocs = locations; const prevShots = shots;
   characters = (d.characters || []).map(vc => {
     const cur = prevChars.find(c => c.id === vc.id) || {};
-    return { ...newCharacter(), images: cur.images || [], referenceImage: cur.referenceImage || null, refImages: cur.refImages || [], ...vc };
+    // Merge refImages: version has {id, url}; current may have richer base64/mediaType data
+    const refImages = (vc.refImages || []).map(vr => {
+      const cr = (cur.refImages || []).find(r => r.id === vr.id);
+      return cr ? { ...cr, ...vr } : vr;
+    });
+    // Merge angles: seed from current (preserves any added after this version), override with version data
+    const angles = { ...(cur.angles || {}) };
+    for (const [k, va] of Object.entries(vc.angles || {})) {
+      const ca = cur.angles?.[k] || {};
+      angles[k] = { ...ca, ...va, image: va.image || ca.image || null };
+    }
+    return { ...newCharacter(), images: cur.images || [], referenceImage: cur.referenceImage || null, ...vc, refImages, angles };
   });
   locations = (d.locations || []).map(vl => {
     const cur = prevLocs.find(l => l.id === vl.id) || {};
-    const mergedAngles = {};
+    // Seed from current so angles added after this version aren't lost, then overlay version data
+    const mergedAngles = { ...(cur.shotAngles || {}) };
     for (const [k, va] of Object.entries(vl.shotAngles || {})) {
-      mergedAngles[k] = { prompt: va.prompt, image: cur.shotAngles?.[k]?.image || null };
+      const ca = cur.shotAngles?.[k] || {};
+      mergedAngles[k] = { ...ca, ...va, image: va.image || ca.image || null };
     }
-    return { ...newLocation(), images: cur.images || [], referenceImage: cur.referenceImage || null, selectedImage: cur.selectedImage || null, ...vl, shotAngles: mergedAngles };
+    // Merge customViews: keep views from current not in version, overlay version data for shared ones
+    const customViewsMap = {};
+    for (const ccv of (cur.customViews || [])) customViewsMap[ccv.id] = ccv;
+    const mergedCustomViews = [...(vl.customViews || []).map(vcv => {
+      const ccv = customViewsMap[vcv.id] || {};
+      delete customViewsMap[vcv.id];
+      return { ...ccv, ...vcv, image: vcv.image || ccv.image || null, refImage: ccv.refImage || null };
+    }), ...Object.values(customViewsMap)];
+    return { ...newLocation(), images: cur.images || [], referenceImage: cur.referenceImage || null, ...vl, shotAngles: mergedAngles, customViews: mergedCustomViews };
   });
   shots = (d.shots || []).map(vs => {
     const cur = prevShots.find(s => s.id === vs.id) || {};
-    return { ...newShot(), images: cur.images || [], videoUrl: cur.videoUrl || '', ...vs };
+    return { ...newShot(), images: cur.images || [], ...vs,
+      finalImage: vs.finalImage || cur.finalImage || null,
+      videoUrl: vs.videoUrl || cur.videoUrl || '',
+      refImage: cur.refImage || null,
+    };
   });
   if (d.visualStyles) {
     const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
@@ -1190,8 +1261,6 @@ function loadVersion(label) {
   if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
   currentVersionLabel = label;
   editsSinceVersion = 0;
-  const _lk = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  _persistData(_lk);
   saveVersionMeta();
   applyStyleUI();
   renderVisualStyles();
@@ -2242,6 +2311,10 @@ function locRowHTML(l) {
       <div class="ref-img-cell">
         <div class="ref-img-preview" onclick="${l.referenceImage ? `toggleLocUseRef('${l.id}')` : `triggerLocImageUpload('${l.id}')`}">${refImgHTML}</div>
         <input type="file" id="locfile-${l.id}" class="hidden" accept="image/*" onchange="handleLocImageUpload('${l.id}', this)">
+        <div style="display:flex;gap:4px;margin-top:5px">
+          <button onclick="triggerLocImageUpload('${l.id}')" style="flex:1;background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:10px;padding:3px 6px;cursor:pointer">⬆ Upload</button>
+          <button onclick="openLocImageLibrary('${l.id}')" style="flex:1;background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:10px;padding:3px 6px;cursor:pointer">🖼 Library</button>
+        </div>
       </div>
     </td>
     <td data-label="Prompt">
@@ -3310,6 +3383,84 @@ function removeLocRefImage(id, event) {
     if (cell) { const b = cell.querySelector('.use-ref-btn'); if (b) b.remove(); }
   }
   autoSave();
+}
+
+function openLocImageLibrary(locId) {
+  // Collect all images from all locations: generated images, reference images, angle images, custom view images
+  const entries = [];
+  for (const l of locations) {
+    const label = l.name || 'Unnamed';
+    for (const url of (l.images || [])) {
+      if (url) entries.push({ url, label });
+    }
+    if (l.selectedImage) entries.push({ url: l.selectedImage, label });
+    if (l.referenceImage?.dataUrl) entries.push({ url: l.referenceImage.dataUrl, label: `${label} (ref)` });
+    if (l.referenceImage?.url && !l.referenceImage?.dataUrl) entries.push({ url: l.referenceImage.url, label: `${label} (ref)` });
+    for (const [angle, a] of Object.entries(l.shotAngles || {})) {
+      if (a.image) entries.push({ url: a.image, label: `${label} – ${angle}` });
+    }
+    for (const cv of (l.customViews || [])) {
+      if (cv.image) entries.push({ url: cv.image, label: `${label} – ${cv.name || 'Custom'}` });
+    }
+  }
+  // Deduplicate by URL
+  const seen = new Set();
+  const unique = entries.filter(e => { if (seen.has(e.url)) return false; seen.add(e.url); return true; });
+
+  const grid = document.getElementById('loc-image-library-grid');
+  if (!grid) return;
+  if (!unique.length) {
+    grid.innerHTML = '<div style="color:#555;font-size:12px;grid-column:1/-1;text-align:center;padding:40px 0">No location images yet. Generate or upload some first.</div>';
+  } else {
+    grid.innerHTML = unique.map((e, i) => `
+      <div onclick="pickLocLibraryImage('${locId}', ${i})" style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s" onmouseover="this.style.borderColor='#818cf8'" onmouseout="this.style.borderColor='transparent'">
+        <img src="${esc(e.url)}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block">
+        <div style="font-size:9px;color:#555;padding:4px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(e.label)}</div>
+      </div>`).join('');
+  }
+  // Store entries on the grid element for lookup by index
+  grid._libraryEntries = unique;
+  document.getElementById('loc-image-library-modal').style.display = 'flex';
+}
+
+async function pickLocLibraryImage(locId, idx) {
+  const grid = document.getElementById('loc-image-library-grid');
+  const entries = grid?._libraryEntries;
+  if (!entries?.[idx]) return;
+  const { url } = entries[idx];
+  const loc = locations.find(l => l.id === locId);
+  if (!loc) return;
+
+  document.getElementById('loc-image-library-modal').style.display = 'none';
+
+  // Fetch the image and convert to base64 for referenceImage
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const mediaType = blob.type || 'image/jpeg';
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const dataUrl = e.target.result;
+      const base64 = dataUrl.split(',')[1];
+      loc.referenceImage = { dataUrl, base64, mediaType, url: url.startsWith('http') ? url : null };
+      if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
+      // Update preview inline
+      const preview = document.querySelector(`#locations-body tr[data-id="${locId}"] .ref-img-preview`);
+      if (preview) {
+        preview.innerHTML = `<img src="${esc(dataUrl)}" alt="Reference"><button class="remove-img" onclick="removeLocRefImage('${locId}', event)">✕</button>`;
+        preview.onclick = () => toggleLocUseRef(locId);
+      }
+      autoSave();
+      renderLocations();
+    };
+    reader.readAsDataURL(blob);
+  } catch(e) {
+    // If fetch fails (CORS etc), use the URL directly as the reference
+    loc.referenceImage = { dataUrl: url, base64: null, mediaType: 'image/jpeg', url: url.startsWith('http') ? url : null };
+    if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
+    autoSave();
+    renderLocations();
+  }
 }
 
 // ── location shot angles ───────────────────────────────────────────────────
