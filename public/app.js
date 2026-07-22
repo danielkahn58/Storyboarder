@@ -2215,7 +2215,10 @@ function charRowHTML(c) {
           <option value="angry with furrowed brows and a frown">
           <option value="neutral">
         </datalist>
-        <input type="text" class="expr-select" id="expr-${c.id}" list="expr-opts-${c.id}" placeholder="Expression…" style="width:100%;font-size:11px;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:4px 6px;margin-top:4px;box-sizing:border-box" onchange="applyCharExpression('${c.id}')" onblur="applyCharExpression('${c.id}')" onkeydown="if(event.key==='Enter'){applyCharExpression('${c.id}')}" value="${esc((c.expressionCache && Object.keys(c.expressionCache).length) ? '' : '')}">
+        <div style="display:flex;gap:4px;margin-top:4px">
+          <input type="text" class="expr-select" id="expr-${c.id}" list="expr-opts-${c.id}" placeholder="Expression…" style="flex:1;min-width:0;font-size:11px;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:4px 6px;box-sizing:border-box">
+          <button onclick="applyCharExpression('${c.id}')" title="Apply expression" style="padding:4px 7px;background:#1a1a2e;border:1px solid #2a2a4a;border-radius:3px;color:#818cf8;font-size:12px;cursor:pointer;flex-shrink:0;line-height:1">▶</button>
+        </div>
       </div>
     </td>
     <td>
@@ -3387,21 +3390,29 @@ function removeLocRefImage(id, event) {
 }
 
 function openLocImageLibrary(locId) {
-  // Collect all images from all locations: generated images, reference images, angle images, custom view images
+  // Collect all images from all locations and their associated shots
   const entries = [];
+  const addUrl = (url, label) => { if (url && typeof url === 'string') entries.push({ url, label }); };
+
   for (const l of locations) {
     const label = l.name || 'Unnamed';
-    for (const url of (l.images || [])) {
-      if (url) entries.push({ url, label });
-    }
-    if (l.selectedImage) entries.push({ url: l.selectedImage, label });
-    if (l.referenceImage?.dataUrl) entries.push({ url: l.referenceImage.dataUrl, label: `${label} (ref)` });
-    if (l.referenceImage?.url && !l.referenceImage?.dataUrl) entries.push({ url: l.referenceImage.url, label: `${label} (ref)` });
+    for (const url of (l.images || [])) addUrl(url, label);
+    addUrl(l.selectedImage, label);
+    const refUrl = l.referenceImage?.dataUrl || l.referenceImage?.url;
+    addUrl(refUrl, `${label} (ref)`);
     for (const [angle, a] of Object.entries(l.shotAngles || {})) {
-      if (a.image) entries.push({ url: a.image, label: `${label} – ${angle}` });
+      addUrl(a.image, `${label} – ${angle}`);
+      addUrl(a.refImage?.dataUrl || a.refImage?.url, `${label} – ${angle} ref`);
     }
     for (const cv of (l.customViews || [])) {
-      if (cv.image) entries.push({ url: cv.image, label: `${label} – ${cv.name || 'Custom'}` });
+      addUrl(cv.image, `${label} – ${cv.name || 'Custom'}`);
+    }
+    // Include final images and generated images from shots that use this location
+    for (const s of shots) {
+      if (s.locationId !== l.id) continue;
+      const shotLabel = `${label} (shot ${s.lyric ? '"' + s.lyric.slice(0, 20) + '"' : 'scene'})`;
+      addUrl(s.finalImage, shotLabel);
+      for (const url of (s.images || [])) addUrl(url, shotLabel);
     }
   }
   // Deduplicate by URL
