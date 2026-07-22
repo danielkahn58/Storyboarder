@@ -1198,8 +1198,11 @@ app.post('/api/apply-expression', async (req, res) => {
     wink:      'Change only the facial expression to a playful wink with one eye closed and a slight smile, keeping everything else identical — same character, same pose, same outfit, same art style, same background.',
     angry:     'Change only the facial expression to angry with furrowed brows and a frown, keeping everything else identical — same character, same pose, same outfit, same art style, same background.',
   };
-  const prompt = PROMPTS[expression];
-  if (!prompt) return res.status(400).json({ error: 'unknown expression' });
+  // Match preset by key or by descriptive value, then fall back to custom prompt
+  const presetByValue = Object.entries(PROMPTS).find(([, v]) => v.toLowerCase().includes(expression.toLowerCase()));
+  const prompt = PROMPTS[expression] || (presetByValue && presetByValue[1])
+    || `Change only the facial expression to ${expression}, keeping everything else identical — same character, same pose, same outfit, same art style, same background.`;
+  if (!prompt) return res.status(400).json({ error: 'expression required' });
   try {
     const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
       input: { prompt, image_url: imageUrl, aspect_ratio: '1:1', num_images: 1, safety_tolerance: '6' }

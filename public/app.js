@@ -2207,14 +2207,15 @@ function charRowHTML(c) {
     <td data-label="Final Image">
       <div class="char-front-wrap">
         <div class="char-front-slot" id="char-front-${c.id}">${frontHTML}</div>
-        <select class="expr-select" id="expr-${c.id}" onchange="applyCharExpression('${c.id}')">
-          <option value="neutral">Neutral</option>
-          <option value="happy">Happy</option>
-          <option value="sad">Sad</option>
-          <option value="surprised">Surprised</option>
-          <option value="wink">Wink</option>
-          <option value="angry">Angry</option>
-        </select>
+        <datalist id="expr-opts-${c.id}">
+          <option value="happy and smiling">
+          <option value="sad and downcast">
+          <option value="wide-eyed and surprised with mouth slightly open">
+          <option value="playful wink with one eye closed and a slight smile">
+          <option value="angry with furrowed brows and a frown">
+          <option value="neutral">
+        </datalist>
+        <input type="text" class="expr-select" id="expr-${c.id}" list="expr-opts-${c.id}" placeholder="Expression…" style="width:100%;font-size:11px;background:#0e0e0e;border:1px solid #1a1a1a;color:#aaa;border-radius:3px;padding:4px 6px;margin-top:4px;box-sizing:border-box" onchange="applyCharExpression('${c.id}')" onblur="applyCharExpression('${c.id}')" onkeydown="if(event.key==='Enter'){applyCharExpression('${c.id}')}" value="${esc((c.expressionCache && Object.keys(c.expressionCache).length) ? '' : '')}">
       </div>
     </td>
     <td>
@@ -4284,18 +4285,18 @@ async function generateMissingShotPrompts() {
 async function applyCharExpression(id) {
   const char = characters.find(c => c.id === id);
   const frontSlot = document.getElementById(`char-front-${id}`);
-  const select = document.getElementById(`expr-${id}`);
-  const expression = select?.value || 'neutral';
+  const input = document.getElementById(`expr-${id}`);
+  const expression = (input?.value || '').trim();
 
   const imageUrl = char?.images?.[0] || null;
-  if (!imageUrl) { showToast('Generate an image first.', true); select.value = 'neutral'; return; }
+  if (!imageUrl) { showToast('Generate an image first.', true); return; }
 
-  if (expression === 'neutral') {
+  if (!expression || expression === 'neutral') {
     frontSlot.innerHTML = `<img src="${esc(imageUrl)}" alt="Front">`;
     return;
   }
 
-  select.disabled = true;
+  input.disabled = true;
   frontSlot.innerHTML = '<span class="spinner"></span>';
   try {
     const data = await apiFetch('/api/apply-expression', { imageUrl, expression });
@@ -4309,7 +4310,7 @@ async function applyCharExpression(id) {
     frontSlot.innerHTML = `<img src="${esc(imageUrl)}" alt="Front">`;
     showToast('Error: ' + e.message, true);
   } finally {
-    select.disabled = false;
+    input.disabled = false;
   }
 }
 
