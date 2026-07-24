@@ -57,6 +57,8 @@ if (AUTH_ENABLED) {
   passport.serializeUser((user, done) => done(null, user));
   passport.deserializeUser((user, done) => done(null, user));
 
+  app.get('/api/ping', (req, res) => res.json({ ok: true, t: Date.now() }));
+
   app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.file'] }));
 
   app.get('/auth/google/callback',

@@ -265,8 +265,8 @@ async function sbUpsertData(id, stripped, imgs) {
     }, { onConflict: 'id' });
     if (error) throw error;
   } catch(e) {
-    console.warn('sb upsert data:', e.message);
-    showToast('Cloud sync failed — data saved locally only.', true);
+    console.warn('sb upsert data:', e.message, e);
+    showToast(`Cloud sync failed (${e.message || 'unknown error'}) — data saved locally only.`, true);
   }
 }
 
@@ -2149,6 +2149,10 @@ async function generateAnimatic() {
     if (currentProjectId) formData.append('projectId', currentProjectId);
 
     status.textContent = 'Building animatic…';
+    // Verify server is reachable before sending the large payload
+    const pingOk = await fetch('/api/ping').then(r => r.ok).catch(() => false);
+    if (!pingOk) throw new Error('Server unreachable — check Railway deployment');
+
     const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
 
