@@ -224,6 +224,7 @@ const AUTO_VERSION_EVERY = 100;
 
 let lastScriptText = null;
 let lastScriptName = null;
+let animatics = []; // { url, createdAt, label } newest-first
 
 const SHOT_SIZES     = ['Extreme Wide Shot','Wide Shot','Medium Wide Shot','Medium Shot','Medium Close Up','Close Up','Extreme Close Up'];
 const SHOT_ANGLES    = ["Eye Level","Low Angle","High Angle","Bird's Eye View","Worm's Eye View","Dutch Angle","Over the Shoulder"];
@@ -820,6 +821,7 @@ async function loadData() {
       if (d.locationGenRules) locationGenRules = d.locationGenRules;
       if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
       if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
+      if (Array.isArray(d.animatics)) animatics = d.animatics;
     }
   } catch {}
   if (!characters.length) characters = [newCharacter()];
@@ -831,6 +833,7 @@ async function loadData() {
   renderCharacters();
   renderLocations();
   renderShots();
+  renderAnimaticHistory();
   renderVersionUI();
   restoreAudio();
   prefetchCharBgRemovals();
@@ -962,7 +965,7 @@ async function prefetchCharBgRemovals() {
 }
 
 function _buildPayload() {
-  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, savedAt: Date.now() };
+  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, animatics: animatics || [], savedAt: Date.now() };
 }
 
 async function _persistData(key) {
@@ -1005,7 +1008,7 @@ function saveData() {
   if (currentVersionLabel) {
     const v = versions.find(v => v.label === currentVersionLabel);
     if (v) {
-      v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+      v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
       v.timestamp = Date.now();
       saveVersionMeta();
     }
@@ -1025,7 +1028,7 @@ function autoSave() {
   // Keep current version snapshot in sync so switching away and back reflects latest state
   if (currentVersionLabel) {
     const v = versions.find(v => v.label === currentVersionLabel);
-    if (v) v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+    if (v) v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
   }
   editsSinceVersion++;
   if (editsSinceVersion >= AUTO_VERSION_EVERY) {
@@ -1129,6 +1132,7 @@ function stripImagesForVersion(data) {
     charGenRules: data.charGenRules,
     locationGenRules: data.locationGenRules,
     charBoilerplate: data.charBoilerplate,
+    animatics: data.animatics || [],
   };
 }
 
@@ -1165,7 +1169,7 @@ function createVersion(isAuto = false) {
     id: genId(),
     label,
     parentLabel: newParent,
-    data: stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE }),
+    data: stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics }),
     timestamp: Date.now(),
     auto: isAuto
   });
@@ -1191,7 +1195,7 @@ function loadVersion(label) {
     const cur = versions.find(v => v.label === currentVersionLabel);
     if (cur) {
       syncFromDOM();
-      cur.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE });
+      cur.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
       cur.timestamp = Date.now();
       const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
       _persistData(key);
@@ -1259,6 +1263,7 @@ function loadVersion(label) {
   if (d.charGenRules) charGenRules = d.charGenRules;
   if (d.locationGenRules) locationGenRules = d.locationGenRules;
   if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
+  if (Array.isArray(d.animatics)) animatics = d.animatics;
   currentVersionLabel = label;
   editsSinceVersion = 0;
   saveVersionMeta();
@@ -1267,6 +1272,7 @@ function loadVersion(label) {
   renderCharacters();
   renderLocations();
   renderShots();
+  renderAnimaticHistory();
   renderVersionUI();
   showToast(`Loaded version ${label}`);
 }
@@ -2085,10 +2091,7 @@ async function generateAnimatic() {
   syncFromDOM();
   const btn = document.getElementById('btn-gen-animatic');
   const status = document.getElementById('animatic-status');
-  const video = document.getElementById('animatic-video');
-  const empty = document.getElementById('animatic-empty');
 
-  // Collect shots that have a final image or motion video and a timestamp
   const shotFrames = shots
     .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
     .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.videoUrl || null, timestamp: s.timestamp }));
@@ -2107,38 +2110,87 @@ async function generateAnimatic() {
   btn.disabled = true;
   btn.textContent = 'Generating…';
   status.textContent = 'Uploading frames and audio…';
-  empty.style.display = 'none';
-  video.style.display = 'none';
 
   try {
     const formData = new FormData();
     formData.append('audio', audioFile);
     formData.append('shots', JSON.stringify(shotFrames));
 
+    status.textContent = 'Building animatic…';
     const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
 
     const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    video.src = url;
-    video.style.display = 'block';
+
+    status.textContent = 'Saving to cloud…';
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const uploadData = await apiFetch('/api/upload-reference', {
+      base64: b64, mediaType: 'video/mp4', projectId: currentProjectId,
+      entityType: 'animatics', entityId: 'animatic'
+    });
+    const permanentUrl = uploadData.url;
+
+    const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString() };
+    animatics = [entry, ...(animatics || [])];
+    autoSave();
+
     status.textContent = '';
-    video.onloadedmetadata = () => renderAnimaticTimeline();
-    video.addEventListener('timeupdate', updateAnimaticPlayhead, { passive: true });
+    renderAnimaticHistory();
   } catch(e) {
     showToast('Animatic failed: ' + e.message, true);
     status.textContent = '';
-    empty.style.display = '';
   } finally {
     btn.disabled = false;
     btn.textContent = 'Generate Animatic';
   }
 }
 
+function renderAnimaticHistory() {
+  const container = document.getElementById('animatic-history');
+  const empty = document.getElementById('animatic-empty');
+  if (!container) return;
+  if (!animatics || !animatics.length) {
+    empty.style.display = '';
+    container.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  container.innerHTML = animatics.map((a, i) => `
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:11px;color:#555">${esc(a.label || new Date(a.createdAt).toLocaleString())}${i === 0 ? ' <span style="color:#818cf8;font-weight:600">· Latest</span>' : ''}</span>
+        <a href="${esc(a.url)}" download="animatic-${a.createdAt}.mp4" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #222;border-radius:3px;padding:2px 7px">↓ Download</a>
+        <button onclick="deleteAnimatic(${i})" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:2px 7px;cursor:pointer">✕ Remove</button>
+      </div>
+      <video src="${esc(a.url)}" controls style="width:100%;max-width:900px;border-radius:8px;background:#000;display:block" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this)"></video>
+      ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
+        <div style="font-size:10px;color:#444;margin-bottom:4px">Shot boundaries — drag handles to adjust timestamps</div>
+        <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer"></div>
+      </div>` : ''}
+    </div>
+  `).join('');
+}
+
+function _initPrimaryAnimaticTimeline(videoEl) {
+  renderAnimaticTimeline(videoEl);
+  videoEl.addEventListener('timeupdate', updateAnimaticPlayhead, { passive: true });
+}
+
+function deleteAnimatic(index) {
+  animatics.splice(index, 1);
+  autoSave();
+  renderAnimaticHistory();
+}
+
 let _animaticTimeline = null;
 
-function renderAnimaticTimeline() {
-  const video = document.getElementById('animatic-video');
+function renderAnimaticTimeline(videoEl) {
+  const video = videoEl || document.querySelector('#animatic-history video');
   const wrap = document.getElementById('animatic-timeline-wrap');
   if (!video || !wrap) return;
   const duration = video.duration;
@@ -2187,7 +2239,7 @@ function _redrawAnimaticTimeline() {
 }
 
 function updateAnimaticPlayhead() {
-  const video = document.getElementById('animatic-video');
+  const video = document.querySelector('#animatic-history video');
   const ph = document.getElementById('animatic-playhead');
   if (!ph || !video || !_animaticTimeline) return;
   ph.style.left = (video.currentTime / _animaticTimeline.duration * 100) + '%';
