@@ -2092,11 +2092,11 @@ async function generateAnimatic() {
   const btn = document.getElementById('btn-gen-animatic');
   const status = document.getElementById('animatic-status');
 
-  const shotFrames = shots
+  const rawFrames = shots
     .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
     .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.videoUrl || null, timestamp: s.timestamp }));
 
-  if (!shotFrames.length) {
+  if (!rawFrames.length) {
     showToast('No shots with a Final Image (or motion video) and a timestamp yet.', true);
     return;
   }
@@ -2109,9 +2109,29 @@ async function generateAnimatic() {
 
   btn.disabled = true;
   btn.textContent = 'Generating…';
-  status.textContent = 'Uploading frames and audio…';
+  status.textContent = 'Resolving assets…';
+
+  // Convert any blob: URLs to base64 data URLs so the server can decode them
+  const blobToDataUrl = async (url) => {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
 
   try {
+    const shotFrames = await Promise.all(rawFrames.map(async f => {
+      let videoUrl = f.videoUrl;
+      let imageUrl = f.imageUrl;
+      if (videoUrl && videoUrl.startsWith('blob:')) videoUrl = await blobToDataUrl(videoUrl);
+      if (imageUrl && imageUrl.startsWith('blob:')) imageUrl = await blobToDataUrl(imageUrl);
+      return { imageUrl, videoUrl, timestamp: f.timestamp };
+    }));
+
     const formData = new FormData();
     formData.append('audio', audioFile);
     formData.append('shots', JSON.stringify(shotFrames));

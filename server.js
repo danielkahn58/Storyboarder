@@ -964,21 +964,33 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
+      const writeDataUrl = (dataUrl, ext) => {
+        const m = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
+        if (!m) return null;
+        const p = tmp(ext);
+        fs.writeFileSync(p, Buffer.from(m[1], 'base64'));
+        return p;
+      };
       if (shot.videoUrl) {
-        const vidPath = tmp('.mp4');
-        await download(shot.videoUrl, vidPath);
+        let vidPath;
+        if (shot.videoUrl.startsWith('data:')) {
+          vidPath = writeDataUrl(shot.videoUrl, '.mp4');
+        } else {
+          vidPath = tmp('.mp4');
+          await download(shot.videoUrl, vidPath);
+        }
+        if (!vidPath) continue;
         frames.push({ type: 'video', path: vidPath, secs });
       } else if (shot.imageUrl) {
         let imgPath;
         if (shot.imageUrl.startsWith('data:')) {
-          const m = shot.imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-          if (!m) continue;
-          imgPath = tmp('.' + m[1]);
-          fs.writeFileSync(imgPath, Buffer.from(m[2], 'base64'));
+          const ext = shot.imageUrl.match(/^data:image\/(\w+)/)?.[1] || 'jpg';
+          imgPath = writeDataUrl(shot.imageUrl, '.' + ext);
         } else {
           imgPath = tmp('.jpg');
           await download(shot.imageUrl, imgPath);
         }
+        if (!imgPath) continue;
         frames.push({ type: 'image', path: imgPath, secs });
       }
     }
