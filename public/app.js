@@ -266,7 +266,11 @@ async function sbUpsertData(id, stripped, imgs) {
     if (error) throw error;
   } catch(e) {
     console.warn('sb upsert data:', e.message, e);
-    showToast(`Cloud sync failed (${e.message || 'unknown error'}) — data saved locally only.`, true);
+    const isPaused = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError') || e.message?.includes('fetch');
+    const msg = isPaused
+      ? 'Cloud sync failed — Supabase project may be paused. Visit supabase.com/dashboard to restore it.'
+      : `Cloud sync failed (${e.message || 'unknown error'}) — data saved locally only.`;
+    showToast(msg, true);
   }
 }
 
