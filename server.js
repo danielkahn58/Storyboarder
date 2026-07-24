@@ -922,7 +922,7 @@ app.post('/api/generate-shot-video', async (req, res) => {
 });
 
 // ── Animatic generation ──────────────────────────────────────────────────────
-const animaticUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 150 * 1024 * 1024 } });
+const animaticUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024, fieldSize: 10 * 1024 * 1024, files: 200 } });
 
 app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
   const { execFile } = require('child_process');
@@ -1058,9 +1058,26 @@ app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
     });
 
     const videoBuffer = fs.readFileSync(outputPath);
-    res.set('Content-Type', 'video/mp4');
-    res.set('Content-Disposition', 'inline; filename="animatic.mp4"');
-    res.send(videoBuffer);
+
+    // Upload to Supabase and return URL (avoids streaming large file back to client)
+    let resultUrl = null;
+    if (sbAdmin) {
+      const storagePath = `projects/${req.body.projectId || 'unassigned'}/animatics/${Date.now()}-animatic.mp4`;
+      const { error } = await sbAdmin.storage.from('images').upload(storagePath, videoBuffer, {
+        contentType: 'video/mp4', upsert: true
+      });
+      if (!error) {
+        const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+        resultUrl = publicUrl;
+      }
+    }
+    if (!resultUrl) {
+      // Fallback: stream the video directly
+      res.set('Content-Type', 'video/mp4');
+      res.set('Content-Disposition', 'inline; filename="animatic.mp4"');
+      return res.send(videoBuffer);
+    }
+    res.json({ url: resultUrl });
   } catch(e) {
     console.error('Animatic error:', e);
     res.status(500).json({ error: e.message });

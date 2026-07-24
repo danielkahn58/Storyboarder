@@ -2146,25 +2146,35 @@ async function generateAnimatic() {
       shotMeta.push(meta);
     }
     formData.append('shots', JSON.stringify(shotMeta));
+    if (currentProjectId) formData.append('projectId', currentProjectId);
 
     status.textContent = 'Building animatic…';
     const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
 
-    const blob = await resp.blob();
-
-    status.textContent = 'Saving to cloud…';
-    const b64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    const uploadData = await apiFetch('/api/upload-reference', {
-      base64: b64, mediaType: 'video/mp4', projectId: currentProjectId,
-      entityType: 'animatics', entityId: 'animatic'
-    });
-    const permanentUrl = uploadData.url;
+    // Server returns JSON {url} if it uploaded to Supabase, or raw video as fallback
+    const ct = resp.headers.get('content-type') || '';
+    let permanentUrl;
+    if (ct.includes('application/json')) {
+      const data = await resp.json();
+      if (!data.url) throw new Error('No URL returned from server');
+      permanentUrl = data.url;
+    } else {
+      // Fallback: server streamed the video — upload it ourselves
+      status.textContent = 'Saving to cloud…';
+      const videoBlob = await resp.blob();
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(videoBlob);
+      });
+      const uploadData = await apiFetch('/api/upload-reference', {
+        base64: b64, mediaType: 'video/mp4', projectId: currentProjectId,
+        entityType: 'animatics', entityId: 'animatic'
+      });
+      permanentUrl = uploadData.url;
+    }
 
     const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString() };
     animatics = [entry, ...(animatics || [])];
