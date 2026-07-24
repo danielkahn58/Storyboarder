@@ -952,23 +952,35 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
       proto.get(url, r => { r.pipe(file); file.on('finish', () => { file.close(); resolve(); }); }).on('error', reject);
     });
 
-    // Download all shot images
+    // Download a URL to a temp file
+    const ffprobe = (filePath) => new Promise((resolve) => {
+      execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], (err, stdout) => {
+        resolve(err ? null : parseFloat(stdout.trim()) || null);
+      });
+    });
+
+    // Download all shot assets (images or videos)
     const frames = [];
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
-      let imgPath;
-      if (shot.imageUrl.startsWith('data:')) {
-        // base64 data URL
-        const m = shot.imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-        if (!m) continue;
-        imgPath = tmp('.' + m[1]);
-        fs.writeFileSync(imgPath, Buffer.from(m[2], 'base64'));
-      } else {
-        imgPath = tmp('.jpg');
-        await download(shot.imageUrl, imgPath);
+      if (shot.videoUrl) {
+        const vidPath = tmp('.mp4');
+        await download(shot.videoUrl, vidPath);
+        frames.push({ type: 'video', path: vidPath, secs });
+      } else if (shot.imageUrl) {
+        let imgPath;
+        if (shot.imageUrl.startsWith('data:')) {
+          const m = shot.imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+          if (!m) continue;
+          imgPath = tmp('.' + m[1]);
+          fs.writeFileSync(imgPath, Buffer.from(m[2], 'base64'));
+        } else {
+          imgPath = tmp('.jpg');
+          await download(shot.imageUrl, imgPath);
+        }
+        frames.push({ type: 'image', path: imgPath, secs });
       }
-      frames.push({ imgPath, secs });
     }
 
     if (!frames.length) return res.status(400).json({ error: 'No valid frames' });
@@ -979,36 +991,53 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
     fs.writeFileSync(audioPath, req.file.buffer);
 
     // Get audio duration via ffprobe
-    const audioDuration = await new Promise((resolve) => {
-      execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath], (err, stdout) => {
-        resolve(err ? 120 : parseFloat(stdout.trim()) || 120);
+    const audioDuration = await ffprobe(audioPath) || 120;
+
+    // Convert each frame to a normalized video segment at 1280x720
+    const vfScale = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24';
+    const segPaths = [];
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      const segDur = Math.max((i + 1 < frames.length ? frames[i + 1].secs : audioDuration) - f.secs, 0.1);
+      const segPath = tmp('.mp4');
+      segPaths.push(segPath);
+      await new Promise((resolve, reject) => {
+        let args;
+        if (f.type === 'image') {
+          args = ['-y', '-loop', '1', '-i', f.path, '-t', String(segDur), '-vf', vfScale,
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-an', segPath];
+        } else {
+          args = ['-y', '-i', f.path, '-t', String(segDur), '-vf', vfScale,
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-an', segPath];
+        }
+        execFile('ffmpeg', args, { maxBuffer: 50 * 1024 * 1024 }, (err, _out, stderr) => {
+          if (err) reject(new Error('segment encode failed: ' + (stderr || err.message)));
+          else resolve();
+        });
+      });
+    }
+
+    // Concat all segments
+    const concatPath = tmp('.txt');
+    fs.writeFileSync(concatPath, segPaths.map(p => `file '${p}'`).join('\n') + '\n');
+    const concatPath2 = tmp('.mp4');
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-c', 'copy', concatPath2], { maxBuffer: 50 * 1024 * 1024 }, (err, _out, stderr) => {
+        if (err) reject(new Error('concat failed: ' + (stderr || err.message)));
+        else resolve();
       });
     });
 
-    // Build concat file: each frame shown from its timestamp to the next
-    const concatPath = tmp('.txt');
-    let concatContent = '';
-    for (let i = 0; i < frames.length; i++) {
-      const start = frames[i].secs;
-      const end = i + 1 < frames.length ? frames[i + 1].secs : audioDuration;
-      const duration = Math.max(end - start, 0.1);
-      concatContent += `file '${frames[i].imgPath}'\nduration ${duration.toFixed(3)}\n`;
-    }
-    // ffmpeg concat needs final file listed twice
-    concatContent += `file '${frames[frames.length - 1].imgPath}'\n`;
-    fs.writeFileSync(concatPath, concatContent);
-
-    // Audio may start after first frame — need offset
     const audioOffset = frames[0].secs;
     const outputPath = tmp('.mp4');
 
     await new Promise((resolve, reject) => {
       const args = [
         '-y',
-        '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-i', concatPath2,
         '-ss', String(audioOffset), '-i', audioPath,
-        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:v', 'copy',
         '-c:a', 'aac', '-b:a', '128k',
         '-shortest',
         outputPath

@@ -2088,13 +2088,13 @@ async function generateAnimatic() {
   const video = document.getElementById('animatic-video');
   const empty = document.getElementById('animatic-empty');
 
-  // Collect shots that have a final image and a timestamp
+  // Collect shots that have a final image or motion video and a timestamp
   const shotFrames = shots
-    .filter(s => s.finalImage && s.timestamp)
-    .map(s => ({ imageUrl: s.finalImage, timestamp: s.timestamp }));
+    .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
+    .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.videoUrl || null, timestamp: s.timestamp }));
 
   if (!shotFrames.length) {
-    showToast('No shots with both a Final Image and a timestamp yet.', true);
+    showToast('No shots with a Final Image (or motion video) and a timestamp yet.', true);
     return;
   }
 
@@ -2123,6 +2123,8 @@ async function generateAnimatic() {
     video.src = url;
     video.style.display = 'block';
     status.textContent = '';
+    video.onloadedmetadata = () => renderAnimaticTimeline();
+    video.addEventListener('timeupdate', updateAnimaticPlayhead, { passive: true });
   } catch(e) {
     showToast('Animatic failed: ' + e.message, true);
     status.textContent = '';
@@ -2131,6 +2133,99 @@ async function generateAnimatic() {
     btn.disabled = false;
     btn.textContent = 'Generate Animatic';
   }
+}
+
+let _animaticTimeline = null;
+
+function renderAnimaticTimeline() {
+  const video = document.getElementById('animatic-video');
+  const wrap = document.getElementById('animatic-timeline-wrap');
+  if (!video || !wrap) return;
+  const duration = video.duration;
+  if (!duration || !isFinite(duration)) return;
+
+  const timedShots = shots
+    .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
+    .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
+    .filter(Boolean)
+    .sort((a, b) => a.secs - b.secs);
+
+  if (!timedShots.length) return;
+  _animaticTimeline = { duration, shots: timedShots };
+  wrap.style.display = '';
+  _redrawAnimaticTimeline();
+
+  const tl = document.getElementById('animatic-timeline');
+  tl.onclick = (e) => {
+    if (e.target.closest('.tl-handle')) return;
+    const rect = tl.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    video.currentTime = Math.max(0, Math.min(duration, pct * duration));
+  };
+}
+
+function _redrawAnimaticTimeline() {
+  const tl = document.getElementById('animatic-timeline');
+  if (!tl || !_animaticTimeline) return;
+  const { duration, shots: ts } = _animaticTimeline;
+  const colors = ['#141a2e','#0e1a0e','#1e1208','#180e1e','#0c1818'];
+  tl.innerHTML = ts.map((s, i) => {
+    const x1 = s.secs / duration * 100;
+    const x2 = i + 1 < ts.length ? ts[i + 1].secs / duration * 100 : 100;
+    const w = Math.max(x2 - x1, 0.2);
+    const hasHandle = i > 0;
+    return `
+      <div style="position:absolute;left:${x1}%;width:${w}%;height:100%;background:${colors[i % colors.length]};border-right:1px solid #222;box-sizing:border-box;overflow:hidden">
+        <span style="position:absolute;left:5px;top:4px;font-size:9px;color:#555;white-space:nowrap;overflow:hidden;max-width:calc(100% - 8px)">${esc(s.lyric.slice(0, 28))}</span>
+        <span style="position:absolute;bottom:4px;left:5px;font-size:8px;color:#383838;font-family:monospace">${formatTimestamp(s.secs)}</span>
+      </div>
+      ${hasHandle ? `<div class="tl-handle" data-shot-id="${s.id}" style="position:absolute;left:${x1}%;top:0;width:14px;height:100%;margin-left:-7px;cursor:ew-resize;z-index:10;display:flex;align-items:center;justify-content:center;touch-action:none" onpointerdown="startTlDrag(event,'${s.id}')">
+        <div style="width:2px;height:75%;background:#818cf8;border-radius:1px;pointer-events:none"></div>
+      </div>` : ''}`;
+  }).join('') +
+  `<div id="animatic-playhead" style="position:absolute;left:0%;top:0;width:2px;height:100%;background:#f59e0b;pointer-events:none;z-index:20"></div>`;
+}
+
+function updateAnimaticPlayhead() {
+  const video = document.getElementById('animatic-video');
+  const ph = document.getElementById('animatic-playhead');
+  if (!ph || !video || !_animaticTimeline) return;
+  ph.style.left = (video.currentTime / _animaticTimeline.duration * 100) + '%';
+}
+
+function startTlDrag(e, shotId) {
+  e.preventDefault();
+  e.stopPropagation();
+  const tl = document.getElementById('animatic-timeline');
+  if (!tl || !_animaticTimeline) return;
+  const { duration, shots: ts } = _animaticTimeline;
+  const shotIdx = ts.findIndex(s => s.id === shotId);
+  if (shotIdx <= 0) return;
+
+  const tlRect = tl.getBoundingClientRect();
+  const minSecs = ts[shotIdx - 1].secs + 0.3;
+  const maxSecs = (shotIdx + 1 < ts.length ? ts[shotIdx + 1].secs : duration) - 0.3;
+
+  const onMove = (ev) => {
+    const pct = Math.max(0, Math.min(1, (ev.clientX - tlRect.left) / tlRect.width));
+    ts[shotIdx].secs = Math.max(minSecs, Math.min(maxSecs, pct * duration));
+    _redrawAnimaticTimeline();
+  };
+
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    const shot = shots.find(s => s.id === shotId);
+    if (shot) {
+      shot.timestamp = formatTimestamp(ts[shotIdx].secs);
+      const inp = document.querySelector(`#shots-body tr[data-id="${shotId}"] .field-timestamp`);
+      if (inp) inp.value = shot.timestamp;
+      debouncedSave();
+    }
+  };
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
 }
 
 function renderShots() {
