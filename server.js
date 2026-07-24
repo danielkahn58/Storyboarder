@@ -924,7 +924,7 @@ app.post('/api/generate-shot-video', async (req, res) => {
 // ── Animatic generation ──────────────────────────────────────────────────────
 const animaticUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 150 * 1024 * 1024 } });
 
-app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, res) => {
+app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
   const { execFile } = require('child_process');
   const os = require('os');
   const https = require('https');
@@ -936,7 +936,10 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
   try {
     const shots = JSON.parse(req.body.shots || '[]');
     if (!shots.length) return res.status(400).json({ error: 'No shots provided' });
-    if (!req.file) return res.status(400).json({ error: 'No audio provided' });
+    const fileMap = {};
+    for (const f of (req.files || [])) fileMap[f.fieldname] = f;
+    const audioFile = fileMap['audio'];
+    if (!audioFile) return res.status(400).json({ error: 'No audio provided' });
 
     // Parse timestamps to seconds
     const toSecs = (ts) => {
@@ -959,34 +962,28 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
       });
     });
 
-    // Download all shot assets (images or videos)
+    // Load all shot assets (images or videos) — assets may arrive as file parts or HTTP URLs
     const frames = [];
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
-      const writeDataUrl = (dataUrl, ext) => {
-        const m = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
-        if (!m) return null;
-        const p = tmp(ext);
-        fs.writeFileSync(p, Buffer.from(m[1], 'base64'));
-        return p;
-      };
-      if (shot.videoUrl) {
+      if (shot.videoKey || shot.videoUrl) {
         let vidPath;
-        if (shot.videoUrl.startsWith('data:')) {
-          vidPath = writeDataUrl(shot.videoUrl, '.mp4');
-        } else {
+        if (shot.videoKey && fileMap[shot.videoKey]) {
+          vidPath = tmp('.mp4');
+          fs.writeFileSync(vidPath, fileMap[shot.videoKey].buffer);
+        } else if (shot.videoUrl) {
           vidPath = tmp('.mp4');
           await download(shot.videoUrl, vidPath);
         }
         if (!vidPath) continue;
         frames.push({ type: 'video', path: vidPath, secs });
-      } else if (shot.imageUrl) {
+      } else if (shot.imageKey || shot.imageUrl) {
         let imgPath;
-        if (shot.imageUrl.startsWith('data:')) {
-          const ext = shot.imageUrl.match(/^data:image\/(\w+)/)?.[1] || 'jpg';
-          imgPath = writeDataUrl(shot.imageUrl, '.' + ext);
-        } else {
+        if (shot.imageKey && fileMap[shot.imageKey]) {
+          imgPath = tmp('.jpg');
+          fs.writeFileSync(imgPath, fileMap[shot.imageKey].buffer);
+        } else if (shot.imageUrl) {
           imgPath = tmp('.jpg');
           await download(shot.imageUrl, imgPath);
         }
@@ -1000,7 +997,7 @@ app.post('/api/generate-animatic', animaticUpload.single('audio'), async (req, r
 
     // Write audio to temp file
     const audioPath = tmp('.mp3');
-    fs.writeFileSync(audioPath, req.file.buffer);
+    fs.writeFileSync(audioPath, audioFile.buffer);
 
     // Get audio duration via ffprobe
     const audioDuration = await ffprobe(audioPath) || 120;

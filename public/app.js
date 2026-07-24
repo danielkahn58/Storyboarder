@@ -2111,30 +2111,41 @@ async function generateAnimatic() {
   btn.textContent = 'Generating…';
   status.textContent = 'Resolving assets…';
 
-  // Convert any blob: URLs to base64 data URLs so the server can decode them
-  const blobToDataUrl = async (url) => {
+  // Resolve a URL (blob: or http:) to a Blob
+  const resolveBlob = async (url) => {
     const resp = await fetch(url);
-    const blob = await resp.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    return resp.blob();
   };
 
   try {
-    const shotFrames = await Promise.all(rawFrames.map(async f => {
-      let videoUrl = f.videoUrl;
-      let imageUrl = f.imageUrl;
-      if (videoUrl && videoUrl.startsWith('blob:')) videoUrl = await blobToDataUrl(videoUrl);
-      if (imageUrl && imageUrl.startsWith('blob:')) imageUrl = await blobToDataUrl(imageUrl);
-      return { imageUrl, videoUrl, timestamp: f.timestamp };
-    }));
-
     const formData = new FormData();
     formData.append('audio', audioFile);
-    formData.append('shots', JSON.stringify(shotFrames));
+
+    // Build shot metadata; attach local assets as named form parts to avoid huge JSON
+    const shotMeta = [];
+    for (let i = 0; i < rawFrames.length; i++) {
+      const f = rawFrames[i];
+      const meta = { timestamp: f.timestamp };
+      if (f.videoUrl) {
+        if (f.videoUrl.startsWith('blob:')) {
+          const blob = await resolveBlob(f.videoUrl);
+          formData.append(`video_${i}`, blob, `shot_${i}.mp4`);
+          meta.videoKey = `video_${i}`;
+        } else {
+          meta.videoUrl = f.videoUrl; // permanent https: URL, server can download
+        }
+      } else if (f.imageUrl) {
+        if (f.imageUrl.startsWith('blob:')) {
+          const blob = await resolveBlob(f.imageUrl);
+          formData.append(`image_${i}`, blob, `shot_${i}.jpg`);
+          meta.imageKey = `image_${i}`;
+        } else {
+          meta.imageUrl = f.imageUrl; // permanent https: URL
+        }
+      }
+      shotMeta.push(meta);
+    }
+    formData.append('shots', JSON.stringify(shotMeta));
 
     status.textContent = 'Building animatic…';
     const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
