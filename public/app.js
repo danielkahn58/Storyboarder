@@ -2199,11 +2199,16 @@ async function generateAnimatic() {
     status.textContent = 'Building animatic…';
 
     // Send only URLs — no binary through Railway's proxy
-    const resp = await fetch('/api/generate-animatic', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shots: shotMeta, audioUrl, projectId: currentProjectId })
-    });
+    let resp;
+    try {
+      resp = await fetch('/api/generate-animatic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shots: shotMeta, audioUrl, projectId: currentProjectId }),
+      });
+    } catch(fetchErr) {
+      throw new Error('Railway request failed: ' + fetchErr.message);
+    }
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
 
     const data = await resp.json();

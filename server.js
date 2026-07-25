@@ -66,7 +66,7 @@ if (AUTH_ENABLED) {
     if (!storagePath) return res.status(400).json({ error: 'path required' });
     if (!sbAdmin) return res.status(500).json({ error: 'Storage not configured' });
     try {
-      const { data, error } = await sbAdmin.storage.from('images').createSignedUploadUrl(storagePath);
+      const { data, error } = await sbAdmin.storage.from('images').createSignedUploadUrl(storagePath, { upsert: true });
       if (error) throw error;
       const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
       res.json({ signedUrl: data.signedUrl, publicUrl });
