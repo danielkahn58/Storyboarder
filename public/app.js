@@ -2991,7 +2991,7 @@ function onMusicPieceCbChange() {
 
 function _audioStatusText(wordCount, beats) {
   const parts = [];
-  if (beats?.length) parts.push(`${beats.length} beats detected`);
+  if (beats?.length) parts.push(`${beats.length} downbeats detected`);
   if (wordCount) parts.push(`${wordCount} words transcribed`);
   return parts.join(' · ') || 'Done';
 }
@@ -3078,6 +3078,38 @@ function detectBeatsFromPCM(pcm, sampleRate) {
     if (beats.length === 0 || t - beats[beats.length - 1] >= 0.25) beats.push(t);
   }
   return beats;
+}
+
+// Given all detected beat positions, return only the downbeats (beat 1 of each 4/4 bar).
+// Strategy: try all 4 possible phase offsets, pick the one whose beats sum to the most
+// low-frequency energy — downbeats (kick on 1) consistently have more bass energy.
+function findDownbeats(beats, pcm, sampleRate) {
+  if (beats.length < 4) return beats;
+
+  // Low-pass filtered energy at each beat position (same filter as beat detection)
+  const alpha = (2 * Math.PI * 200) / (2 * Math.PI * 200 + sampleRate);
+  const halfWin = Math.round(sampleRate * 0.03); // 30ms window around each beat
+  const energies = beats.map(t => {
+    const c = Math.round(t * sampleRate);
+    let e = 0, n = 0, prev = 0;
+    // Apply IIR inline over the window — cheap and avoids allocating the full LP array
+    for (let j = Math.max(0, c - halfWin); j < Math.min(pcm.length, c + halfWin); j++) {
+      prev = alpha * Math.abs(pcm[j]) + (1 - alpha) * prev;
+      e += prev * prev; n++;
+    }
+    return n > 0 ? Math.sqrt(e / n) : 0;
+  });
+
+  // For each phase 0-3, sum energy of beats at that phase position
+  const phaseScore = [0, 1, 2, 3].map(phase => {
+    let s = 0;
+    for (let i = phase; i < beats.length; i += 4) s += energies[i];
+    return s;
+  });
+  const bestPhase = phaseScore.indexOf(Math.max(...phaseScore));
+
+  // Return every 4th beat starting at bestPhase
+  return beats.filter((_, i) => i % 4 === bestPhase);
 }
 
 // Assign shot timestamps to detected beats. Lyric shots snap to the beat nearest
@@ -3193,10 +3225,11 @@ async function handleAudioUpload(input) {
     if (statusEl) { statusEl.textContent = 'Decoding audio…'; statusEl.className = 'upload-status loading'; }
     const pcm = await decodeToMono16k(file);
 
-    // Beat detection (music piece mode)
+    // Beat detection (music piece mode) — detect all beats then reduce to downbeats (bar 1s)
     if (_isMusicPiece) {
-      if (statusEl) { statusEl.textContent = 'Detecting beats…'; statusEl.className = 'upload-status loading'; }
-      _audioBeats = detectBeatsFromPCM(pcm, sampleRate);
+      if (statusEl) { statusEl.textContent = 'Detecting downbeats…'; statusEl.className = 'upload-status loading'; }
+      const allBeats = detectBeatsFromPCM(pcm, sampleRate);
+      _audioBeats = findDownbeats(allBeats, pcm, sampleRate);
       await _saveBeats(_audioBeats);
     }
 

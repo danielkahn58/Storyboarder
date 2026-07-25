@@ -40,12 +40,12 @@ A web-based storyboard generation tool for music videos and films. Users build a
 
 ### Audio — Music Piece Mode **NEW**
 
-- When "Music piece" is checked before importing audio, the app runs client-side beat detection on the decoded PCM: IIR low-pass filter (~200 Hz) to isolate kick/bass frequencies, onset strength (positive energy flux), adaptive peak picking with minimum 250 ms inter-beat interval.
+- When "Music piece" is checked before importing audio, the app runs client-side downbeat detection: (1) IIR low-pass filter (~200 Hz) isolates kick/bass frequencies; (2) onset strength (positive energy flux) is computed per 23 ms hop; (3) adaptive peak picking finds all beat positions (quarter notes); (4) beats are grouped into 4/4 bars — all four phase offsets (0–3) are scored by summing low-frequency energy at each candidate downbeat, and the phase with the highest score is selected; every 4th beat at that phase becomes a downbeat (bar 1).
 - Two text boxes appear after import:
   - **Lyrics & Word Timestamps** — one line per transcribed word: `[M:SS.d] word`
-  - **Downbeats with Lyrics** — one line per detected downbeat: `[M:SS.d] word1 word2 …` (all words that fall between that beat and the next)
-- Shot timestamps are assigned to detected beats: shots are distributed evenly across beats; lyric shots snap to the beat nearest their Whisper transcript match.
-- Beat timestamps and music-piece mode are persisted per version in IndexedDB alongside the audio file and transcript.
+  - **Downbeats with Lyrics** — one line per bar: `[M:SS.d] word1 word2 …` (all words that fall between that downbeat and the next)
+- Shot timestamps are assigned to detected downbeats (one shot per bar): shots are distributed evenly across downbeats; lyric shots snap to the downbeat nearest their Whisper transcript match.
+- Downbeat timestamps and music-piece mode are persisted per version in IndexedDB alongside the audio file and transcript.
 
 ---
 
@@ -112,4 +112,4 @@ A web-based storyboard generation tool for music videos and films. Users build a
 - Audio files are stored in the browser's IndexedDB — they do not sync across devices. Re-import audio on a new device.
 - Image galleries (all historically generated images per shot/character/location) are not versioned — they accumulate across all versions of a project.
 - Blob: URLs (temporary browser object URLs) are not persisted — generated videos/images are always uploaded to Supabase before being stored in shot data.
-- Beat detection accuracy varies by music genre. Sparse or acoustic music may yield fewer beats than expected. Electronic/pop with a prominent kick drum gives best results.
+- Downbeat detection accuracy varies by genre. It works best on 4/4 music with a prominent kick drum on beat 1. Sparse or acoustic music may produce uneven bar groupings.
