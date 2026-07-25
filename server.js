@@ -961,15 +961,22 @@ app.post('/api/generate-animatic', async (req, res) => {
       return parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0] * 3600 + parts[1] * 60 + parts[2];
     };
 
-    // Download a URL to a temp file
-    const download = (url, dest) => new Promise((resolve, reject) => {
+    // Download a URL to a temp file, following up to 5 redirects
+    const download = (url, dest, _hops = 0) => new Promise((resolve, reject) => {
+      if (_hops > 5) { reject(new Error('Too many redirects: ' + url)); return; }
       const proto = url.startsWith('https') ? https : http;
       const file = fs.createWriteStream(dest);
       proto.get(url, r => {
-        if (r.statusCode >= 400) { reject(new Error(`HTTP ${r.statusCode} downloading ${url}`)); return; }
+        if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+          file.close();
+          fs.unlink(dest, () => {});
+          resolve(download(r.headers.location, dest, _hops + 1));
+          return;
+        }
+        if (r.statusCode >= 400) { file.close(); reject(new Error(`HTTP ${r.statusCode} downloading ${url}`)); return; }
         r.pipe(file);
         file.on('finish', () => { file.close(); resolve(); });
-      }).on('error', reject);
+      }).on('error', (e) => { file.close(); reject(e); });
     });
 
     const ffprobe = (filePath) => new Promise((resolve) => {
@@ -982,19 +989,42 @@ app.post('/api/generate-animatic', async (req, res) => {
     const audioPath = tmp('.mp3');
     await download(audioUrl, audioPath);
 
-    // Download all shot assets from their URLs
+    // Download all shot assets — video with image fallback on any per-shot failure
     const frames = [];
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
       if (shot.videoUrl) {
-        const vidPath = tmp('.mp4');
-        await download(shot.videoUrl, vidPath);
-        frames.push({ type: 'video', path: vidPath, secs });
+        try {
+          const vidPath = tmp('.mp4');
+          await download(shot.videoUrl, vidPath);
+          // Verify ffprobe can read it as video before committing
+          const dur = await ffprobe(vidPath);
+          if (dur && dur > 0) {
+            frames.push({ type: 'video', path: vidPath, secs });
+            continue;
+          }
+        } catch(e) {
+          log('warn', 'video download failed, falling back to image', { url: shot.videoUrl, error: e.message });
+        }
+        // Video failed — fall through to image if available
+        if (shot.imageUrl) {
+          try {
+            const imgPath = tmp('.jpg');
+            await download(shot.imageUrl, imgPath);
+            frames.push({ type: 'image', path: imgPath, secs });
+          } catch(e) {
+            log('warn', 'image fallback also failed', { url: shot.imageUrl, error: e.message });
+          }
+        }
       } else if (shot.imageUrl) {
-        const imgPath = tmp('.jpg');
-        await download(shot.imageUrl, imgPath);
-        frames.push({ type: 'image', path: imgPath, secs });
+        try {
+          const imgPath = tmp('.jpg');
+          await download(shot.imageUrl, imgPath);
+          frames.push({ type: 'image', path: imgPath, secs });
+        } catch(e) {
+          log('warn', 'image download failed', { url: shot.imageUrl, error: e.message });
+        }
       }
     }
 

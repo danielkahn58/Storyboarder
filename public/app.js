@@ -1521,102 +1521,67 @@ function resetLocRules() {
   autoSave();
 }
 
-function openRequirements() {
+async function openRequirements() {
   const modal = document.getElementById('requirements-modal');
   const body = document.getElementById('requirements-body');
   if (!modal || !body) return;
-  body.innerHTML = `
-<h2 style="color:#e2e8f0;font-size:15px;margin:0 0 18px">Storyboard Generator — Product Requirements</h2>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Overview</h3>
-<p>A web-based storyboard generation tool for music videos and films. Users build a project with characters, locations, and shots; generate AI images and motion videos for each shot; and assemble them into an animatic with audio. All data is versioned, cloud-synced, and persists across sessions.</p>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Projects</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Users can create, rename, and delete projects. Each project is independent.</li>
-<li>Projects are stored in Supabase (cloud) and in localStorage/IndexedDB (local). On load, cloud data takes precedence; on save failure, data is kept locally.</li>
-<li>Projects can be duplicated, which copies all data including audio.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Versioning</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Each project maintains a version history. Versions can be created manually ("Save Version") or are created automatically every N edits.</li>
-<li>Switching to an older version restores <strong>all</strong> versioned fields for that snapshot. Switching away from a version first saves the current state back into that version's snapshot.</li>
-<li><strong>Versioned:</strong> all character/location/shot fields (prompts, images, angles, composeMeta, composeLayers, finalImage, videoUrl), visual styles, generation rules, boilerplate, animatics list, script text/name, audio file and transcript.</li>
-<li><strong>Not versioned (shared across all versions):</strong> the image galleries (all historically generated images for each shot/character/location — these accumulate and are never deleted when switching versions).</li>
-<li>Version snapshots strip base64 and blob: data; only permanent Supabase https: URLs are stored in snapshots.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Configuration Tab</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Visual style selector: choose or create styles that affect AI image generation.</li>
-<li>Character generation rules: global prompt instructions applied to all character image generation.</li>
-<li>Location generation rules: same for locations.</li>
-<li>Character prompt boilerplate: appended to every character image prompt.</li>
-<li>Script import: upload a text/PDF script. The script text is parsed to extract characters, locations, and shots. Versioned per version.</li>
-<li>Audio import: upload an MP3/WAV. Audio is transcribed via Whisper and timestamps are assigned to shots. Audio is versioned per version — switching versions restores the audio that was imported for that version.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Characters</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Each character has: name, reference description, attributes, prompt, expression field, LoRA training status, reference images, and angle images (front, 3/4 left, profile left, 3/4 back left, back, 3/4 back right, profile right, 3/4 right).</li>
-<li>Reference images: upload or choose from library. Multiple reference images can be uploaded. "Use Ref As Default" toggles whether the ref image is used in generation.</li>
-<li>Expression: a text input with preset suggestions (via datalist). Pressing ▶ applies the expression to the current character image via AI editing.</li>
-<li>Angle images: generate each angle via AI. Images are stored as Supabase URLs and versioned.</li>
-<li>LoRA training: trains a fine-tuned model on the character's reference images. LoRA URL and status are versioned.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Locations</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Each location has: name, aliases, reference description, prompt, and shot angle images (wide establishing, reverse angle, 3/4 left, 3/4 right, high angle, low angle) plus custom views.</li>
-<li>Reference image column offers Upload or Choose from Library. The library shows all historical images for that location (including shot images for shots assigned to it).</li>
-<li>"Use Ref As Default" applies the reference image when generating shot angles for that location. Versioned.</li>
-<li>Custom views: user-defined named views with their own prompts and generated images.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Shot Sequence</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Each shot has: lyric/line, description, image prompt, video prompt, shot size, shot angle, shot movement, assigned characters, assigned location, character details, timestamp, and final image.</li>
-<li>Timestamps are assigned manually or auto-assigned from the Whisper transcript. Timestamps mark when each shot starts in the animatic.</li>
-<li>Final image: the selected/approved image for this shot. Shown in the animatic.</li>
-<li>Image editor (Compose): opens a canvas where a background (from location images) and character layers can be arranged, scaled, and lit. The compose state (bgUrl, bgColor, bgScale, bgOffsetX, bgOffsetY, globalLighting, globalContrast, globalSaturation, bgSeparation, layers with per-layer position/opacity/lighting) is versioned with the shot.</li>
-<li>Motion video: a Ken Burns–style video can be generated for each shot and stored as a Supabase URL. Used in the animatic in place of the still image.</li>
-<li>Undo in the image editor: undoes changes to all compose fields including background size and position.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">AV Script</h3>
-<ul style="margin:0;padding-left:18px">
-<li>A read-only formatted view showing each shot's lyric, description, and assigned characters/location in a two-column A/V script layout.</li>
-<li>Can be printed.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Animatic</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Generates a video assembling all shots (using motion video where available, otherwise final image) timed to the imported audio.</li>
-<li>Shot boundaries are shown as a draggable timeline below the video player. Dragging a handle adjusts the shot's timestamp and saves it.</li>
-<li>Clicking the timeline scrubs the video to that position.</li>
-<li>Generated animatics are uploaded to Supabase and saved permanently. The animatic tab shows all previously generated animatics for the current version, newest first.</li>
-<li>Each animatic has a Download button and a Remove button.</li>
-<li>Animatics are versioned — switching versions shows the animatics generated for that version.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Cloud Sync</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Project data (characters, locations, shots, styles, rules) is saved to Supabase Storage as JSON files (data.json, images.json) on every auto-save.</li>
-<li>Script text is stored locally only (IndexedDB) — it is too large for efficient cloud storage and is versioned in localStorage version snapshots.</li>
-<li>Audio files are stored in IndexedDB, keyed per-project and per-version.</li>
-<li>Generated images and videos are stored as permanent Supabase Storage URLs and referenced in the project data.</li>
-<li>If cloud sync fails, data is retained locally. The error toast shows the specific failure reason.</li>
-</ul>
-
-<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Known Limitations</h3>
-<ul style="margin:0;padding-left:18px">
-<li>Audio files are stored in the browser's IndexedDB — they do not sync across devices. Re-import audio on a new device.</li>
-<li>Image galleries (all historically generated images per shot/character/location) are not versioned — they accumulate across all versions of a project.</li>
-<li>Blob: URLs (temporary browser object URLs) are not persisted — generated videos/images are always uploaded to Supabase before being stored in shot data.</li>
-</ul>
-`;
   modal.style.display = 'flex';
+  body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
+  try {
+    const md = await fetch('/spec.md').then(r => r.text());
+    body.innerHTML = _renderSpecMd(md);
+  } catch(e) {
+    body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load spec.md: ' + e.message + '</p>';
+  }
+}
+
+function _renderSpecMd(md) {
+  // Convert spec.md markdown to styled HTML with NEW/UPDATED badges
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const badge = tag => `<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;vertical-align:middle;margin-left:5px;letter-spacing:.04em;background:${tag==='NEW'?'#14532d':'#1e3a5f'};color:${tag==='NEW'?'#4ade80':'#60a5fa'}">${tag}</span>`;
+  const inlineStyles = s => s
+    .replace(/\*\*NEW\*\*/g, badge('NEW'))
+    .replace(/\*\*UPDATED\*\*/g, badge('UPDATED'))
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:#1a1a1a;padding:1px 4px;border-radius:3px;font-size:10px">$1</code>');
+
+  const lines = md.split('\n');
+  let html = '';
+  let inUl = false, inBlockquote = false;
+
+  const closeUl = () => { if (inUl) { html += '</ul>'; inUl = false; } };
+  const closeBq = () => { if (inBlockquote) { html += '</blockquote>'; inBlockquote = false; } };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('# ')) {
+      closeUl(); closeBq();
+      html += `<h2 style="color:#e2e8f0;font-size:15px;margin:0 0 18px">${esc(line.slice(2))}</h2>`;
+    } else if (line.startsWith('## ')) {
+      closeUl(); closeBq();
+      html += `<h3 style="color:#818cf8;font-size:13px;margin:20px 0 8px;padding-top:4px;border-top:1px solid #1a1a1a">${inlineStyles(esc(line.slice(3)))}</h3>`;
+    } else if (line.startsWith('### ')) {
+      closeUl(); closeBq();
+      html += `<h4 style="color:#a78bfa;font-size:12px;margin:14px 0 6px">${inlineStyles(esc(line.slice(4)))}</h4>`;
+    } else if (line.startsWith('> ')) {
+      closeUl();
+      if (!inBlockquote) { html += '<blockquote style="border-left:2px solid #374151;margin:0 0 14px;padding:6px 12px;color:#6b7280;font-size:11px">'; inBlockquote = true; }
+      html += `<p style="margin:2px 0">${inlineStyles(esc(line.slice(2)))}</p>`;
+    } else if (line.startsWith('- ')) {
+      closeBq();
+      if (!inUl) { html += '<ul style="margin:0 0 8px;padding-left:18px">'; inUl = true; }
+      html += `<li style="margin-bottom:4px;font-size:12px;color:#c4c4c4;line-height:1.5">${inlineStyles(esc(line.slice(2)))}</li>`;
+    } else if (line.startsWith('---')) {
+      closeUl(); closeBq();
+    } else if (line.trim() === '') {
+      closeUl(); closeBq();
+    } else {
+      closeUl(); closeBq();
+      if (line.trim()) html += `<p style="font-size:12px;color:#c4c4c4;margin:0 0 8px;line-height:1.6">${inlineStyles(esc(line))}</p>`;
+    }
+  }
+  closeUl(); closeBq();
+  return html;
 }
 
 function closeRequirements() {
@@ -2986,8 +2951,10 @@ function clearAudioState() {
   const showBtn = document.getElementById('btn-pinned-expand');
   if (hideBtn) hideBtn.style.display = '';
   if (showBtn) showBtn.style.display = 'none';
-  const transcriptBox = document.getElementById('audio-transcript');
-  if (transcriptBox) { transcriptBox.value = ''; transcriptBox.style.display = 'none'; }
+  const lw = document.getElementById('audio-transcript-lyrics-wrap');
+  const bw = document.getElementById('audio-transcript-beats-wrap');
+  if (lw) { lw.style.display = 'none'; const b = document.getElementById('audio-transcript-lyrics'); if (b) b.value = ''; }
+  if (bw) { bw.style.display = 'none'; const b = document.getElementById('audio-transcript-beats'); if (b) b.value = ''; }
   const statusEl = document.getElementById('audio-upload-status');
   if (statusEl) { statusEl.textContent = 'MP3, WAV, M4A, MP4…'; statusEl.className = 'upload-status'; }
 }
@@ -3030,21 +2997,39 @@ function _audioStatusText(wordCount, beats) {
 }
 
 function _renderAudioTranscriptBox(words, beats) {
-  const transcriptBox = document.getElementById('audio-transcript');
-  if (!transcriptBox) return;
-  const lines = [];
-  if (beats?.length) {
-    lines.push('Beats: ' + beats.map(b => formatTimestamp(b)).join('  '));
+  const lyricsWrap = document.getElementById('audio-transcript-lyrics-wrap');
+  const lyricsBox  = document.getElementById('audio-transcript-lyrics');
+  const beatsWrap  = document.getElementById('audio-transcript-beats-wrap');
+  const beatsBox   = document.getElementById('audio-transcript-beats');
+
+  // Lyrics box: one line per word with its timestamp
+  if (lyricsBox) {
+    if (words?.length) {
+      lyricsBox.value = words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join('\n');
+      if (lyricsWrap) lyricsWrap.style.display = '';
+    } else {
+      lyricsBox.value = '';
+      if (lyricsWrap) lyricsWrap.style.display = 'none';
+    }
   }
-  if (words?.length) {
-    lines.push(words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' '));
-  }
-  if (lines.length) {
-    transcriptBox.value = lines.join('\n');
-    transcriptBox.style.display = '';
-  } else {
-    transcriptBox.value = '';
-    transcriptBox.style.display = 'none';
+
+  // Beats box: one line per downbeat — timestamp followed by lyrics that fall in that beat interval
+  if (beatsBox) {
+    if (beats?.length) {
+      const lines = beats.map((b, i) => {
+        const nextBeat = beats[i + 1] ?? Infinity;
+        const beatWords = (words || [])
+          .filter(w => w.start >= b && w.start < nextBeat)
+          .map(w => w.word.trim())
+          .join(' ');
+        return `[${formatTimestamp(b)}] ${beatWords}`;
+      });
+      beatsBox.value = lines.join('\n');
+      if (beatsWrap) beatsWrap.style.display = '';
+    } else {
+      beatsBox.value = '';
+      if (beatsWrap) beatsWrap.style.display = 'none';
+    }
   }
 }
 

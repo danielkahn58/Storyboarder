@@ -1082,7 +1082,14 @@
         </label>
         <span class="upload-status" id="audio-upload-status">MP3, WAV, M4A, MP4…</span>
       </div>
-      <textarea id="audio-transcript" class="audio-transcript-box" placeholder="Transcript with timestamps will appear here after import…" readonly style="display:none"></textarea>
+      <div id="audio-transcript-lyrics-wrap" style="display:none">
+        <div style="font-size:10px;color:#555;margin-top:8px;margin-bottom:3px;letter-spacing:.04em">LYRICS &amp; WORD TIMESTAMPS</div>
+        <textarea id="audio-transcript-lyrics" class="audio-transcript-box" placeholder="Word timestamps will appear here…" readonly></textarea>
+      </div>
+      <div id="audio-transcript-beats-wrap" style="display:none">
+        <div style="font-size:10px;color:#555;margin-top:8px;margin-bottom:3px;letter-spacing:.04em">DOWNBEATS WITH LYRICS</div>
+        <textarea id="audio-transcript-beats" class="audio-transcript-box" placeholder="Beat timestamps with lyrics will appear here…" readonly></textarea>
+      </div>
     </div>
   </div>
 </div>
