@@ -2147,10 +2147,14 @@ async function generateAnimatic() {
   // Upload a Blob directly to Supabase Storage from the browser, return public URL
   const uploadBlobToSupabase = async (blob, storagePath) => {
     const sb = getSB();
-    const { error } = await sb.storage.from('images').upload(storagePath, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
-    if (error) throw new Error('Supabase storage upload failed: ' + error.message);
-    const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(storagePath);
-    return publicUrl;
+    try {
+      const { error } = await sb.storage.from('images').upload(storagePath, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
+      if (error) throw new Error(error.message);
+      const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(storagePath);
+      return publicUrl;
+    } catch(e) {
+      throw new Error(`Supabase upload failed (${storagePath.split('/').pop()}): ${e.message}`);
+    }
   };
 
   try {
@@ -7497,6 +7501,9 @@ function captureUndoState() {
     globalContrast: _compose.globalContrast ?? 100,
     globalSaturation: _compose.globalSaturation ?? 100,
     bgSeparation: _compose.bgSeparation ?? 0,
+    bgScale: _compose.bgScale ?? 1,
+    bgOffsetX: _compose.bgOffsetX ?? 0,
+    bgOffsetY: _compose.bgOffsetY ?? 0,
     selectedIdx: _compose.selectedIdx,
   };
   _compose.undoStack.push(snap);
@@ -7513,6 +7520,9 @@ async function undo() {
   _compose.globalContrast = snap.globalContrast;
   _compose.globalSaturation = snap.globalSaturation;
   _compose.bgSeparation = snap.bgSeparation;
+  _compose.bgScale = snap.bgScale ?? 1;
+  _compose.bgOffsetX = snap.bgOffsetX ?? 0;
+  _compose.bgOffsetY = snap.bgOffsetY ?? 0;
   _compose.bgColor = snap.bgColor;
   _compose.bgKey = snap.bgKey;
   _compose.selectedIdx = Math.max(-1, Math.min(snap.selectedIdx, snap.layers.length - 1));
