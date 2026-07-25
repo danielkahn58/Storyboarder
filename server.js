@@ -59,6 +59,22 @@ if (AUTH_ENABLED) {
 
   app.get('/api/ping', (req, res) => res.json({ ok: true, t: Date.now() }));
 
+  // Returns a signed upload URL so the browser can PUT directly to Supabase Storage
+  // without sending the file through Railway or needing the anon key to have write access.
+  app.post('/api/storage-upload-url', async (req, res) => {
+    const { path: storagePath } = req.body;
+    if (!storagePath) return res.status(400).json({ error: 'path required' });
+    if (!sbAdmin) return res.status(500).json({ error: 'Storage not configured' });
+    try {
+      const { data, error } = await sbAdmin.storage.from('images').createSignedUploadUrl(storagePath);
+      if (error) throw error;
+      const { data: { publicUrl } } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
+      res.json({ signedUrl: data.signedUrl, publicUrl });
+    } catch(e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.file'] }));
 
   app.get('/auth/google/callback',

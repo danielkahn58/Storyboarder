@@ -264,15 +264,17 @@ async function sbUpsertData(id, stripped, imgs) {
     const { scriptText, scriptName, ...strippedForDB } = stripped;
     const sb = getSB();
 
-    // Store data as JSON files in Supabase Storage (no size/timeout limit)
-    const dataBlob = new Blob([JSON.stringify(strippedForDB)], { type: 'application/json' });
-    const imgsBlob = new Blob([JSON.stringify(stripBase64ForSync(imgs))], { type: 'application/json' });
-    const [dataUpload, imgsUpload] = await Promise.all([
-      sb.storage.from('images').upload(`projects/${id}/data.json`, dataBlob, { upsert: true, contentType: 'application/json' }),
-      sb.storage.from('images').upload(`projects/${id}/images.json`, imgsBlob, { upsert: true, contentType: 'application/json' }),
+    // Store data as JSON files in Supabase Storage via server-issued signed URLs
+    const uploadJson = async (storagePath, obj) => {
+      const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+      const { signedUrl } = await apiFetch('/api/storage-upload-url', { path: storagePath });
+      const r = await fetch(signedUrl, { method: 'PUT', body: blob, headers: { 'Content-Type': 'application/json' } });
+      if (!r.ok) throw new Error(`Storage PUT ${r.status}`);
+    };
+    await Promise.all([
+      uploadJson(`projects/${id}/data.json`, strippedForDB),
+      uploadJson(`projects/${id}/images.json`, stripBase64ForSync(imgs)),
     ]);
-    if (dataUpload.error) throw dataUpload.error;
-    if (imgsUpload.error) throw imgsUpload.error;
 
     // Update only lightweight metadata in the DB row
     const { error } = await sb.from('projects').upsert({
@@ -2144,16 +2146,20 @@ async function generateAnimatic() {
   btn.textContent = 'Generating…';
   status.textContent = 'Uploading assets…';
 
-  // Upload a Blob directly to Supabase Storage from the browser, return public URL
+  // Upload a Blob directly to Supabase Storage via a server-issued signed URL.
+  // This bypasses Railway's body size limit and doesn't need anon key write access.
   const uploadBlobToSupabase = async (blob, storagePath) => {
-    const sb = getSB();
     try {
-      const { error } = await sb.storage.from('images').upload(storagePath, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
-      if (error) throw new Error(error.message);
-      const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(storagePath);
+      const { signedUrl, publicUrl } = await apiFetch('/api/storage-upload-url', { path: storagePath });
+      const uploadResp = await fetch(signedUrl, {
+        method: 'PUT',
+        body: blob,
+        headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+      });
+      if (!uploadResp.ok) throw new Error(`PUT ${uploadResp.status} ${uploadResp.statusText}`);
       return publicUrl;
     } catch(e) {
-      throw new Error(`Supabase upload failed (${storagePath.split('/').pop()}): ${e.message}`);
+      throw new Error(`Upload failed (${storagePath.split('/').pop()}): ${e.message}`);
     }
   };
 
