@@ -2174,17 +2174,31 @@ async function generateAnimatic() {
     for (let i = 0; i < rawFrames.length; i++) {
       const f = rawFrames[i];
       const meta = { timestamp: f.timestamp };
+      const tryFetchBlob = async (url) => {
+        try { return await fetch(url).then(r => r.blob()); } catch { return null; }
+      };
       if (f.videoUrl) {
         if (f.videoUrl.startsWith('blob:')) {
-          const blob = await fetch(f.videoUrl).then(r => r.blob());
-          meta.videoUrl = await uploadBlobToSupabase(blob, `${prefix}/video_${i}.mp4`);
+          // blob: URLs expire on page reload — try to fetch, fall back to still image
+          const blob = await tryFetchBlob(f.videoUrl);
+          if (blob) {
+            meta.videoUrl = await uploadBlobToSupabase(blob, `${prefix}/video_${i}.mp4`);
+          } else if (f.imageUrl && !f.imageUrl.startsWith('blob:')) {
+            meta.imageUrl = f.imageUrl; // use still image instead
+          } else {
+            continue; // skip this shot — no valid asset
+          }
         } else {
           meta.videoUrl = f.videoUrl;
         }
       } else if (f.imageUrl) {
         if (f.imageUrl.startsWith('blob:')) {
-          const blob = await fetch(f.imageUrl).then(r => r.blob());
-          meta.imageUrl = await uploadBlobToSupabase(blob, `${prefix}/image_${i}.jpg`);
+          const blob = await tryFetchBlob(f.imageUrl);
+          if (blob) {
+            meta.imageUrl = await uploadBlobToSupabase(blob, `${prefix}/image_${i}.jpg`);
+          } else {
+            continue; // skip — stale blob, no fallback
+          }
         } else {
           meta.imageUrl = f.imageUrl;
         }
