@@ -3136,7 +3136,7 @@ function matchBeatsToShots() {
   }
 
   autoSave();
-  renderShotsTable();
+  renderShots();
 }
 
 const WHISPER_LIMIT = 24 * 1024 * 1024; // 24MB
