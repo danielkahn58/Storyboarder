@@ -1147,6 +1147,27 @@ function stripImagesForVersion(data) {
     })),
   });
 
+  const stripComposeMeta = m => m ? {
+    bgUrl: isUrl(m.bgUrl) ? m.bgUrl : null,
+    bgColor: m.bgColor || null,
+    bgMaskUrl: isUrl(m.bgMaskUrl) ? m.bgMaskUrl : null,
+    globalLighting: m.globalLighting || 'none',
+    globalLightingDir: m.globalLightingDir || 'none',
+    globalContrast: m.globalContrast ?? 100,
+    globalSaturation: m.globalSaturation ?? 100,
+    bgSeparation: m.bgSeparation ?? 0,
+    bgScale: m.bgScale ?? 1,
+    bgOffsetX: m.bgOffsetX ?? 0,
+    bgOffsetY: m.bgOffsetY ?? 0,
+  } : null;
+  const stripComposeLayer = l => ({
+    imgUrl: isUrl(l.imgUrl) ? l.imgUrl : null,
+    label: l.label, charId: l.charId || null,
+    cx: l.cx, cy: l.cy, scale: l.scale, w: l.w, h: l.h,
+    opacity: l.opacity ?? 1, lighting: l.lighting || 'none',
+    lightingIntensity: l.lightingIntensity ?? 0.6,
+    contrast: l.contrast ?? 100, saturation: l.saturation ?? 100,
+  });
   const stripShot = s => ({
     id: s.id, lyric: s.lyric, description: s.description,
     imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt,
@@ -1156,6 +1177,8 @@ function stripImagesForVersion(data) {
     timestampIssue: s.timestampIssue || null,
     finalImage: isUrl(s.finalImage) ? s.finalImage : null,
     videoUrl: isUrl(s.videoUrl) ? s.videoUrl : '',
+    composeMeta: stripComposeMeta(s.composeMeta),
+    composeLayers: (s.composeLayers || []).map(stripComposeLayer).filter(l => l.imgUrl),
   });
 
   return {
@@ -1279,6 +1302,8 @@ function loadVersion(label) {
       finalImage: vs.finalImage || cur.finalImage || null,
       videoUrl: vs.videoUrl || cur.videoUrl || '',
       refImage: cur.refImage || null,
+      composeMeta: vs.composeMeta || cur.composeMeta || null,
+      composeLayers: vs.composeLayers || cur.composeLayers || null,
     };
   });
   if (d.visualStyles) {
