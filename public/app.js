@@ -259,14 +259,29 @@ async function sbUpsertMeta(proj) {
 async function sbUpsertData(id, stripped, imgs) {
   const proj = projects.find(p => p.id === id);
   try {
-    const { error } = await getSB().from('projects').upsert({
+    // Exclude scriptText from the DB row — it can be hundreds of KB and causes
+    // statement timeouts on Supabase free tier (3-second limit). It stays in IndexedDB.
+    const { scriptText, scriptName, ...strippedForDB } = stripped;
+    const sb = getSB();
+
+    // Store data as JSON files in Supabase Storage (no size/timeout limit)
+    const dataBlob = new Blob([JSON.stringify(strippedForDB)], { type: 'application/json' });
+    const imgsBlob = new Blob([JSON.stringify(stripBase64ForSync(imgs))], { type: 'application/json' });
+    const [dataUpload, imgsUpload] = await Promise.all([
+      sb.storage.from('images').upload(`projects/${id}/data.json`, dataBlob, { upsert: true, contentType: 'application/json' }),
+      sb.storage.from('images').upload(`projects/${id}/images.json`, imgsBlob, { upsert: true, contentType: 'application/json' }),
+    ]);
+    if (dataUpload.error) throw dataUpload.error;
+    if (imgsUpload.error) throw imgsUpload.error;
+
+    // Update only lightweight metadata in the DB row
+    const { error } = await sb.from('projects').upsert({
       id, name: proj?.name || 'Untitled', updated_at: Date.now(),
-      data: stripped, images: imgs
     }, { onConflict: 'id' });
     if (error) throw error;
   } catch(e) {
     console.warn('sb upsert data:', e.message, e);
-    const isPaused = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError') || e.message?.includes('fetch');
+    const isPaused = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError');
     const msg = isPaused
       ? 'Cloud sync failed — Supabase project may be paused. Visit supabase.com/dashboard to restore it.'
       : `Cloud sync failed (${e.message || 'unknown error'}) — data saved locally only.`;
@@ -336,8 +351,22 @@ async function sbRestoreSnapshot(snapshotId, projectId) {
 }
 
 async function sbGetData(id) {
+  const sb = getSB();
   try {
-    const { data, error } = await getSB().from('projects').select('data,images').eq('id', id).single();
+    // Try new Storage-based format first
+    const fetchJson = async (path) => {
+      const { data, error } = await sb.storage.from('images').download(path);
+      if (error) return null;
+      return JSON.parse(await data.text());
+    };
+    const [projectData, imagesData] = await Promise.all([
+      fetchJson(`projects/${id}/data.json`),
+      fetchJson(`projects/${id}/images.json`),
+    ]);
+    if (projectData) return { data: projectData, images: imagesData };
+
+    // Fallback: old format stored directly in DB columns
+    const { data, error } = await sb.from('projects').select('data,images').eq('id', id).single();
     if (error) throw error;
     return data;
   } catch(e) { console.warn('sb get data:', e.message); return null; }
@@ -2116,21 +2145,20 @@ async function generateAnimatic() {
   status.textContent = 'Uploading assets…';
 
   // Upload a Blob directly to Supabase Storage from the browser, return public URL
-  const uploadBlobToSupabase = async (blob, path) => {
+  const uploadBlobToSupabase = async (blob, storagePath) => {
     const sb = getSB();
-    const { error } = await sb.storage.from('images').upload(path, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
-    if (error) throw new Error('Supabase upload failed: ' + error.message);
-    const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(path);
+    const { error } = await sb.storage.from('images').upload(storagePath, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
+    if (error) throw new Error('Supabase storage upload failed: ' + error.message);
+    const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(storagePath);
     return publicUrl;
   };
 
   try {
     const prefix = `projects/${currentProjectId || 'unassigned'}/animatic-tmp/${Date.now()}`;
 
-    // Upload audio directly to Supabase
+    status.textContent = 'Uploading audio…';
     const audioUrl = await uploadBlobToSupabase(audioFile, `${prefix}/audio.mp3`);
 
-    // Resolve any blob: URLs to Supabase URLs; pass https: URLs through unchanged
     status.textContent = 'Uploading shot assets…';
     const shotMeta = [];
     for (let i = 0; i < rawFrames.length; i++) {
@@ -2154,9 +2182,11 @@ async function generateAnimatic() {
       shotMeta.push(meta);
     }
 
-    status.textContent = 'Building animatic…';
+    status.textContent = 'Connecting to server…';
     const pingOk = await fetch('/api/ping').then(r => r.ok).catch(() => false);
     if (!pingOk) throw new Error('Server unreachable — check Railway deployment');
+
+    status.textContent = 'Building animatic…';
 
     // Send only URLs — no binary through Railway's proxy
     const resp = await fetch('/api/generate-animatic', {
