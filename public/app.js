@@ -1329,7 +1329,8 @@ async function loadVersion(label) {
   if (d.charGenRules) charGenRules = d.charGenRules;
   if (d.locationGenRules) locationGenRules = d.locationGenRules;
   if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
-  if (Array.isArray(d.animatics)) animatics = d.animatics;
+  // Animatics are project-level, not version-level — never overwrite from a version snapshot.
+  // (Version snapshots may have empty or stale animatics arrays from before this was tracked.)
   // Restore script for this version (may be null for versions created before this was tracked)
   lastScriptText = d.scriptText || null;
   lastScriptName = d.scriptName || null;
