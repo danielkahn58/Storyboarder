@@ -2113,76 +2113,62 @@ async function generateAnimatic() {
 
   btn.disabled = true;
   btn.textContent = 'Generating…';
-  status.textContent = 'Resolving assets…';
+  status.textContent = 'Uploading assets…';
 
-  // Resolve a URL (blob: or http:) to a Blob
-  const resolveBlob = async (url) => {
-    const resp = await fetch(url);
-    return resp.blob();
+  // Upload a Blob directly to Supabase Storage from the browser, return public URL
+  const uploadBlobToSupabase = async (blob, path) => {
+    const sb = getSB();
+    const { error } = await sb.storage.from('images').upload(path, blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
+    if (error) throw new Error('Supabase upload failed: ' + error.message);
+    const { data: { publicUrl } } = sb.storage.from('images').getPublicUrl(path);
+    return publicUrl;
   };
 
   try {
-    const formData = new FormData();
-    formData.append('audio', audioFile);
+    const prefix = `projects/${currentProjectId || 'unassigned'}/animatic-tmp/${Date.now()}`;
 
-    // Build shot metadata; attach local assets as named form parts to avoid huge JSON
+    // Upload audio directly to Supabase
+    const audioUrl = await uploadBlobToSupabase(audioFile, `${prefix}/audio.mp3`);
+
+    // Resolve any blob: URLs to Supabase URLs; pass https: URLs through unchanged
+    status.textContent = 'Uploading shot assets…';
     const shotMeta = [];
     for (let i = 0; i < rawFrames.length; i++) {
       const f = rawFrames[i];
       const meta = { timestamp: f.timestamp };
       if (f.videoUrl) {
         if (f.videoUrl.startsWith('blob:')) {
-          const blob = await resolveBlob(f.videoUrl);
-          formData.append(`video_${i}`, blob, `shot_${i}.mp4`);
-          meta.videoKey = `video_${i}`;
+          const blob = await fetch(f.videoUrl).then(r => r.blob());
+          meta.videoUrl = await uploadBlobToSupabase(blob, `${prefix}/video_${i}.mp4`);
         } else {
-          meta.videoUrl = f.videoUrl; // permanent https: URL, server can download
+          meta.videoUrl = f.videoUrl;
         }
       } else if (f.imageUrl) {
         if (f.imageUrl.startsWith('blob:')) {
-          const blob = await resolveBlob(f.imageUrl);
-          formData.append(`image_${i}`, blob, `shot_${i}.jpg`);
-          meta.imageKey = `image_${i}`;
+          const blob = await fetch(f.imageUrl).then(r => r.blob());
+          meta.imageUrl = await uploadBlobToSupabase(blob, `${prefix}/image_${i}.jpg`);
         } else {
-          meta.imageUrl = f.imageUrl; // permanent https: URL
+          meta.imageUrl = f.imageUrl;
         }
       }
       shotMeta.push(meta);
     }
-    formData.append('shots', JSON.stringify(shotMeta));
-    if (currentProjectId) formData.append('projectId', currentProjectId);
 
     status.textContent = 'Building animatic…';
-    // Verify server is reachable before sending the large payload
     const pingOk = await fetch('/api/ping').then(r => r.ok).catch(() => false);
     if (!pingOk) throw new Error('Server unreachable — check Railway deployment');
 
-    const resp = await fetch('/api/generate-animatic', { method: 'POST', body: formData });
+    // Send only URLs — no binary through Railway's proxy
+    const resp = await fetch('/api/generate-animatic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shots: shotMeta, audioUrl, projectId: currentProjectId })
+    });
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || resp.statusText); }
 
-    // Server returns JSON {url} if it uploaded to Supabase, or raw video as fallback
-    const ct = resp.headers.get('content-type') || '';
-    let permanentUrl;
-    if (ct.includes('application/json')) {
-      const data = await resp.json();
-      if (!data.url) throw new Error('No URL returned from server');
-      permanentUrl = data.url;
-    } else {
-      // Fallback: server streamed the video — upload it ourselves
-      status.textContent = 'Saving to cloud…';
-      const videoBlob = await resp.blob();
-      const b64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(videoBlob);
-      });
-      const uploadData = await apiFetch('/api/upload-reference', {
-        base64: b64, mediaType: 'video/mp4', projectId: currentProjectId,
-        entityType: 'animatics', entityId: 'animatic'
-      });
-      permanentUrl = uploadData.url;
-    }
+    const data = await resp.json();
+    if (!data.url) throw new Error('No URL returned from server');
+    const permanentUrl = data.url;
 
     const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString() };
     animatics = [entry, ...(animatics || [])];

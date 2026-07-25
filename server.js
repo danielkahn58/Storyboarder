@@ -924,9 +924,7 @@ app.post('/api/generate-shot-video', async (req, res) => {
 });
 
 // ── Animatic generation ──────────────────────────────────────────────────────
-const animaticUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024, fieldSize: 10 * 1024 * 1024, files: 200 } });
-
-app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
+app.post('/api/generate-animatic', async (req, res) => {
   const { execFile } = require('child_process');
   const os = require('os');
   const https = require('https');
@@ -936,12 +934,9 @@ app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
   const tmp = (ext) => { const p = path.join(os.tmpdir(), `sg-anim-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`); tmpFiles.push(p); return p; };
 
   try {
-    const shots = JSON.parse(req.body.shots || '[]');
-    if (!shots.length) return res.status(400).json({ error: 'No shots provided' });
-    const fileMap = {};
-    for (const f of (req.files || [])) fileMap[f.fieldname] = f;
-    const audioFile = fileMap['audio'];
-    if (!audioFile) return res.status(400).json({ error: 'No audio provided' });
+    const { shots, audioUrl, projectId } = req.body;
+    if (!shots || !shots.length) return res.status(400).json({ error: 'No shots provided' });
+    if (!audioUrl) return res.status(400).json({ error: 'No audio URL provided' });
 
     // Parse timestamps to seconds
     const toSecs = (ts) => {
@@ -954,52 +949,41 @@ app.post('/api/generate-animatic', animaticUpload.any(), async (req, res) => {
     const download = (url, dest) => new Promise((resolve, reject) => {
       const proto = url.startsWith('https') ? https : http;
       const file = fs.createWriteStream(dest);
-      proto.get(url, r => { r.pipe(file); file.on('finish', () => { file.close(); resolve(); }); }).on('error', reject);
+      proto.get(url, r => {
+        if (r.statusCode >= 400) { reject(new Error(`HTTP ${r.statusCode} downloading ${url}`)); return; }
+        r.pipe(file);
+        file.on('finish', () => { file.close(); resolve(); });
+      }).on('error', reject);
     });
 
-    // Download a URL to a temp file
     const ffprobe = (filePath) => new Promise((resolve) => {
       execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], (err, stdout) => {
         resolve(err ? null : parseFloat(stdout.trim()) || null);
       });
     });
 
-    // Load all shot assets (images or videos) — assets may arrive as file parts or HTTP URLs
+    // Download audio
+    const audioPath = tmp('.mp3');
+    await download(audioUrl, audioPath);
+
+    // Download all shot assets from their URLs
     const frames = [];
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
-      if (shot.videoKey || shot.videoUrl) {
-        let vidPath;
-        if (shot.videoKey && fileMap[shot.videoKey]) {
-          vidPath = tmp('.mp4');
-          fs.writeFileSync(vidPath, fileMap[shot.videoKey].buffer);
-        } else if (shot.videoUrl) {
-          vidPath = tmp('.mp4');
-          await download(shot.videoUrl, vidPath);
-        }
-        if (!vidPath) continue;
+      if (shot.videoUrl) {
+        const vidPath = tmp('.mp4');
+        await download(shot.videoUrl, vidPath);
         frames.push({ type: 'video', path: vidPath, secs });
-      } else if (shot.imageKey || shot.imageUrl) {
-        let imgPath;
-        if (shot.imageKey && fileMap[shot.imageKey]) {
-          imgPath = tmp('.jpg');
-          fs.writeFileSync(imgPath, fileMap[shot.imageKey].buffer);
-        } else if (shot.imageUrl) {
-          imgPath = tmp('.jpg');
-          await download(shot.imageUrl, imgPath);
-        }
-        if (!imgPath) continue;
+      } else if (shot.imageUrl) {
+        const imgPath = tmp('.jpg');
+        await download(shot.imageUrl, imgPath);
         frames.push({ type: 'image', path: imgPath, secs });
       }
     }
 
     if (!frames.length) return res.status(400).json({ error: 'No valid frames' });
     frames.sort((a, b) => a.secs - b.secs);
-
-    // Write audio to temp file
-    const audioPath = tmp('.mp3');
-    fs.writeFileSync(audioPath, audioFile.buffer);
 
     // Get audio duration via ffprobe
     const audioDuration = await ffprobe(audioPath) || 120;
