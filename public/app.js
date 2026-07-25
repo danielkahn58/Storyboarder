@@ -1178,6 +1178,7 @@ function stripImagesForVersion(data) {
     timestampIssue: s.timestampIssue || null,
     finalImage: isUrl(s.finalImage) ? s.finalImage : null,
     videoUrl: isUrl(s.videoUrl) ? s.videoUrl : '',
+    motionVideoUrl: isUrl(s.motionVideoUrl) ? s.motionVideoUrl : '',
     composeMeta: stripComposeMeta(s.composeMeta),
     composeLayers: (s.composeLayers || []).map(stripComposeLayer).filter(l => l.imgUrl),
   });
@@ -1305,6 +1306,7 @@ async function loadVersion(label) {
     return { ...newShot(), images: cur.images || [], ...vs,
       finalImage: vs.finalImage || cur.finalImage || null,
       videoUrl: vs.videoUrl || cur.videoUrl || '',
+      motionVideoUrl: vs.motionVideoUrl || cur.motionVideoUrl || '',
       refImage: cur.refImage || null,
       composeMeta: vs.composeMeta || cur.composeMeta || null,
       composeLayers: vs.composeLayers || cur.composeLayers || null,
@@ -2266,8 +2268,8 @@ async function generateAnimatic() {
   const status = document.getElementById('animatic-status');
 
   const rawFrames = shots
-    .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
-    .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.videoUrl || null, timestamp: s.timestamp }));
+    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.motionVideoUrl || s.videoUrl || null, timestamp: s.timestamp }));
 
   if (!rawFrames.length) {
     showToast('No shots with a Final Image (or motion video) and a timestamp yet.', true);
@@ -2429,7 +2431,7 @@ function renderAnimaticTimeline(videoEl) {
   if (!duration || !isFinite(duration)) return;
 
   const timedShots = shots
-    .filter(s => (s.finalImage || s.videoUrl) && s.timestamp)
+    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
     .filter(Boolean)
     .sort((a, b) => a.secs - b.secs);
@@ -2863,6 +2865,8 @@ async function handleScriptUpload(input) {
 
 // ── Audio import + Whisper transcript ────────────────────────────────────────
 let _audioTranscript = null; // array of word objects: { word, start, end }
+let _audioBeats = null;      // array of beat timestamps in seconds (music mode only)
+let _isMusicPiece = false;
 
 function _audioKey() { return `audio-${currentProjectId || 'default'}`; }
 function _audioVersionKey(label) { return `audio-${currentProjectId || 'default'}-v-${label}`; }
@@ -2870,7 +2874,6 @@ function _audioVersionKey(label) { return `audio-${currentProjectId || 'default'
 async function _saveAudio(file) {
   try {
     await idbSet(_audioKey() + '-file', file);
-    // Also save under the current version label so version switching can restore it
     if (currentVersionLabel) await idbSet(_audioVersionKey(currentVersionLabel) + '-file', file);
   } catch(e) { console.warn('audio save failed', e); }
 }
@@ -2882,15 +2885,33 @@ async function _saveTranscript(words) {
   } catch(e) { console.warn('transcript save failed', e); }
 }
 
+async function _saveBeats(beats) {
+  try {
+    await idbSet(_audioKey() + '-beats', beats);
+    if (currentVersionLabel) await idbSet(_audioVersionKey(currentVersionLabel) + '-beats', beats);
+  } catch(e) { console.warn('beats save failed', e); }
+}
+
+async function _saveMusicMode(val) {
+  try {
+    await idbSet(_audioKey() + '-musicMode', val);
+    if (currentVersionLabel) await idbSet(_audioVersionKey(currentVersionLabel) + '-musicMode', val);
+  } catch(e) { console.warn('musicMode save failed', e); }
+}
+
 // Called when switching versions — snaps current audio to the outgoing version key, then loads
 // audio for the incoming version (falls back to project-level key for old versions).
 async function _snapshotCurrentAudio() {
   if (!currentVersionLabel) return;
   try {
-    const file = await idbGet(_audioKey() + '-file');
+    const file  = await idbGet(_audioKey() + '-file');
     const words = await idbGet(_audioKey() + '-transcript');
-    if (file) await idbSet(_audioVersionKey(currentVersionLabel) + '-file', file);
+    const beats = await idbGet(_audioKey() + '-beats');
+    const mode  = await idbGet(_audioKey() + '-musicMode');
+    if (file)  await idbSet(_audioVersionKey(currentVersionLabel) + '-file', file);
     if (words) await idbSet(_audioVersionKey(currentVersionLabel) + '-transcript', words);
+    if (beats) await idbSet(_audioVersionKey(currentVersionLabel) + '-beats', beats);
+    if (mode !== undefined) await idbSet(_audioVersionKey(currentVersionLabel) + '-musicMode', mode);
   } catch(e) { console.warn('audio snapshot failed', e); }
 }
 
@@ -2898,16 +2919,24 @@ async function _restoreVersionAudio(label) {
   clearAudioState();
   try {
     const vKey = _audioVersionKey(label);
-    const file = await idbGet(vKey + '-file') || await idbGet(_audioKey() + '-file');
+    const file  = await idbGet(vKey + '-file')       || await idbGet(_audioKey() + '-file');
     const words = await idbGet(vKey + '-transcript') || await idbGet(_audioKey() + '-transcript');
+    const beats = await idbGet(vKey + '-beats')      || await idbGet(_audioKey() + '-beats');
+    const mode  = await idbGet(vKey + '-musicMode');
     const transcriptBox = document.getElementById('audio-transcript');
     const statusEl = document.getElementById('audio-upload-status');
     if (file) { _setAudioSrc(URL.createObjectURL(file)); }
+    _isMusicPiece = !!mode;
+    _audioBeats = beats || null;
+    const cb = document.getElementById('music-piece-cb');
+    if (cb) cb.checked = _isMusicPiece;
     if (words?.length) {
       _audioTranscript = words;
-      const fullText = words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
-      if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
-      if (statusEl) { statusEl.textContent = `${words.length} words transcribed`; statusEl.className = 'upload-status done'; }
+      _renderAudioTranscriptBox(words, beats);
+      if (statusEl) { statusEl.textContent = _audioStatusText(words.length, beats); statusEl.className = 'upload-status done'; }
+    } else if (beats?.length) {
+      _renderAudioTranscriptBox(null, beats);
+      if (statusEl) { statusEl.textContent = _audioStatusText(0, beats); statusEl.className = 'upload-status done'; }
     }
   } catch(e) { console.warn('restoreVersionAudio failed', e); }
 }
@@ -2943,6 +2972,10 @@ function _setAudioSrc(src) {
 
 function clearAudioState() {
   _audioTranscript = null;
+  _audioBeats = null;
+  _isMusicPiece = false;
+  const cb = document.getElementById('music-piece-cb');
+  if (cb) cb.checked = false;
   const pinned = document.getElementById('pinned-audio-player');
   if (pinned) { pinned.pause(); pinned.src = ''; }
   const bar = document.getElementById('pinned-audio-bar');
@@ -2961,21 +2994,149 @@ function clearAudioState() {
 async function restoreAudio() {
   clearAudioState();
   try {
-    const file = await idbGet(_audioKey() + '-file');
+    const file  = await idbGet(_audioKey() + '-file');
     const words = await idbGet(_audioKey() + '-transcript');
+    const beats = await idbGet(_audioKey() + '-beats');
+    const mode  = await idbGet(_audioKey() + '-musicMode');
     const transcriptBox = document.getElementById('audio-transcript');
     const statusEl = document.getElementById('audio-upload-status');
-    if (file) {
-      const src = URL.createObjectURL(file);
-      _setAudioSrc(src);
-    }
+    if (file) { _setAudioSrc(URL.createObjectURL(file)); }
+    _isMusicPiece = !!mode;
+    _audioBeats = beats || null;
+    const cb = document.getElementById('music-piece-cb');
+    if (cb) cb.checked = _isMusicPiece;
     if (words?.length) {
       _audioTranscript = words;
-      const fullText = words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
-      if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
-      if (statusEl) { statusEl.textContent = `${words.length} words transcribed`; statusEl.className = 'upload-status done'; }
+      _renderAudioTranscriptBox(words, beats);
+      if (statusEl) { statusEl.textContent = _audioStatusText(words.length, beats); statusEl.className = 'upload-status done'; }
+    } else if (beats?.length) {
+      _renderAudioTranscriptBox(null, beats);
+      if (statusEl) { statusEl.textContent = _audioStatusText(0, beats); statusEl.className = 'upload-status done'; }
     }
   } catch(e) { console.warn('restoreAudio failed', e); }
+}
+
+function onMusicPieceCbChange() {
+  const cb = document.getElementById('music-piece-cb');
+  _isMusicPiece = cb ? cb.checked : false;
+}
+
+function _audioStatusText(wordCount, beats) {
+  const parts = [];
+  if (beats?.length) parts.push(`${beats.length} beats detected`);
+  if (wordCount) parts.push(`${wordCount} words transcribed`);
+  return parts.join(' · ') || 'Done';
+}
+
+function _renderAudioTranscriptBox(words, beats) {
+  const transcriptBox = document.getElementById('audio-transcript');
+  if (!transcriptBox) return;
+  const lines = [];
+  if (beats?.length) {
+    lines.push('Beats: ' + beats.map(b => formatTimestamp(b)).join('  '));
+  }
+  if (words?.length) {
+    lines.push(words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' '));
+  }
+  if (lines.length) {
+    transcriptBox.value = lines.join('\n');
+    transcriptBox.style.display = '';
+  } else {
+    transcriptBox.value = '';
+    transcriptBox.style.display = 'none';
+  }
+}
+
+// Beat detection: onset strength (positive energy flux on low-passed signal) + adaptive peak picking
+function detectBeatsFromPCM(pcm, sampleRate) {
+  // IIR low-pass ~200 Hz to isolate kick/bass
+  const alpha = (2 * Math.PI * 200) / (2 * Math.PI * 200 + sampleRate);
+  const lp = new Float32Array(pcm.length);
+  lp[0] = Math.abs(pcm[0]);
+  for (let i = 1; i < pcm.length; i++) lp[i] = alpha * Math.abs(pcm[i]) + (1 - alpha) * lp[i - 1];
+
+  // RMS energy per ~23ms hop
+  const HOP = Math.max(1, Math.round(sampleRate * 0.023));
+  const WIN = HOP * 2;
+  const nFrames = Math.floor((lp.length - WIN) / HOP);
+  const energy = new Float32Array(nFrames);
+  for (let i = 0; i < nFrames; i++) {
+    let e = 0;
+    const s = i * HOP;
+    for (let j = 0; j < WIN; j++) e += lp[s + j] ** 2;
+    energy[i] = Math.sqrt(e / WIN);
+  }
+
+  // Onset strength: positive energy flux
+  const flux = new Float32Array(nFrames);
+  for (let i = 1; i < nFrames; i++) flux[i] = Math.max(0, energy[i] - energy[i - 1]);
+
+  // Adaptive peak picking: must exceed local mean + 1.2*std, be a local max, min 250ms apart
+  const localW = Math.round(sampleRate / HOP); // ~1s of frames
+  const minDistFrames = Math.round(0.25 * sampleRate / HOP);
+  const beats = [];
+  for (let i = localW; i < nFrames - localW; i++) {
+    let sum = 0, sum2 = 0;
+    for (let j = i - localW; j <= i + localW; j++) { sum += flux[j]; sum2 += flux[j] ** 2; }
+    const n = 2 * localW + 1;
+    const mean = sum / n;
+    const std = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+    if (flux[i] < mean + std * 1.2) continue;
+    // Local peak in ±4 frames
+    let isPeak = true;
+    for (let j = Math.max(0, i - 4); j <= Math.min(nFrames - 1, i + 4); j++) {
+      if (j !== i && flux[j] >= flux[i]) { isPeak = false; break; }
+    }
+    if (!isPeak) continue;
+    const t = parseFloat((i * HOP / sampleRate).toFixed(3));
+    if (beats.length === 0 || t - beats[beats.length - 1] >= 0.25) beats.push(t);
+  }
+  return beats;
+}
+
+// Assign shot timestamps to detected beats. Lyric shots snap to the beat nearest
+// their transcript match; blank/instrumental shots fill remaining beats evenly.
+function matchBeatsToShots() {
+  if (!_audioBeats?.length || !shots.length) return;
+  syncFromDOM();
+  shots.forEach(s => { delete s.timestampIssue; s.timestamp = ''; });
+
+  const beats = _audioBeats;
+  const n = shots.length;
+
+  // Initial even distribution: shot i → beat at index round(i/(n-1) * (beats.length-1))
+  for (let i = 0; i < n; i++) {
+    const bi = Math.min(Math.round(i / Math.max(n - 1, 1) * (beats.length - 1)), beats.length - 1);
+    shots[i].timestamp = formatTimestamp(beats[bi]);
+  }
+
+  // Lyric refinement: snap to beat nearest the transcript word match
+  if (_audioTranscript?.length) {
+    const beatInterval = beats.length > 1 ? (beats[beats.length - 1] - beats[0]) / (beats.length - 1) : 1;
+    shots.forEach(shot => {
+      if (!shot.lyric?.trim()) return;
+      const approxSecs = parseTimestamp(shot.timestamp);
+      if (approxSecs == null) return;
+      const searchWindow = beatInterval * 4;
+      const lyricWords = shot.lyric.trim().toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+      let bestSecs = null;
+      for (const w of _audioTranscript) {
+        if (Math.abs(w.start - approxSecs) > searchWindow) continue;
+        const tw = w.word.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (lyricWords.some(lw => lw.length > 2 && (tw === lw || tw.startsWith(lw) || lw.startsWith(tw)))) {
+          if (bestSecs === null || Math.abs(w.start - approxSecs) < Math.abs(bestSecs - approxSecs)) bestSecs = w.start;
+        }
+      }
+      if (bestSecs !== null) {
+        // Snap to nearest beat
+        const nearest = beats.reduce((b, c) => Math.abs(c - bestSecs) < Math.abs(b - bestSecs) ? c : b);
+        shot.timestamp = formatTimestamp(nearest);
+      }
+    });
+  }
+
+  autoSave();
+  renderShotsTable();
 }
 
 const WHISPER_LIMIT = 24 * 1024 * 1024; // 24MB
@@ -3030,10 +3191,14 @@ async function handleAudioUpload(input) {
   if (!file) return;
   const statusEl = document.getElementById('audio-upload-status');
   const transcriptBox = document.getElementById('audio-transcript');
+  const cb = document.getElementById('music-piece-cb');
+  _isMusicPiece = cb ? cb.checked : false;
   await _saveAudio(file);
-  // Clear stale transcript immediately so old results aren't visible during transcription
+  await _saveMusicMode(_isMusicPiece);
   _audioTranscript = [];
+  _audioBeats = null;
   await _saveTranscript([]);
+  await _saveBeats(null);
   if (transcriptBox) { transcriptBox.value = ''; transcriptBox.style.display = 'none'; }
   _setAudioSrc(URL.createObjectURL(file));
   try {
@@ -3041,6 +3206,15 @@ async function handleAudioUpload(input) {
     const chunkFrames = CHUNK_SECS * sampleRate;
     if (statusEl) { statusEl.textContent = 'Decoding audio…'; statusEl.className = 'upload-status loading'; }
     const pcm = await decodeToMono16k(file);
+
+    // Beat detection (music piece mode)
+    if (_isMusicPiece) {
+      if (statusEl) { statusEl.textContent = 'Detecting beats…'; statusEl.className = 'upload-status loading'; }
+      _audioBeats = detectBeatsFromPCM(pcm, sampleRate);
+      await _saveBeats(_audioBeats);
+    }
+
+    // Transcription (always — helps refine lyric shot placement even in music mode)
     const totalChunks = Math.ceil(pcm.length / chunkFrames);
     let allWords = [];
     for (let i = 0; i < totalChunks; i++) {
@@ -3052,13 +3226,18 @@ async function handleAudioUpload(input) {
     }
     _audioTranscript = allWords;
     await _saveTranscript(_audioTranscript);
-    const fullText = _audioTranscript.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
-    if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
-    if (statusEl) { statusEl.textContent = `Transcribed ${_audioTranscript.length} words`; statusEl.className = 'upload-status done'; }
-    await matchTranscriptToShots();
+
+    _renderAudioTranscriptBox(_audioTranscript, _audioBeats);
+    if (statusEl) { statusEl.textContent = _audioStatusText(_audioTranscript.length, _audioBeats); statusEl.className = 'upload-status done'; }
+
+    if (_isMusicPiece && _audioBeats?.length) {
+      matchBeatsToShots();
+    } else {
+      await matchTranscriptToShots();
+    }
   } catch(e) {
     if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.className = 'upload-status error'; }
-    showToast('Transcription failed: ' + e.message, true);
+    showToast('Audio processing failed: ' + e.message, true);
   }
   input.value = '';
 }

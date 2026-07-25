@@ -1076,6 +1076,10 @@
       <div class="script-section-top">
         <button class="btn-upload" onclick="document.getElementById('audio-file').click()">Import Audio</button>
         <input type="file" id="audio-file" class="hidden" accept="audio/*,video/mp4,video/webm" onchange="handleAudioUpload(this)">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;white-space:nowrap;user-select:none">
+          <input type="checkbox" id="music-piece-cb" style="accent-color:#4ade80;cursor:pointer" onchange="onMusicPieceCbChange()">
+          Music piece
+        </label>
         <span class="upload-status" id="audio-upload-status">MP3, WAV, M4A, MP4…</span>
       </div>
       <textarea id="audio-transcript" class="audio-transcript-box" placeholder="Transcript with timestamps will appear here after import…" readonly style="display:none"></textarea>
