@@ -969,6 +969,17 @@
 
 <header id="main-header"><!-- rendered by renderHeader() --></header>
 
+<!-- ── Requirements Modal ── -->
+<div id="requirements-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);display:none;align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto;">
+  <div style="background:#111;border:1px solid #2a2a2a;border-radius:10px;width:min(820px,100%);position:relative;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #1e1e1e;">
+      <span style="font-size:15px;font-weight:600;color:#ccc;">App Requirements</span>
+      <button onclick="closeRequirements()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+    <div id="requirements-body" style="padding:24px;font-size:13px;color:#aaa;line-height:1.7;max-height:80vh;overflow-y:auto;"></div>
+  </div>
+</div>
+
 <!-- ── Projects View ── -->
 <div id="view-projects">
   <div style="max-width:900px;margin:0 auto;padding:48px 32px;">

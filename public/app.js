@@ -743,6 +743,7 @@ function renderHeader() {
         <div id="version-ui" class="version-bar"></div>
         <a href="/vrm-builder.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">VRM Builder</a>
         <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
+        <button onclick="openRequirements()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Requirements</button>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
         ${userBadgeHTML()}
@@ -1191,6 +1192,8 @@ function stripImagesForVersion(data) {
     locationGenRules: data.locationGenRules,
     charBoilerplate: data.charBoilerplate,
     animatics: data.animatics || [],
+    scriptText: data.scriptText || null,
+    scriptName: data.scriptName || null,
   };
 }
 
@@ -1244,7 +1247,7 @@ function createVersion(isAuto = false) {
   }
 }
 
-function loadVersion(label) {
+async function loadVersion(label) {
   if (!label) return;
   const v = versions.find(v => v.label === label);
   if (!v) return;
@@ -1258,6 +1261,7 @@ function loadVersion(label) {
       const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
       _persistData(key);
     }
+    await _snapshotCurrentAudio();
   }
   const d = v.data;
   // Restore versioned state. Versions now store all fields including Supabase URLs.
@@ -1324,6 +1328,11 @@ function loadVersion(label) {
   if (d.locationGenRules) locationGenRules = d.locationGenRules;
   if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
   if (Array.isArray(d.animatics)) animatics = d.animatics;
+  // Restore script for this version (may be null for versions created before this was tracked)
+  lastScriptText = d.scriptText || null;
+  lastScriptName = d.scriptName || null;
+  // Restore audio for this version from IDB (keyed by version label)
+  _restoreVersionAudio(label);
   currentVersionLabel = label;
   editsSinceVersion = 0;
   saveVersionMeta();
@@ -1333,6 +1342,7 @@ function loadVersion(label) {
   renderLocations();
   renderShots();
   renderAnimaticHistory();
+  renderScriptPreview();
   renderVersionUI();
   showToast(`Loaded version ${label}`);
 }
@@ -1506,6 +1516,109 @@ function resetLocRules() {
   const el = document.getElementById('loc-gen-rules');
   if (el) el.value = locationGenRules;
   autoSave();
+}
+
+function openRequirements() {
+  const modal = document.getElementById('requirements-modal');
+  const body = document.getElementById('requirements-body');
+  if (!modal || !body) return;
+  body.innerHTML = `
+<h2 style="color:#e2e8f0;font-size:15px;margin:0 0 18px">Storyboard Generator — Product Requirements</h2>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Overview</h3>
+<p>A web-based storyboard generation tool for music videos and films. Users build a project with characters, locations, and shots; generate AI images and motion videos for each shot; and assemble them into an animatic with audio. All data is versioned, cloud-synced, and persists across sessions.</p>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Projects</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Users can create, rename, and delete projects. Each project is independent.</li>
+<li>Projects are stored in Supabase (cloud) and in localStorage/IndexedDB (local). On load, cloud data takes precedence; on save failure, data is kept locally.</li>
+<li>Projects can be duplicated, which copies all data including audio.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Versioning</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Each project maintains a version history. Versions can be created manually ("Save Version") or are created automatically every N edits.</li>
+<li>Switching to an older version restores <strong>all</strong> versioned fields for that snapshot. Switching away from a version first saves the current state back into that version's snapshot.</li>
+<li><strong>Versioned:</strong> all character/location/shot fields (prompts, images, angles, composeMeta, composeLayers, finalImage, videoUrl), visual styles, generation rules, boilerplate, animatics list, script text/name, audio file and transcript.</li>
+<li><strong>Not versioned (shared across all versions):</strong> the image galleries (all historically generated images for each shot/character/location — these accumulate and are never deleted when switching versions).</li>
+<li>Version snapshots strip base64 and blob: data; only permanent Supabase https: URLs are stored in snapshots.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Configuration Tab</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Visual style selector: choose or create styles that affect AI image generation.</li>
+<li>Character generation rules: global prompt instructions applied to all character image generation.</li>
+<li>Location generation rules: same for locations.</li>
+<li>Character prompt boilerplate: appended to every character image prompt.</li>
+<li>Script import: upload a text/PDF script. The script text is parsed to extract characters, locations, and shots. Versioned per version.</li>
+<li>Audio import: upload an MP3/WAV. Audio is transcribed via Whisper and timestamps are assigned to shots. Audio is versioned per version — switching versions restores the audio that was imported for that version.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Characters</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Each character has: name, reference description, attributes, prompt, expression field, LoRA training status, reference images, and angle images (front, 3/4 left, profile left, 3/4 back left, back, 3/4 back right, profile right, 3/4 right).</li>
+<li>Reference images: upload or choose from library. Multiple reference images can be uploaded. "Use Ref As Default" toggles whether the ref image is used in generation.</li>
+<li>Expression: a text input with preset suggestions (via datalist). Pressing ▶ applies the expression to the current character image via AI editing.</li>
+<li>Angle images: generate each angle via AI. Images are stored as Supabase URLs and versioned.</li>
+<li>LoRA training: trains a fine-tuned model on the character's reference images. LoRA URL and status are versioned.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Locations</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Each location has: name, aliases, reference description, prompt, and shot angle images (wide establishing, reverse angle, 3/4 left, 3/4 right, high angle, low angle) plus custom views.</li>
+<li>Reference image column offers Upload or Choose from Library. The library shows all historical images for that location (including shot images for shots assigned to it).</li>
+<li>"Use Ref As Default" applies the reference image when generating shot angles for that location. Versioned.</li>
+<li>Custom views: user-defined named views with their own prompts and generated images.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Shot Sequence</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Each shot has: lyric/line, description, image prompt, video prompt, shot size, shot angle, shot movement, assigned characters, assigned location, character details, timestamp, and final image.</li>
+<li>Timestamps are assigned manually or auto-assigned from the Whisper transcript. Timestamps mark when each shot starts in the animatic.</li>
+<li>Final image: the selected/approved image for this shot. Shown in the animatic.</li>
+<li>Image editor (Compose): opens a canvas where a background (from location images) and character layers can be arranged, scaled, and lit. The compose state (bgUrl, bgColor, bgScale, bgOffsetX, bgOffsetY, globalLighting, globalContrast, globalSaturation, bgSeparation, layers with per-layer position/opacity/lighting) is versioned with the shot.</li>
+<li>Motion video: a Ken Burns–style video can be generated for each shot and stored as a Supabase URL. Used in the animatic in place of the still image.</li>
+<li>Undo in the image editor: undoes changes to all compose fields including background size and position.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">AV Script</h3>
+<ul style="margin:0;padding-left:18px">
+<li>A read-only formatted view showing each shot's lyric, description, and assigned characters/location in a two-column A/V script layout.</li>
+<li>Can be printed.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Animatic</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Generates a video assembling all shots (using motion video where available, otherwise final image) timed to the imported audio.</li>
+<li>Shot boundaries are shown as a draggable timeline below the video player. Dragging a handle adjusts the shot's timestamp and saves it.</li>
+<li>Clicking the timeline scrubs the video to that position.</li>
+<li>Generated animatics are uploaded to Supabase and saved permanently. The animatic tab shows all previously generated animatics for the current version, newest first.</li>
+<li>Each animatic has a Download button and a Remove button.</li>
+<li>Animatics are versioned — switching versions shows the animatics generated for that version.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Cloud Sync</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Project data (characters, locations, shots, styles, rules) is saved to Supabase Storage as JSON files (data.json, images.json) on every auto-save.</li>
+<li>Script text is stored locally only (IndexedDB) — it is too large for efficient cloud storage and is versioned in localStorage version snapshots.</li>
+<li>Audio files are stored in IndexedDB, keyed per-project and per-version.</li>
+<li>Generated images and videos are stored as permanent Supabase Storage URLs and referenced in the project data.</li>
+<li>If cloud sync fails, data is retained locally. The error toast shows the specific failure reason.</li>
+</ul>
+
+<h3 style="color:#818cf8;font-size:13px;margin:18px 0 8px">Known Limitations</h3>
+<ul style="margin:0;padding-left:18px">
+<li>Audio files are stored in the browser's IndexedDB — they do not sync across devices. Re-import audio on a new device.</li>
+<li>Image galleries (all historically generated images per shot/character/location) are not versioned — they accumulate across all versions of a project.</li>
+<li>Blob: URLs (temporary browser object URLs) are not persisted — generated videos/images are always uploaded to Supabase before being stored in shot data.</li>
+</ul>
+`;
+  modal.style.display = 'flex';
+}
+
+function closeRequirements() {
+  const modal = document.getElementById('requirements-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 function toggleDebugMode() {
@@ -2752,13 +2865,51 @@ async function handleScriptUpload(input) {
 let _audioTranscript = null; // array of word objects: { word, start, end }
 
 function _audioKey() { return `audio-${currentProjectId || 'default'}`; }
+function _audioVersionKey(label) { return `audio-${currentProjectId || 'default'}-v-${label}`; }
 
 async function _saveAudio(file) {
-  try { await idbSet(_audioKey() + '-file', file); } catch(e) { console.warn('audio save failed', e); }
+  try {
+    await idbSet(_audioKey() + '-file', file);
+    // Also save under the current version label so version switching can restore it
+    if (currentVersionLabel) await idbSet(_audioVersionKey(currentVersionLabel) + '-file', file);
+  } catch(e) { console.warn('audio save failed', e); }
 }
 
 async function _saveTranscript(words) {
-  try { await idbSet(_audioKey() + '-transcript', words); } catch(e) { console.warn('transcript save failed', e); }
+  try {
+    await idbSet(_audioKey() + '-transcript', words);
+    if (currentVersionLabel) await idbSet(_audioVersionKey(currentVersionLabel) + '-transcript', words);
+  } catch(e) { console.warn('transcript save failed', e); }
+}
+
+// Called when switching versions — snaps current audio to the outgoing version key, then loads
+// audio for the incoming version (falls back to project-level key for old versions).
+async function _snapshotCurrentAudio() {
+  if (!currentVersionLabel) return;
+  try {
+    const file = await idbGet(_audioKey() + '-file');
+    const words = await idbGet(_audioKey() + '-transcript');
+    if (file) await idbSet(_audioVersionKey(currentVersionLabel) + '-file', file);
+    if (words) await idbSet(_audioVersionKey(currentVersionLabel) + '-transcript', words);
+  } catch(e) { console.warn('audio snapshot failed', e); }
+}
+
+async function _restoreVersionAudio(label) {
+  clearAudioState();
+  try {
+    const vKey = _audioVersionKey(label);
+    const file = await idbGet(vKey + '-file') || await idbGet(_audioKey() + '-file');
+    const words = await idbGet(vKey + '-transcript') || await idbGet(_audioKey() + '-transcript');
+    const transcriptBox = document.getElementById('audio-transcript');
+    const statusEl = document.getElementById('audio-upload-status');
+    if (file) { _setAudioSrc(URL.createObjectURL(file)); }
+    if (words?.length) {
+      _audioTranscript = words;
+      const fullText = words.map(w => `[${formatTimestamp(w.start)}] ${w.word}`).join(' ');
+      if (transcriptBox) { transcriptBox.value = fullText; transcriptBox.style.display = ''; }
+      if (statusEl) { statusEl.textContent = `${words.length} words transcribed`; statusEl.className = 'upload-status done'; }
+    }
+  } catch(e) { console.warn('restoreVersionAudio failed', e); }
 }
 
 function getPinnedPlayer() {
