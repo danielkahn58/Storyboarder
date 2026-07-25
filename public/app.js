@@ -3081,34 +3081,54 @@ function detectBeatsFromPCM(pcm, sampleRate) {
 }
 
 // Given all detected beat positions, return only the downbeats (beat 1 of each 4/4 bar).
-// Strategy: try all 4 possible phase offsets, pick the one whose beats sum to the most
-// low-frequency energy — downbeats (kick on 1) consistently have more bass energy.
+//
+// Scoring: compute low-frequency onset strength (flux) at each beat, then for each of the
+// 4 possible phases, score = avg_flux(phase) − avg_flux(phase+2).
+// In 4/4 music the kick lands on beats 1 (and sometimes 3), snare on 2 and 4.
+// Beat 1 has more bass flux than beat 3, so (flux_at_1 − flux_at_3) > 0 at the true phase.
+// This reliably separates beat 1 from beat 3 even when both have kicks.
 function findDownbeats(beats, pcm, sampleRate) {
   if (beats.length < 4) return beats;
 
-  // Low-pass filtered energy at each beat position (same filter as beat detection)
+  // Recompute onset flux on the low-passed signal (same as detectBeatsFromPCM)
+  const HOP = Math.max(1, Math.round(sampleRate * 0.023));
+  const WIN = HOP * 2;
+  const nFrames = Math.floor((pcm.length - WIN) / HOP);
   const alpha = (2 * Math.PI * 200) / (2 * Math.PI * 200 + sampleRate);
-  const halfWin = Math.round(sampleRate * 0.03); // 30ms window around each beat
-  const energies = beats.map(t => {
-    const c = Math.round(t * sampleRate);
-    let e = 0, n = 0, prev = 0;
-    // Apply IIR inline over the window — cheap and avoids allocating the full LP array
-    for (let j = Math.max(0, c - halfWin); j < Math.min(pcm.length, c + halfWin); j++) {
-      prev = alpha * Math.abs(pcm[j]) + (1 - alpha) * prev;
-      e += prev * prev; n++;
+  const lp = new Float32Array(pcm.length);
+  lp[0] = Math.abs(pcm[0]);
+  for (let i = 1; i < pcm.length; i++) lp[i] = alpha * Math.abs(pcm[i]) + (1 - alpha) * lp[i - 1];
+  const energy = new Float32Array(nFrames);
+  for (let i = 0; i < nFrames; i++) {
+    let e = 0; const s = i * HOP;
+    for (let j = 0; j < WIN; j++) e += lp[s + j] ** 2;
+    energy[i] = Math.sqrt(e / WIN);
+  }
+  const flux = new Float32Array(nFrames);
+  for (let i = 1; i < nFrames; i++) flux[i] = Math.max(0, energy[i] - energy[i - 1]);
+
+  // Peak flux in ±3-frame window around each detected beat
+  const beatFlux = beats.map(t => {
+    const frame = Math.round(t * sampleRate / HOP);
+    let max = 0;
+    for (let j = Math.max(0, frame - 3); j <= Math.min(nFrames - 1, frame + 3); j++) {
+      if (flux[j] > max) max = flux[j];
     }
-    return n > 0 ? Math.sqrt(e / n) : 0;
+    return max;
   });
 
-  // For each phase 0-3, sum energy of beats at that phase position
+  // Score each phase: avg(flux at this phase) − avg(flux at the half-bar-away phase)
+  // Positive = this phase has more bass accent than the beat 2 positions away → true downbeat
   const phaseScore = [0, 1, 2, 3].map(phase => {
-    let s = 0;
-    for (let i = phase; i < beats.length; i += 4) s += energies[i];
-    return s;
+    let sumA = 0, nA = 0, sumB = 0, nB = 0;
+    for (let i = 0; i < beats.length; i++) {
+      if (i % 4 === phase)              { sumA += beatFlux[i]; nA++; }
+      if (i % 4 === (phase + 2) % 4)   { sumB += beatFlux[i]; nB++; }
+    }
+    return (nA > 0 ? sumA / nA : 0) - (nB > 0 ? sumB / nB : 0);
   });
-  const bestPhase = phaseScore.indexOf(Math.max(...phaseScore));
 
-  // Return every 4th beat starting at bestPhase
+  const bestPhase = phaseScore.indexOf(Math.max(...phaseScore));
   return beats.filter((_, i) => i % 4 === bestPhase);
 }
 
