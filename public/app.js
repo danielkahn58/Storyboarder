@@ -3082,15 +3082,28 @@ function detectBeatsFromPCM(pcm, sampleRate) {
 
 // Given all detected beat positions, return only the downbeats (beat 1 of each 4/4 bar).
 //
-// Scoring: compute low-frequency onset strength (flux) at each beat, then for each of the
-// 4 possible phases, score = avg_flux(phase) − avg_flux(phase+2).
-// In 4/4 music the kick lands on beats 1 (and sometimes 3), snare on 2 and 4.
-// Beat 1 has more bass flux than beat 3, so (flux_at_1 − flux_at_3) > 0 at the true phase.
-// This reliably separates beat 1 from beat 3 even when both have kicks.
+// Uses a time-based bar grid rather than index-based grouping, so a missed or
+// doubled beat anywhere in the song doesn't cascade into wrong phase for the rest.
+//
+// Algorithm:
+//  1. Estimate beat period T from the median inter-beat interval.
+//  2. Bar period B = 4T.
+//  3. Try all 4 phase offsets (0, T, 2T, 3T from the first beat).
+//     For each, project a regular bar grid and sum the bass onset flux at each
+//     grid point (with a ±50ms window to tolerate beat jitter).
+//  4. The phase whose grid points land consistently on high-flux moments = downbeat.
+//  5. Return one detected beat per bar, snapped to the nearest beat within ±T/2.
 function findDownbeats(beats, pcm, sampleRate) {
   if (beats.length < 4) return beats;
 
-  // Recompute onset flux on the low-passed signal (same as detectBeatsFromPCM)
+  // Median inter-beat interval → quarter-note period T
+  const ibi = [];
+  for (let i = 1; i < beats.length; i++) ibi.push(beats[i] - beats[i - 1]);
+  ibi.sort((a, b) => a - b);
+  const T = ibi[Math.floor(ibi.length / 2)];
+  const B = 4 * T; // bar period
+
+  // Build low-pass onset flux (same filter as detectBeatsFromPCM)
   const HOP = Math.max(1, Math.round(sampleRate * 0.023));
   const WIN = HOP * 2;
   const nFrames = Math.floor((pcm.length - WIN) / HOP);
@@ -3107,29 +3120,43 @@ function findDownbeats(beats, pcm, sampleRate) {
   const flux = new Float32Array(nFrames);
   for (let i = 1; i < nFrames; i++) flux[i] = Math.max(0, energy[i] - energy[i - 1]);
 
-  // Peak flux in ±3-frame window around each detected beat
-  const beatFlux = beats.map(t => {
-    const frame = Math.round(t * sampleRate / HOP);
+  // Max flux within ±window_s seconds of time t (tolerates beat timing jitter)
+  const searchHalfFrames = Math.round(Math.min(0.05, T * 0.35) * sampleRate / HOP);
+  const fluxAt = t => {
+    const c = Math.round(t * sampleRate / HOP);
     let max = 0;
-    for (let j = Math.max(0, frame - 3); j <= Math.min(nFrames - 1, frame + 3); j++) {
+    for (let j = Math.max(0, c - searchHalfFrames); j <= Math.min(nFrames - 1, c + searchHalfFrames); j++) {
       if (flux[j] > max) max = flux[j];
     }
     return max;
-  });
+  };
 
-  // Score each phase: avg(flux at this phase) − avg(flux at the half-bar-away phase)
-  // Positive = this phase has more bass accent than the beat 2 positions away → true downbeat
+  // Score all 4 phase offsets using the regular bar grid
+  const end = beats[beats.length - 1] + B;
   const phaseScore = [0, 1, 2, 3].map(phase => {
-    let sumA = 0, nA = 0, sumB = 0, nB = 0;
-    for (let i = 0; i < beats.length; i++) {
-      if (i % 4 === phase)              { sumA += beatFlux[i]; nA++; }
-      if (i % 4 === (phase + 2) % 4)   { sumB += beatFlux[i]; nB++; }
-    }
-    return (nA > 0 ? sumA / nA : 0) - (nB > 0 ? sumB / nB : 0);
+    const start = beats[0] + phase * T;
+    let sum = 0, count = 0;
+    for (let t = start; t <= end; t += B) { sum += fluxAt(t); count++; }
+    return count > 0 ? sum / count : 0;
   });
 
   const bestPhase = phaseScore.indexOf(Math.max(...phaseScore));
-  return beats.filter((_, i) => i % 4 === bestPhase);
+  const gridStart = beats[0] + bestPhase * T;
+
+  // Snap each bar-grid position to the nearest detected beat within ±T*0.55
+  const snapRadius = T * 0.55;
+  const downbeats = [];
+  const used = new Set();
+  for (let t = gridStart; t <= end; t += B) {
+    let nearest = null, nearestDist = snapRadius;
+    for (const b of beats) {
+      const d = Math.abs(b - t);
+      if (d < nearestDist && !used.has(b)) { nearest = b; nearestDist = d; }
+    }
+    if (nearest !== null) { downbeats.push(nearest); used.add(nearest); }
+  }
+  downbeats.sort((a, b) => a - b);
+  return downbeats.length > 0 ? downbeats : beats.filter((_, i) => i % 4 === 0);
 }
 
 // Assign shot timestamps to detected beats. Lyric shots snap to the beat nearest
