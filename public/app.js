@@ -2833,6 +2833,10 @@ async function handleScriptUpload(input) {
 let _audioTranscript = null; // array of word objects: { word, start, end }
 let _audioBeats = null;      // array of beat timestamps in seconds (music mode only)
 let _isMusicPiece = false;
+let _audioBarOffset = 0;     // time of first bar marker (seconds)
+let _audioBarInterval = 0;   // time between bar markers (seconds)
+let _dragMarkerIdx = null;   // index of marker being dragged
+let _dragTimelineRect = null;
 
 function _audioKey() { return `audio-${currentProjectId || 'default'}`; }
 function _audioVersionKey(label) { return `audio-${currentProjectId || 'default'}-v-${label}`; }
@@ -2904,6 +2908,7 @@ async function _restoreVersionAudio(label) {
       _renderAudioTranscriptBox(null, beats);
       if (statusEl) { statusEl.textContent = _audioStatusText(0, beats); statusEl.className = 'upload-status done'; }
     }
+    if (beats?.length) _updateBarFromBeats(beats);
   } catch(e) { console.warn('restoreVersionAudio failed', e); }
 }
 
@@ -2934,7 +2939,162 @@ function _setAudioSrc(src) {
   const pinned = document.getElementById('pinned-audio-player');
   if (pinned) pinned.src = src;
   showPinnedPlayer();
+  const section = document.getElementById('audio-section-player');
+  if (section) section.src = src;
+  const wrap = document.getElementById('audio-player-wrap');
+  if (wrap) wrap.style.display = '';
 }
+
+// ── Section audio player ──────────────────────────────────────────────────────
+
+function _fmtTime(s) {
+  if (!isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+}
+
+function _updateSectionPlayerTime(player) {
+  const el = document.getElementById('audio-section-time');
+  if (el) el.textContent = _fmtTime(player.currentTime) + ' / ' + _fmtTime(player.duration);
+  const dur = player.duration || 1;
+  const pct = (player.currentTime / dur) * 100;
+  const prog = document.getElementById('audio-bar-progress');
+  if (prog) prog.style.width = pct + '%';
+  const head = document.getElementById('audio-bar-playhead');
+  if (head) head.style.left = pct + '%';
+}
+
+function _onSectionPlayerEnded() {
+  const btn = document.getElementById('audio-section-play-btn');
+  if (btn) btn.textContent = '▶';
+}
+
+function _onSectionPlayerLoaded() {
+  const player = document.getElementById('audio-section-player');
+  if (player) _updateSectionPlayerTime(player);
+  _renderBarMarkers();
+}
+
+function toggleSectionAudioPlayback() {
+  const player = document.getElementById('audio-section-player');
+  const btn = document.getElementById('audio-section-play-btn');
+  if (!player) return;
+  if (player.paused) { player.play(); if (btn) btn.textContent = '⏸'; }
+  else { player.pause(); if (btn) btn.textContent = '▶'; }
+}
+
+function onTimelineMouseDown(e) {
+  if (e.target.closest('.bar-marker')) return;
+  const timeline = document.getElementById('audio-bar-timeline');
+  const player = document.getElementById('audio-section-player');
+  if (!timeline || !player || !player.duration) return;
+  const rect = timeline.getBoundingClientRect();
+  const t = ((e.clientX - rect.left) / rect.width) * player.duration;
+  player.currentTime = Math.max(0, Math.min(t, player.duration));
+}
+
+function _computeBarTimes() {
+  if (!_audioBarInterval || _audioBarInterval < 0.05) return [];
+  const player = document.getElementById('audio-section-player');
+  const duration = player?.duration;
+  if (!duration || isNaN(duration) || duration <= 0) return [];
+  const times = [];
+  for (let t = _audioBarOffset; t < duration + _audioBarInterval * 0.4; t += _audioBarInterval) {
+    times.push(parseFloat(t.toFixed(3)));
+  }
+  return times;
+}
+
+function _renderBarMarkers() {
+  const timeline = document.getElementById('audio-bar-timeline');
+  if (!timeline) return;
+  timeline.querySelectorAll('.bar-marker').forEach(m => m.remove());
+  const player = document.getElementById('audio-section-player');
+  const duration = player?.duration;
+  if (!duration || isNaN(duration) || !_audioBarInterval) return;
+  const barTimes = _computeBarTimes();
+  barTimes.forEach((t, i) => {
+    if (t < 0 || t > duration * 1.02) return;
+    const pct = Math.min(100, (t / duration) * 100);
+    const m = document.createElement('div');
+    m.className = 'bar-marker';
+    m.dataset.idx = i;
+    m.style.cssText = `position:absolute;top:0;left:${pct}%;width:2px;height:100%;background:#f59e0b;transform:translateX(-1px);cursor:ew-resize;z-index:2;`;
+    // Wide hit target
+    const hit = document.createElement('div');
+    hit.style.cssText = 'position:absolute;top:0;left:-5px;width:12px;height:100%;cursor:ew-resize;';
+    m.appendChild(hit);
+    // Bar number label above
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:8px;color:#f59e0b;white-space:nowrap;pointer-events:none;';
+    lbl.textContent = i + 1;
+    m.appendChild(lbl);
+    m.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      _dragMarkerIdx = i;
+      _dragTimelineRect = timeline.getBoundingClientRect();
+    });
+    timeline.appendChild(m);
+  });
+}
+
+function _updateBarFromBeats(beats) {
+  if (!beats?.length) return;
+  _audioBarOffset = beats[0];
+  if (beats.length >= 2) {
+    const diffs = [];
+    for (let i = 1; i < beats.length; i++) diffs.push(beats[i] - beats[i - 1]);
+    diffs.sort((a, b) => a - b);
+    _audioBarInterval = diffs[Math.floor(diffs.length / 2)];
+  }
+  const inp = document.getElementById('audio-bar-interval');
+  if (inp) inp.value = _audioBarInterval.toFixed(2);
+  const lbl = document.getElementById('audio-bar-interval-label');
+  if (lbl) lbl.style.display = 'flex';
+  _renderBarMarkers();
+}
+
+function onBarIntervalInput(val) {
+  const v = parseFloat(val);
+  if (!isFinite(v) || v < 0.05) return;
+  _audioBarInterval = v;
+  _renderBarMarkers();
+  _audioBeats = _computeBarTimes();
+  _saveBeats(_audioBeats);
+  _renderAudioTranscriptBox(_audioTranscript, _audioBeats);
+  if (_isMusicPiece && _audioBeats?.length) matchBeatsToShots();
+}
+
+// Drag handlers (document-level so drag works outside timeline bounds)
+document.addEventListener('mousemove', e => {
+  if (_dragMarkerIdx === null || !_dragTimelineRect) return;
+  const player = document.getElementById('audio-section-player');
+  const duration = player?.duration;
+  if (!duration || isNaN(duration)) return;
+  const x = Math.max(0, Math.min(e.clientX - _dragTimelineRect.left, _dragTimelineRect.width));
+  const t = (x / _dragTimelineRect.width) * duration;
+  if (_dragMarkerIdx === 0) {
+    _audioBarOffset = Math.max(0, t);
+  } else {
+    const newInterval = (t - _audioBarOffset) / _dragMarkerIdx;
+    if (newInterval > 0.05) _audioBarInterval = newInterval;
+  }
+  const inp = document.getElementById('audio-bar-interval');
+  if (inp) inp.value = _audioBarInterval.toFixed(2);
+  _renderBarMarkers();
+});
+
+document.addEventListener('mouseup', () => {
+  if (_dragMarkerIdx !== null) {
+    _dragMarkerIdx = null;
+    _dragTimelineRect = null;
+    _audioBeats = _computeBarTimes();
+    _saveBeats(_audioBeats);
+    _renderAudioTranscriptBox(_audioTranscript, _audioBeats);
+    if (_isMusicPiece && _audioBeats?.length) matchBeatsToShots();
+  }
+});
 
 function clearAudioState() {
   _audioTranscript = null;
@@ -2957,6 +3117,27 @@ function clearAudioState() {
   if (bw) { bw.style.display = 'none'; const b = document.getElementById('audio-transcript-beats'); if (b) b.value = ''; }
   const statusEl = document.getElementById('audio-upload-status');
   if (statusEl) { statusEl.textContent = 'MP3, WAV, M4A, MP4…'; statusEl.className = 'upload-status'; }
+  // Reset section player
+  const sectionPlayer = document.getElementById('audio-section-player');
+  if (sectionPlayer) { sectionPlayer.pause(); sectionPlayer.src = ''; }
+  const playerWrap = document.getElementById('audio-player-wrap');
+  if (playerWrap) playerWrap.style.display = 'none';
+  const timeEl = document.getElementById('audio-section-time');
+  if (timeEl) timeEl.textContent = '0:00 / 0:00';
+  const playBtn = document.getElementById('audio-section-play-btn');
+  if (playBtn) playBtn.textContent = '▶';
+  const intervalLbl = document.getElementById('audio-bar-interval-label');
+  if (intervalLbl) intervalLbl.style.display = 'none';
+  const intervalInp = document.getElementById('audio-bar-interval');
+  if (intervalInp) intervalInp.value = '';
+  const timeline = document.getElementById('audio-bar-timeline');
+  if (timeline) timeline.querySelectorAll('.bar-marker').forEach(m => m.remove());
+  const prog = document.getElementById('audio-bar-progress');
+  if (prog) prog.style.width = '0';
+  const head = document.getElementById('audio-bar-playhead');
+  if (head) head.style.left = '0';
+  _audioBarOffset = 0;
+  _audioBarInterval = 0;
 }
 
 async function restoreAudio() {
@@ -2981,6 +3162,7 @@ async function restoreAudio() {
       _renderAudioTranscriptBox(null, beats);
       if (statusEl) { statusEl.textContent = _audioStatusText(0, beats); statusEl.className = 'upload-status done'; }
     }
+    if (beats?.length) _updateBarFromBeats(beats);
   } catch(e) { console.warn('restoreAudio failed', e); }
 }
 
@@ -3278,6 +3460,7 @@ async function handleAudioUpload(input) {
       const allBeats = detectBeatsFromPCM(pcm, sampleRate);
       _audioBeats = findDownbeats(allBeats, pcm, sampleRate);
       await _saveBeats(_audioBeats);
+      _updateBarFromBeats(_audioBeats);
     }
 
     // Transcription (always — helps refine lyric shot placement even in music mode)

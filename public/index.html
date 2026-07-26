@@ -1090,6 +1090,31 @@
         <div style="font-size:10px;color:#555;margin-top:8px;margin-bottom:3px;letter-spacing:.04em">DOWNBEATS WITH LYRICS</div>
         <textarea id="audio-transcript-beats" class="audio-transcript-box" placeholder="Beat timestamps with lyrics will appear here…" readonly></textarea>
       </div>
+      <div id="audio-player-wrap" style="display:none;margin-top:12px">
+        <audio id="audio-section-player" preload="metadata" style="display:none"
+          ontimeupdate="_updateSectionPlayerTime(this)"
+          onended="_onSectionPlayerEnded()"
+          onloadedmetadata="_onSectionPlayerLoaded()"></audio>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <button id="audio-section-play-btn" onclick="toggleSectionAudioPlayback()"
+                  style="background:#131313;border:1px solid #252525;color:#aaa;border-radius:3px;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1.4;flex-shrink:0">▶</button>
+          <span id="audio-section-time" style="font-size:10px;color:#555;font-family:monospace;min-width:95px">0:00 / 0:00</span>
+          <span style="flex:1"></span>
+          <label id="audio-bar-interval-label" style="display:none;font-size:10px;color:#666;align-items:center;gap:5px">
+            Bar interval
+            <input type="number" id="audio-bar-interval" step="0.01" min="0.1"
+                   oninput="onBarIntervalInput(this.value)"
+                   style="width:54px;background:#0a0a0a;border:1px solid #222;color:#bbb;border-radius:3px;padding:2px 5px;font-size:10px">
+            s
+          </label>
+        </div>
+        <div id="audio-bar-timeline"
+             style="position:relative;height:26px;background:#0d0d0d;border-radius:3px;border:1px solid #1c1c1c;cursor:pointer;overflow:visible;user-select:none;margin-top:2px"
+             onmousedown="onTimelineMouseDown(event)">
+          <div id="audio-bar-progress" style="position:absolute;left:0;top:0;height:100%;background:#0a1a0a;border-radius:3px;pointer-events:none;width:0"></div>
+          <div id="audio-bar-playhead" style="position:absolute;top:0;left:0;width:2px;height:100%;background:#4ade80;opacity:.75;pointer-events:none;z-index:3;transform:translateX(-1px)"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
