@@ -2257,9 +2257,10 @@ async function generateAnimatic() {
   const btn = document.getElementById('btn-gen-animatic');
   const status = document.getElementById('animatic-status');
 
-  const rawFrames = shots
-    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+  const filteredShots = shots.filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp);
+  const rawFrames = filteredShots
     .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.motionVideoUrl || s.videoUrl || null, timestamp: s.timestamp }));
+  const shotSnapshot = filteredShots.map(s => ({ id: s.id, timestamp: s.timestamp, lyric: s.lyric || '' }));
 
   if (!rawFrames.length) {
     showToast('No shots with a Final Image (or motion video) and a timestamp yet.', true);
@@ -2359,7 +2360,7 @@ async function generateAnimatic() {
     if (!data.url) throw new Error('No URL returned from server');
     const permanentUrl = data.url;
 
-    const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString() };
+    const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString(), shots: shotSnapshot };
     animatics = [entry, ...(animatics || [])];
     autoSave();
 
@@ -2391,7 +2392,7 @@ function renderAnimaticHistory() {
         <a href="${esc(a.url)}" download="animatic-${a.createdAt}.mp4" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #222;border-radius:3px;padding:2px 7px">↓ Download</a>
         <button onclick="deleteAnimatic(${i})" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:2px 7px;cursor:pointer">✕ Remove</button>
       </div>
-      <video src="${esc(a.url)}" controls style="width:100%;max-width:900px;border-radius:8px;background:#000;display:block" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this)"></video>
+      <video src="${esc(a.url)}" controls style="width:100%;max-width:900px;border-radius:8px;background:#000;display:block" data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
         <div style="font-size:10px;color:#444;margin-bottom:4px">Shot boundaries — drag handles to adjust timestamps</div>
         <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer"></div>
@@ -2400,8 +2401,8 @@ function renderAnimaticHistory() {
   `).join('');
 }
 
-function _initPrimaryAnimaticTimeline(videoEl) {
-  renderAnimaticTimeline(videoEl);
+function _initPrimaryAnimaticTimeline(videoEl, animaticIdx) {
+  renderAnimaticTimeline(videoEl, animaticIdx != null ? animatics[animaticIdx] : null);
   videoEl.addEventListener('timeupdate', updateAnimaticPlayhead, { passive: true });
 }
 
@@ -2413,18 +2414,27 @@ function deleteAnimatic(index) {
 
 let _animaticTimeline = null;
 
-function renderAnimaticTimeline(videoEl) {
+function renderAnimaticTimeline(videoEl, animatic) {
   const video = videoEl || document.querySelector('#animatic-history video');
   const wrap = document.getElementById('animatic-timeline-wrap');
   if (!video || !wrap) return;
   const duration = video.duration;
   if (!duration || !isFinite(duration)) return;
 
-  const timedShots = shots
-    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
-    .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
-    .filter(Boolean)
-    .sort((a, b) => a.secs - b.secs);
+  // Prefer the snapshot saved at generation time; fall back to current shots
+  let timedShots;
+  if (animatic?.shots?.length) {
+    timedShots = animatic.shots
+      .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
+      .filter(Boolean)
+      .sort((a, b) => a.secs - b.secs);
+  } else {
+    timedShots = shots
+      .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+      .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
+      .filter(Boolean)
+      .sort((a, b) => a.secs - b.secs);
+  }
 
   if (!timedShots.length) return;
   _animaticTimeline = { duration, shots: timedShots };
@@ -2491,13 +2501,21 @@ function startTlDrag(e, shotId) {
   const onUp = () => {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
+    const newTs = formatTimestamp(ts[shotIdx].secs);
+    // Update the animatic snapshot so the handle stays in the right place
+    ts[shotIdx].timestamp = newTs;
+    if (animatics[0]?.shots) {
+      const snapShot = animatics[0].shots.find(s => s.id === shotId);
+      if (snapShot) snapShot.timestamp = newTs;
+    }
+    // Update the live shot and its DOM input
     const shot = shots.find(s => s.id === shotId);
     if (shot) {
-      shot.timestamp = formatTimestamp(ts[shotIdx].secs);
+      shot.timestamp = newTs;
       const inp = document.querySelector(`#shots-body tr[data-id="${shotId}"] .field-timestamp`);
-      if (inp) inp.value = shot.timestamp;
-      debouncedSave();
+      if (inp) inp.value = newTs;
     }
+    debouncedSave();
   };
 
   document.addEventListener('pointermove', onMove);
