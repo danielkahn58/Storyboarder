@@ -815,15 +815,23 @@ async function loadData() {
     try { localImgs = await idbGet(key); } catch {}
     const localCharCount = (() => { try { return JSON.parse(localSaved)?.characters?.length || 0; } catch { return 0; } })();
 
-    // Try Supabase — only trust it if it has actual content, or local is also empty
+    // Try Supabase — prefer whichever source is newer (by savedAt), but never replace local data with less data
     if (currentProjectId) {
       const sbRow = await sbGetData(currentProjectId);
       const sbCharCount = sbRow?.data?.characters?.length || 0;
       if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
-        saved = JSON.stringify(sbRow.data);
-        imgs = sbRow.images || {};
-        try { localStorage.setItem(key, saved); } catch {}
-        try { await idbSet(key, imgs); } catch {}
+        const sbSavedAt = sbRow.data.savedAt || 0;
+        const localSavedAt = (() => { try { return JSON.parse(localSaved)?.savedAt || 0; } catch { return 0; } })();
+        // Use local if it's strictly newer than Supabase (pending cloud sync not yet uploaded)
+        if (localSavedAt > sbSavedAt && localCharCount > 0) {
+          saved = localSaved;
+          imgs = localImgs;
+        } else {
+          saved = JSON.stringify(sbRow.data);
+          imgs = sbRow.images || {};
+          try { localStorage.setItem(key, saved); } catch {}
+          try { await idbSet(key, imgs); } catch {}
+        }
       }
     }
 
