@@ -964,8 +964,24 @@ async function migrateRefImages() {
     }));
   };
 
-  for (const c of characters) { await migrateRef(c, 'chars'); await migrateImageArr(c, 'chars'); await migrateRefImages(c, 'chars'); }
-  for (const l of locations) { await migrateRef(l, 'locs'); await migrateImageArr(l, 'locs'); }
+  for (const c of characters) {
+    await migrateRef(c, 'chars'); await migrateImageArr(c, 'chars'); await migrateRefImages(c, 'chars');
+    for (const [k, v] of Object.entries(c.angles || {})) {
+      const src = v.refImage?.dataUrl && needsMigration(v.refImage.dataUrl) ? v.refImage.dataUrl : null;
+      if (src) { const u = await uploadUrl(src, 'chars', c.id); if (u !== src) { v.refImage = { ...v.refImage, url: u, dataUrl: u, base64: null }; changed = true; } }
+    }
+  }
+  for (const l of locations) {
+    await migrateRef(l, 'locs'); await migrateImageArr(l, 'locs');
+    for (const [k, v] of Object.entries(l.shotAngles || {})) {
+      const src = v.refImage?.dataUrl && needsMigration(v.refImage.dataUrl) ? v.refImage.dataUrl : null;
+      if (src) { const u = await uploadUrl(src, 'locs', l.id); if (u !== src) { v.refImage = { ...v.refImage, url: u, dataUrl: u, base64: null }; changed = true; } }
+    }
+    for (const cv of (l.customViews || [])) {
+      const src = cv.refImage?.dataUrl && needsMigration(cv.refImage.dataUrl) ? cv.refImage.dataUrl : null;
+      if (src) { const u = await uploadUrl(src, 'locs', l.id); if (u !== src) { cv.refImage = { ...cv.refImage, url: u, dataUrl: u, base64: null }; changed = true; } }
+    }
+  }
   for (const s of shots) {
     s.images = await Promise.all((s.images || []).map(u => needsMigration(u) ? uploadUrl(u, 'shots', s.id) : u));
     if (needsMigration(s.finalImage)) s.finalImage = await uploadUrl(s.finalImage, 'shots', s.id);
@@ -1874,11 +1890,11 @@ function locAngleRowHTML(l) {
       ? `<img src="${esc(img)}" alt="${esc(angle)}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
     const angleImgHtml = entry.useRef && refImg
-      ? `<img src="${esc(refImg.dataUrl)}" alt="${esc(angle)}">`
+      ? `<img src="${esc(refImg.dataUrl || refImg.url)}" alt="${esc(angle)}">`
       : imgHtml;
     const refHtml = refImg
       ? `<div style="position:relative;display:inline-block">
-           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${entry.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocAngleUseRef('${l.id}','${angle}')" title="${entry.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <img src="${esc(refImg.dataUrl || refImg.url)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${entry.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocAngleUseRef('${l.id}','${angle}')" title="${entry.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
            <button onclick="removeLocAngleRefImage('${l.id}','${angle}')" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
          </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocAngleRefUpload('${l.id}','${angle}',this)"></label>`;
@@ -1900,11 +1916,11 @@ function locAngleRowHTML(l) {
       ? `<img src="${esc(img)}" alt="${esc(cv.name || '')}">`
       : `<div class="loc-shot-placeholder">no image</div>`;
     const cvImgHtml = cv.useRef && refImg
-      ? `<img src="${esc(refImg.dataUrl)}" alt="${esc(cv.name || '')}">`
+      ? `<img src="${esc(refImg.dataUrl || refImg.url)}" alt="${esc(cv.name || '')}">`
       : imgHtml;
     const refHtml = refImg
       ? `<div style="position:relative;display:inline-block">
-           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${cv.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocCustomViewUseRef('${l.id}',${i})" title="${cv.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <img src="${esc(refImg.dataUrl || refImg.url)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${cv.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleLocCustomViewUseRef('${l.id}',${i})" title="${cv.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
            <button onclick="removeLocCustomRefImage('${l.id}',${i})" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
          </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleLocCustomRefUpload('${l.id}',${i},this)"></label>`;
@@ -2585,7 +2601,7 @@ function charAngleRowsInnerHTML(c) {
     const d = c.angles?.[angle] || {};
     const isMirror = !!MIRROR_PAIRS[angle];
     const refImg = d.refImage;
-    const effectiveImg = d.useRef && refImg ? refImg.dataUrl : d.image;
+    const effectiveImg = d.useRef && refImg ? (refImg.dataUrl || refImg.url) : d.image;
     const imgHTML = effectiveImg
       ? `<img src="${esc(effectiveImg)}" alt="${esc(angle)}">`
       : `<span class="placeholder">·</span>`;
@@ -2594,7 +2610,7 @@ function charAngleRowsInnerHTML(c) {
       : esc(angle);
     const refHtml = refImg
       ? `<div style="position:relative;display:inline-block">
-           <img src="${esc(refImg.dataUrl)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${d.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleCharAngleUseRef('${c.id}','${angle}')" title="${d.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
+           <img src="${esc(refImg.dataUrl || refImg.url)}" alt="ref" style="width:40px;height:40px;object-fit:cover;border-radius:3px;cursor:pointer;outline:${d.useRef ? '2px solid #4ade80' : 'none'}" onclick="toggleCharAngleUseRef('${c.id}','${angle}')" title="${d.useRef ? 'Using ref as image (click to revert)' : 'Click to use as image'}">
            <button onclick="removeCharAngleRefImage('${c.id}','${angle}')" style="position:absolute;top:-5px;right:-5px;background:#222;border:none;border-radius:50%;color:#888;font-size:9px;width:14px;height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">✕</button>
          </div>`
       : `<label style="cursor:pointer;font-size:10px;color:#555;border:1px dashed #2a2a2a;border-radius:3px;padding:4px 6px;display:block;text-align:center">📷 Upload<input type="file" accept="image/*" style="display:none" onchange="handleCharAngleRefUpload('${c.id}','${angle}',this)"></label>`;
@@ -4471,6 +4487,10 @@ function handleCharAngleRefUpload(charId, angle, input) {
       if (!char.angles[angle]) char.angles[angle] = {};
       char.angles[angle].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
       autoSave(); renderCharacters();
+      // Upload to Supabase so images.json stays small
+      apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'chars', entityId: charId })
+        .then(r => { if (r.url) { char.angles[angle].refImage = { url: r.url, dataUrl: r.url, base64: null, mediaType: 'image/jpeg' }; autoSave(); } })
+        .catch(() => {});
       const row = document.getElementById(`char-angles-${charId}`);
       if (row) row.style.display = '';
     };
@@ -4512,6 +4532,9 @@ function handleLocAngleRefUpload(locId, angle, input) {
       loc.shotAngles[angle].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
       if (!loc.shotAngles[angle].image) loc.shotAngles[angle].useRef = true;
       autoSave(); renderLocations();
+      apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'locs', entityId: locId })
+        .then(r => { if (r.url) { loc.shotAngles[angle].refImage = { url: r.url, dataUrl: r.url, base64: null, mediaType: 'image/jpeg' }; autoSave(); } })
+        .catch(() => {});
     };
     img.src = e.target.result;
   };
@@ -4545,6 +4568,9 @@ function handleLocCustomRefUpload(locId, idx, input) {
       loc.customViews[idx].refImage = { dataUrl, base64, mediaType: 'image/jpeg' };
       if (!loc.customViews[idx].image) loc.customViews[idx].useRef = true;
       autoSave(); renderLocations();
+      apiFetch('/api/upload-reference', { base64, mediaType: 'image/jpeg', projectId: currentProjectId, entityType: 'locs', entityId: locId })
+        .then(r => { if (r.url) { loc.customViews[idx].refImage = { url: r.url, dataUrl: r.url, base64: null, mediaType: 'image/jpeg' }; autoSave(); } })
+        .catch(() => {});
     };
     img.src = e.target.result;
   };
