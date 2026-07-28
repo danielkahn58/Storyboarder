@@ -827,6 +827,9 @@ async function loadData() {
         if (localSavedAt > sbSavedAt && localCharCount > 0) {
           saved = localSaved;
           imgs = localImgs;
+          // Re-push to Supabase now so other devices get the latest data
+          const { stripped: s2, imgs: i2 } = _buildPayloadFromSaved(JSON.parse(localSaved), localImgs);
+          sbUpsertData(currentProjectId, s2, i2);
         } else {
           saved = JSON.stringify(sbRow.data);
           imgs = sbRow.images || {};
@@ -867,6 +870,15 @@ async function loadData() {
       if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
       if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
       if (Array.isArray(d.animatics)) animatics = d.animatics;
+      // Restore version context from Supabase on devices that have no localStorage version history
+      if (!versions.length && d.currentVersionLabel) {
+        currentVersionLabel = d.currentVersionLabel;
+        if (Array.isArray(d.versionIndex)) {
+          // Reconstruct lightweight version stubs — snapshot data will be fetched on demand via cloud restore
+          versions = d.versionIndex.map(v => ({ label: v.label, timestamp: v.timestamp, auto: v.auto || false, data: null }));
+          editsSinceVersion = 0;
+        }
+      }
     }
   } catch {}
   if (!characters.length) characters = [newCharacter()];
@@ -1026,7 +1038,8 @@ async function prefetchCharBgRemovals() {
 }
 
 function _buildPayload() {
-  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, animatics: animatics || [], savedAt: Date.now() };
+  const versionIndex = versions.map(v => ({ label: v.label, timestamp: v.timestamp, auto: v.auto || false }));
+  return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, animatics: animatics || [], currentVersionLabel: currentVersionLabel || null, versionIndex: versionIndex, savedAt: Date.now() };
 }
 
 async function _persistData(key) {
