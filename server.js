@@ -1596,6 +1596,29 @@ app.get('/api/snapshots/:projectId/:snapshotId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Proxy project data reads through the server so the service key is used,
+// eliminating bucket-policy dependency on the client anon key.
+app.get('/api/project/:id/data', async (req, res) => {
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  const { id } = req.params;
+  try {
+    const fetchJson = async (path) => {
+      const { data, error } = await sbAdmin.storage.from('images').download(path);
+      if (error) return null;
+      return JSON.parse(await data.text());
+    };
+    const [projectData, imagesData] = await Promise.all([
+      fetchJson(`projects/${id}/data.json`),
+      fetchJson(`projects/${id}/images.json`),
+    ]);
+    if (projectData) return res.json({ data: projectData, images: imagesData || {} });
+    // Fallback: old DB column format
+    const { data, error } = await sbAdmin.from('projects').select('data,images').eq('id', id).single();
+    if (error) return res.status(404).json({ error: 'not found' });
+    res.json(data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/backup', async (req, res) => {
   runBackup().catch(e => log('error', 'manual backup error', { error: e.message }));
   res.json({ message: 'Backup started in background' });

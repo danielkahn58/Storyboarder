@@ -353,24 +353,10 @@ async function sbRestoreSnapshot(snapshotId, projectId) {
 }
 
 async function sbGetData(id) {
-  const sb = getSB();
   try {
-    // Try new Storage-based format first
-    const fetchJson = async (path) => {
-      const { data, error } = await sb.storage.from('images').download(path);
-      if (error) return null;
-      return JSON.parse(await data.text());
-    };
-    const [projectData, imagesData] = await Promise.all([
-      fetchJson(`projects/${id}/data.json`),
-      fetchJson(`projects/${id}/images.json`),
-    ]);
-    if (projectData) return { data: projectData, images: imagesData };
-
-    // Fallback: old format stored directly in DB columns
-    const { data, error } = await sb.from('projects').select('data,images').eq('id', id).single();
-    if (error) throw error;
-    return data;
+    // Route through server so service key is used — avoids bucket-policy issues with anon key
+    const result = await apiFetch(`/api/project/${id}/data`, null, 'GET');
+    return result || null;
   } catch(e) { console.warn('sb get data:', e.message); return null; }
 }
 
@@ -716,9 +702,9 @@ async function loadAuthUser() {
 
 function userBadgeHTML() {
   if (!_authUser) return '';
-  return `<div style="display:flex;align-items:center;gap:8px;border-left:1px solid #222;padding-left:12px;margin-left:4px;">
-    <span style="font-size:12px;color:#555;">${esc(_authUser.email)}</span>
-    <a href="/auth/logout" style="font-size:12px;color:#444;text-decoration:none;border:1px solid #222;border-radius:5px;padding:5px 10px;transition:all 0.15s;" onmouseover="this.style.color='#aaa';this.style.borderColor='#444'" onmouseout="this.style.color='#444';this.style.borderColor='#222'">Sign out</a>
+  return `<div style="display:flex;align-items:center;gap:8px;border-left:1px solid #222;padding-left:12px;margin-left:4px;flex-shrink:0;">
+    <span class="user-email-label" style="font-size:12px;color:#555;">${esc(_authUser.email)}</span>
+    <a href="/auth/logout" class="btn-sign-out" style="font-size:12px;color:#444;text-decoration:none;border:1px solid #222;border-radius:5px;padding:5px 10px;white-space:nowrap;flex-shrink:0;transition:all 0.15s;" onmouseover="this.style.color='#aaa';this.style.borderColor='#444'" onmouseout="this.style.color='#444';this.style.borderColor='#222'">Sign out</a>
   </div>`;
 }
 
@@ -1450,7 +1436,6 @@ function renderVersionUI() {
     ${selectHTML}
     <button class="btn-new-version" onclick="createVersion()">+ Version</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
-    ${_authUser ? `<a href="/auth/logout" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #222;border-radius:5px;padding:4px 8px;white-space:nowrap;flex-shrink:0;">Sign out</a>` : ''}
   `;
 }
 
