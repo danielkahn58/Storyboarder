@@ -378,6 +378,15 @@ function openIDB() {
     req.onerror  = () => rej(req.error);
   });
 }
+async function idbDelete(key) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('images', 'readwrite');
+    tx.objectStore('images').delete(key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+
 async function idbSet(key, val) {
   const db = await openIDB();
   return new Promise((res, rej) => {
@@ -1428,6 +1437,7 @@ function renderVersionUI() {
     ${selectHTML}
     <button id="btn-new-version" class="btn-new-version" onclick="createVersion()">+ New Version</button>
     <button class="btn-cloud-restore" onclick="openCloudRestore()" title="Restore from cloud backup">☁ Restore</button>
+    <button class="btn-cloud-restore" onclick="forceLoadFromCloud()" title="Discard local data and reload current state from cloud">↓ Cloud</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
     <span id="version-edit-count" class="version-edit-count">${editsSinceVersion > 0 ? `${editsSinceVersion}/${AUTO_VERSION_EVERY}` : ''}</span>
   `;
@@ -1436,7 +1446,25 @@ function renderVersionUI() {
     ${selectHTML}
     <button class="btn-new-version" onclick="createVersion()">+ Version</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
+    <button onclick="forceLoadFromCloud()" title="Discard local data and reload from cloud" style="background:none;border:1px solid #2a2a2a;border-radius:5px;color:#555;font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;flex-shrink:0;">↓ Cloud</button>
   `;
+}
+
+async function forceLoadFromCloud() {
+  if (!currentProjectId) return;
+  if (!confirm('Discard local data and load the latest version from cloud? This cannot be undone.')) return;
+  const key = projectDataKey(currentProjectId);
+  const vKey = projectVersionsKey(currentProjectId);
+  localStorage.removeItem(key);
+  localStorage.removeItem(vKey);
+  try { await idbDelete(key); } catch {}
+  versions = [];
+  currentVersionLabel = null;
+  editsSinceVersion = 0;
+  showToast('Loading from cloud…');
+  await loadData();
+  renderVersionUI();
+  showToast('Loaded latest version from cloud.');
 }
 
 async function openCloudRestore() {
