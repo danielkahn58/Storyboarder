@@ -757,6 +757,7 @@ function renderHeader() {
       <button class="section-nav-btn" id="nav-btn-avscript" onclick="switchMainTab('avscript')">AV Script</button>
       <button class="section-nav-btn" id="nav-btn-animatic" onclick="switchMainTab('animatic')">Animatic</button>
     </nav>
+    <div id="version-ui-mobile" class="version-bar-mobile"></div>
   `;
   renderVersionUI();
   // Restore debug button state
@@ -1384,19 +1385,27 @@ function timeAgo(ts) {
 
 function renderVersionUI() {
   const el = document.getElementById('version-ui');
-  if (!el) return;
+  const mob = document.getElementById('version-ui-mobile');
+  if (!el && !mob) return;
   const sorted = (Array.isArray(versions) ? [...versions] : []).sort((a, b) => b.timestamp - a.timestamp);
-  el.innerHTML = `
-    ${versions.length > 0 ? `
-      <select class="version-select" onchange="loadVersion(this.value)">
-        <option value="">version history…</option>
-        ${sorted.map(v => `<option value="${v.label}" ${v.label === currentVersionLabel ? 'selected' : ''}>v${v.label}${v.auto ? ' ⟳' : ''} · ${timeAgo(v.timestamp)}</option>`).join('')}
-      </select>
-    ` : ''}
+  const selectHTML = versions.length > 0 ? `
+    <select class="version-select" onchange="loadVersion(this.value)">
+      <option value="">version history…</option>
+      ${sorted.map(v => `<option value="${v.label}" ${v.label === currentVersionLabel ? 'selected' : ''}>v${v.label}${v.auto ? ' ⟳' : ''} · ${timeAgo(v.timestamp)}</option>`).join('')}
+    </select>
+  ` : '';
+  const fullHTML = `
+    ${selectHTML}
     <button id="btn-new-version" class="btn-new-version" onclick="createVersion()">+ New Version</button>
     <button class="btn-cloud-restore" onclick="openCloudRestore()" title="Restore from cloud backup">☁ Restore</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
     <span id="version-edit-count" class="version-edit-count">${editsSinceVersion > 0 ? `${editsSinceVersion}/${AUTO_VERSION_EVERY}` : ''}</span>
+  `;
+  if (el) el.innerHTML = fullHTML;
+  if (mob) mob.innerHTML = `
+    ${selectHTML}
+    <button class="btn-new-version" onclick="createVersion()">+ Version</button>
+    ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
   `;
 }
 

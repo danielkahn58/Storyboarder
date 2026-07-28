@@ -87,6 +87,7 @@
   .restore-item-btn:hover { background:#2a2a2a; color:#fff; border-color:#555; }
   .version-edit-count { font-size: 11px; color: #333; white-space: nowrap; }
   .version-badge { font-size: 11px; color: #555; background: #141414; border: 1px solid #222; border-radius: 4px; padding: 3px 8px; white-space: nowrap; }
+  .version-bar-mobile { display: none; }
 
   /* ── section headers ── */
   .section-header { padding: 20px 32px 0; display: flex; align-items: center; justify-content: space-between; }
@@ -575,6 +576,21 @@
     a[href="/vrm-builder.html"],
     a[href="/reference.html"],
     #btn-debug-toggle { display: none !important; }
+    .version-bar-mobile {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-bottom: 1px solid #1a1a1a;
+      background: #0c0c0c;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .version-bar-mobile::-webkit-scrollbar { display: none; }
+    .version-bar-mobile .version-select { max-width: none; flex: 1 1 0; min-width: 0; font-size: 12px; }
+    .version-bar-mobile .btn-new-version { white-space: nowrap; flex-shrink: 0; }
+    .version-bar-mobile .version-badge { flex-shrink: 0; }
     .section-nav { overflow-x: auto; flex-wrap: nowrap; padding: 0 12px; gap: 0; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
     .section-nav::-webkit-scrollbar { display: none; }
     .section-nav-btn { font-size: 11px; padding: 8px 10px; white-space: nowrap; }
