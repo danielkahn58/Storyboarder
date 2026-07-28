@@ -1277,12 +1277,14 @@ function createVersion(isAuto = false) {
   editsSinceVersion = 0;
   saveVersionMeta();
   renderVersionUI();
-  // Save named versions to Supabase snapshots table
-  if (!isAuto && currentProjectId) {
+  // Save ALL versions (auto and named) to Supabase snapshots for cross-device access
+  if (currentProjectId) {
     const { stripped, imgs } = extractImages(_buildPayload());
-    sbSaveSnapshot(currentProjectId, label, false, stripped, imgs);
-    const btn = document.getElementById('btn-new-version');
-    if (btn) { btn.classList.add('saved-flash'); setTimeout(() => btn.classList.remove('saved-flash'), 1500); }
+    sbSaveSnapshot(currentProjectId, label, isAuto, stripped, imgs);
+    if (!isAuto) {
+      const btn = document.getElementById('btn-new-version');
+      if (btn) { btn.classList.add('saved-flash'); setTimeout(() => btn.classList.remove('saved-flash'), 1500); }
+    }
   }
 }
 
@@ -1302,7 +1304,25 @@ async function loadVersion(label) {
     }
     await _snapshotCurrentAudio();
   }
-  const d = v.data;
+  let d = v.data;
+  // If data isn't in memory (cross-device stub with data: null), fetch from Supabase snapshots
+  if (!d && currentProjectId) {
+    showToast('Loading version from cloud…');
+    const snapshots = await sbGetSnapshots(currentProjectId);
+    const snap = snapshots.find(s => s.label === label);
+    if (!snap) {
+      showToast('Version not available — save on original device first to sync it.', true);
+      return;
+    }
+    const restored = await sbRestoreSnapshot(snap.id, currentProjectId);
+    if (!restored?.data) {
+      showToast('Failed to load version from cloud.', true);
+      return;
+    }
+    v.data = restored.data;
+    d = restored.data;
+  }
+  if (!d) { showToast('Version data unavailable.', true); return; }
   // Restore versioned state. Versions now store all fields including Supabase URLs.
   // Only fall back to current in-memory data for base64/blob content not stored in versions.
   const prevChars = characters; const prevLocs = locations; const prevShots = shots;
