@@ -871,16 +871,27 @@ async function loadData() {
       if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
       if (Array.isArray(d.animatics)) animatics = d.animatics;
       // Restore version context from Supabase on devices that have no localStorage version history
-      if (!versions.length && d.currentVersionLabel) {
-        currentVersionLabel = d.currentVersionLabel;
-        if (Array.isArray(d.versionIndex)) {
-          // Reconstruct lightweight version stubs — snapshot data will be fetched on demand via cloud restore
+      if (!versions.length) {
+        if (d.currentVersionLabel) currentVersionLabel = d.currentVersionLabel;
+        if (Array.isArray(d.versionIndex) && d.versionIndex.length > 0) {
           versions = d.versionIndex.map(v => ({ label: v.label, timestamp: v.timestamp, auto: v.auto || false, data: null }));
           editsSinceVersion = 0;
         }
       }
     }
   } catch {}
+  // If still no version history after parsing local/Supabase data, fetch snapshot list directly
+  if (!versions.length && currentProjectId) {
+    try {
+      const snapshots = await sbGetSnapshots(currentProjectId);
+      if (snapshots.length > 0) {
+        const sorted = [...snapshots].sort((a, b) => (b.created_at ? new Date(b.created_at).getTime() : 0) - (a.created_at ? new Date(a.created_at).getTime() : 0));
+        versions = sorted.map(s => ({ label: s.label, timestamp: s.created_at ? new Date(s.created_at).getTime() : 0, auto: s.auto || false, data: null }));
+        if (!currentVersionLabel && sorted.length > 0) currentVersionLabel = sorted[0].label;
+        editsSinceVersion = 0;
+      }
+    } catch(e) {}
+  }
   if (!characters.length) characters = [newCharacter()];
   if (!locations.length) locations = [newLocation()];
   // Remove legacy global script key
@@ -1439,6 +1450,7 @@ function renderVersionUI() {
     ${selectHTML}
     <button class="btn-new-version" onclick="createVersion()">+ Version</button>
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
+    ${_authUser ? `<a href="/auth/logout" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #222;border-radius:5px;padding:4px 8px;white-space:nowrap;flex-shrink:0;">Sign out</a>` : ''}
   `;
 }
 
