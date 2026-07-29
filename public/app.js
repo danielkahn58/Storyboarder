@@ -2602,9 +2602,10 @@ function _redrawAnimaticTimeline() {
   if (!tl || !_animaticTimeline) return;
   const { duration, shots: ts } = _animaticTimeline;
   const colors = ['#141a2e','#0e1a0e','#1e1208','#180e1e','#0c1818'];
+  const offset = ts[0].secs;
   tl.innerHTML = ts.map((s, i) => {
-    const x1 = s.secs / duration * 100;
-    const x2 = i + 1 < ts.length ? ts[i + 1].secs / duration * 100 : 100;
+    const x1 = (s.secs - offset) / duration * 100;
+    const x2 = i + 1 < ts.length ? (ts[i + 1].secs - offset) / duration * 100 : 100;
     const w = Math.max(x2 - x1, 0.2);
     const hasHandle = i > 0;
     return `
@@ -2639,9 +2640,10 @@ function startTlDrag(e, shotId) {
   const minSecs = ts[shotIdx - 1].secs + 0.3;
   const maxSecs = (shotIdx + 1 < ts.length ? ts[shotIdx + 1].secs : duration) - 0.3;
 
+  const offset = ts[0].secs;
   const onMove = (ev) => {
     const pct = Math.max(0, Math.min(1, (ev.clientX - tlRect.left) / tlRect.width));
-    ts[shotIdx].secs = Math.max(minSecs, Math.min(maxSecs, pct * duration));
+    ts[shotIdx].secs = Math.max(minSecs, Math.min(maxSecs, pct * duration + offset));
     _redrawAnimaticTimeline();
   };
 
