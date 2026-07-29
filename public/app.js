@@ -629,9 +629,7 @@ function renderHeader() {
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div id="version-ui" class="version-bar"></div>
-        <a href="/vrm-builder.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">VRM Builder</a>
-        <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
-        <button onclick="openDocs()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Docs</button>
+<button onclick="openDocs()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Docs</button>
         <button id="btn-open-tests" onclick="openTestResults()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Tests</button>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
