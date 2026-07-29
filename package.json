@@ -4,7 +4,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "pkill -f 'node server.js' 2>/dev/null; node server.js & cloudflared tunnel --url http://localhost:3000"
+    "dev": "pkill -f 'node server.js' 2>/dev/null; node server.js & cloudflared tunnel --url http://localhost:3000",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.54.0",
@@ -26,5 +28,10 @@
     "passport-google-oauth20": "^2.0.0",
     "pdf-parse": "^1.1.1",
     "replicate": "^1.4.0"
+  },
+  "devDependencies": {
+    "msw": "^2.15.0",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }

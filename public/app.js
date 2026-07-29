@@ -295,43 +295,7 @@ async function sbUpsertData(id, stripped, imgs, throwOnError = false) {
   }
 }
 
-// Replace any base64 / dataUrl blobs with null so they don't bloat the Supabase payload.
-// CDN URLs (https://...) are kept as-is.
-// An "image object" is any object with a dataUrl or base64 key — treated atomically, not recursed into.
-function stripBase64ForSync(imgs) {
-  if (!imgs) return imgs;
-  function isImgObj(v) {
-    return v && typeof v === 'object' && !Array.isArray(v) && ('dataUrl' in v || 'base64' in v);
-  }
-  function cleanImgObj(v) {
-    if (!v) return v;
-    const out = { ...v };
-    out.base64 = null;
-    const cdn = out.cdnUrl || out.url; // use Supabase/CDN URL for cross-device display
-    if (cdn) out.dataUrl = cdn;
-    else if (typeof out.dataUrl === 'string' && out.dataUrl.startsWith('data:')) out.dataUrl = null;
-    return out;
-  }
-  function cleanVal(v) {
-    if (!v) return v;
-    if (typeof v === 'string') return v.startsWith('data:') ? null : v;
-    if (isImgObj(v)) return cleanImgObj(v);
-    if (Array.isArray(v)) return v.map(cleanVal);
-    if (typeof v === 'object') return cleanEntry(v);
-    return v;
-  }
-  function cleanEntry(obj) {
-    if (!obj) return obj;
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) out[k] = cleanVal(v);
-    return out;
-  }
-  return {
-    chars: Object.fromEntries(Object.entries(imgs.chars || {}).map(([id, v]) => [id, cleanEntry(v)])),
-    locs:  Object.fromEntries(Object.entries(imgs.locs  || {}).map(([id, v]) => [id, cleanEntry(v)])),
-    shots: Object.fromEntries(Object.entries(imgs.shots || {}).map(([id, v]) => [id, cleanEntry(v)])),
-  };
-}
+// stripBase64ForSync now lives in lib/versioning.js (loaded before this script).
 
 async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
   try {
@@ -409,82 +373,7 @@ async function idbGet(key) {
   });
 }
 
-// Extract all image data into a separate object, return stripped copy.
-function extractImages(data) {
-  const imgs = { chars: {}, locs: {}, shots: {} };
-  const chars = (data.characters || []).map(c => {
-    imgs.chars[c.id] = { images: c.images, referenceImage: c.referenceImage, refImages: c.refImages || [], expressionCache: c.expressionCache,
-      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {} };
-    return { ...c, images: [], referenceImage: null, refImages: [], expressionCache: {},
-      angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k,v]) => [k, { prompt: v.prompt, useRef: v.useRef || false }])) : {} };
-  });
-  const locs = (data.locations || []).map(l => {
-    imgs.locs[l.id] = { images: l.images, referenceImage: l.referenceImage,
-      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { image: v.image, refImage: v.refImage || null }])) : {},
-      customViews: (l.customViews || []).map(cv => ({ image: cv.image, refImage: cv.refImage || null })) };
-    return { ...l, images: [], referenceImage: null,
-      shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k,v]) => [k, { prompt: v.prompt, useRef: v.useRef || false }])) : {},
-      customViews: (l.customViews || []).map(cv => ({ ...cv, image: null, refImage: null })) };
-  });
-  const shots = (data.shots || []).map(s => {
-    imgs.shots[s.id] = { images: s.images, finalImage: s.finalImage, refImage: s.refImage, videoUrl: s.videoUrl };
-    return { ...s, images: [], finalImage: null, refImage: null, videoUrl: '' };
-  });
-  return { stripped: { ...data, characters: chars, locations: locs, shots }, imgs };
-}
-
-// Merge images back into loaded data.
-function mergeImages(data, imgs) {
-  if (!imgs) return data;
-  const characters = (data.characters || []).map(c => {
-    const ci = imgs.chars?.[c.id] || {};
-    const angles = { ...c.angles };
-    for (const [k, v] of Object.entries(ci.angles || {})) {
-      angles[k] = { ...(angles[k] || {}), image: v.image, refImage: v.refImage || null };
-    }
-    return { ...c, images: ci.images || [], referenceImage: ci.referenceImage || null,
-      refImages: ci.refImages || [], expressionCache: ci.expressionCache || {}, angles };
-  });
-  const locations = (data.locations || []).map(l => {
-    const li = imgs.locs?.[l.id] || {};
-    const shotAngles = { ...l.shotAngles };
-    for (const [k, v] of Object.entries(li.shotAngles || {})) {
-      shotAngles[k] = { ...(shotAngles[k] || {}), image: v.image, refImage: v.refImage || null };
-    }
-    const customViews = (l.customViews || []).map((cv, i) => ({ ...cv, image: li.customViews?.[i]?.image || null, refImage: li.customViews?.[i]?.refImage || null }));
-    return { ...l, images: li.images || [], referenceImage: li.referenceImage || null, shotAngles, customViews };
-  });
-  const shots = (data.shots || []).map(s => {
-    const si = imgs.shots?.[s.id] || {};
-    return { ...s, images: si.images || [], finalImage: si.finalImage || null,
-      refImage: si.refImage || null, videoUrl: si.videoUrl || '' };
-  });
-  return { ...data, characters, locations, shots };
-}
-
-// When loading from Supabase, fill in any base64 images (referenceImage etc.) that
-// didn't sync (because stripBase64ForSync removed them) from the local IDB copy.
-function mergeLocalIntoSbImages(sbImgs, localImgs) {
-  if (!localImgs) return sbImgs || {};
-  if (!sbImgs) return localImgs;
-  function mergeEntry(sb, local) {
-    if (!local) return sb || {};
-    if (!sb) return local;
-    const out = { ...sb };
-    for (const [k, v] of Object.entries(local)) {
-      if (out[k] == null && v != null) out[k] = v; // fill in missing fields from local
-      else if (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object') {
-        out[k] = mergeEntry(out[k], v);
-      }
-    }
-    return out;
-  }
-  return {
-    chars: Object.fromEntries(Object.entries(localImgs.chars || {}).map(([id, v]) => [id, mergeEntry((sbImgs.chars || {})[id], v)])),
-    locs:  Object.fromEntries(Object.entries(localImgs.locs  || {}).map(([id, v]) => [id, mergeEntry((sbImgs.locs  || {})[id], v)])),
-    shots: Object.fromEntries(Object.entries(localImgs.shots || {}).map(([id, v]) => [id, mergeEntry((sbImgs.shots || {})[id], v)])),
-  };
-}
+// extractImages, mergeImages, mergeLocalIntoSbImages now live in lib/versioning.js.
 
 // Thin wrapper: given already-parsed saved data + imgs, produce { stripped, imgs } for sbUpsertData
 function _buildPayloadFromSaved(data, imgs) {
@@ -743,6 +632,7 @@ function renderHeader() {
         <a href="/vrm-builder.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">VRM Builder</a>
         <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
         <button onclick="openRequirements()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Requirements</button>
+        <button id="btn-open-tests" onclick="openTestResults()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Tests</button>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
         ${userBadgeHTML()}
@@ -1183,91 +1073,7 @@ function loadVersions() {
   } catch {}
 }
 
-function stripImagesForVersion(data) {
-  // Keep persistent HTTP URLs (Supabase); strip only base64/blob data which is large and ephemeral.
-  const isUrl = v => v && typeof v === 'string' && v.startsWith('http');
-
-  const stripChar = c => ({
-    id: c.id, name: c.name, reference: c.reference, prompt: c.prompt, attributes: c.attributes,
-    useRefAsDefault: c.useRefAsDefault || false,
-    selectedRefImageId: c.selectedRefImageId || null,
-    loraUrl: c.loraUrl || null,
-    loraStatus: c.loraStatus || 'idle',
-    loraTriggerWord: c.loraTriggerWord || null,
-    refImages: (c.refImages || []).map(r => ({ id: r.id, url: r.url || null })),
-    angles: c.angles ? Object.fromEntries(Object.entries(c.angles).map(([k, v]) => [k, {
-      prompt: v.prompt,
-      useRef: v.useRef || false,
-      image: isUrl(v.image) ? v.image : null,
-    }])) : undefined,
-  });
-
-  const stripLoc = l => ({
-    id: l.id, name: l.name, aliases: l.aliases || [], reference: l.reference,
-    prompt: l.prompt, possibleDuplicate: l.possibleDuplicate,
-    useRefAsDefault: l.useRefAsDefault || false,
-    selectedImage: isUrl(l.selectedImage) ? l.selectedImage : null,
-    shotAngles: l.shotAngles ? Object.fromEntries(Object.entries(l.shotAngles).map(([k, v]) => [k, {
-      prompt: v.prompt,
-      useRef: v.useRef || false,
-      image: isUrl(v.image) ? v.image : null,
-    }])) : undefined,
-    customViews: (l.customViews || []).map(cv => ({
-      id: cv.id, name: cv.name || '', prompt: cv.prompt || '',
-      useRef: cv.useRef || false,
-      image: isUrl(cv.image) ? cv.image : null,
-    })),
-  });
-
-  const stripComposeMeta = m => m ? {
-    bgUrl: isUrl(m.bgUrl) ? m.bgUrl : null,
-    bgColor: m.bgColor || null,
-    bgMaskUrl: isUrl(m.bgMaskUrl) ? m.bgMaskUrl : null,
-    globalLighting: m.globalLighting || 'none',
-    globalLightingDir: m.globalLightingDir || 'none',
-    globalContrast: m.globalContrast ?? 100,
-    globalSaturation: m.globalSaturation ?? 100,
-    bgSeparation: m.bgSeparation ?? 0,
-    bgScale: m.bgScale ?? 1,
-    bgOffsetX: m.bgOffsetX ?? 0,
-    bgOffsetY: m.bgOffsetY ?? 0,
-  } : null;
-  const stripComposeLayer = l => ({
-    imgUrl: isUrl(l.imgUrl) ? l.imgUrl : null,
-    label: l.label, charId: l.charId || null,
-    cx: l.cx, cy: l.cy, scale: l.scale, w: l.w, h: l.h,
-    opacity: l.opacity ?? 1, lighting: l.lighting || 'none',
-    lightingIntensity: l.lightingIntensity ?? 0.6,
-    contrast: l.contrast ?? 100, saturation: l.saturation ?? 100,
-  });
-  const stripShot = s => ({
-    id: s.id, lyric: s.lyric, description: s.description,
-    imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt,
-    shotSize: s.shotSize, shotAngle: s.shotAngle, shotMovement: s.shotMovement,
-    characterIds: s.characterIds, locationId: s.locationId, characterDetails: s.characterDetails,
-    timestamp: s.timestamp || '',
-    timestampIssue: s.timestampIssue || null,
-    finalImage: isUrl(s.finalImage) ? s.finalImage : null,
-    videoUrl: isUrl(s.videoUrl) ? s.videoUrl : '',
-    motionVideoUrl: isUrl(s.motionVideoUrl) ? s.motionVideoUrl : '',
-    composeMeta: stripComposeMeta(s.composeMeta),
-    composeLayers: (s.composeLayers || []).map(stripComposeLayer).filter(l => l.imgUrl),
-  });
-
-  return {
-    characters: (data.characters || []).map(stripChar),
-    locations:  (data.locations  || []).map(stripLoc),
-    shots:      (data.shots      || []).map(stripShot),
-    visualStyles: data.visualStyles,
-    selectedStyleId: data.selectedStyleId,
-    charGenRules: data.charGenRules,
-    locationGenRules: data.locationGenRules,
-    charBoilerplate: data.charBoilerplate,
-    animatics: data.animatics || [],
-    scriptText: data.scriptText || null,
-    scriptName: data.scriptName || null,
-  };
-}
+// stripImagesForVersion now lives in lib/versioning.js.
 
 function createVersion(isAuto = false) {
   syncFromDOM();
@@ -1722,6 +1528,92 @@ function closeRequirements() {
   if (modal) modal.style.display = 'none';
 }
 
+// ── Test results panel ──────────────────────────────────────────────────────
+async function openTestResults() {
+  const modal = document.getElementById('test-results-modal');
+  const body = document.getElementById('test-results-body');
+  if (!modal || !body) return;
+  modal.style.display = 'flex';
+  body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
+  try {
+    const data = await fetch('/api/test-results').then(r => r.json());
+    body.innerHTML = _renderTestResults(data);
+  } catch (e) {
+    body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load test results: ' + esc(e.message) + '</p>';
+  }
+}
+
+function closeTestResults() {
+  const modal = document.getElementById('test-results-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function runTestsNow() {
+  const btn = document.getElementById('btn-run-tests');
+  const body = document.getElementById('test-results-body');
+  if (!btn || !body) return;
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  body.innerHTML = '<p style="color:#555;font-size:12px">Running test suite…</p>';
+  try {
+    const res = await fetch('/api/run-tests', { method: 'POST' });
+    const data = await res.json();
+    body.innerHTML = _renderTestResults(data);
+  } catch (e) {
+    body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to run tests: ' + esc(e.message) + '</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run Tests';
+  }
+}
+
+function _renderTestResults(data) {
+  if (data.error) {
+    let html = `<p style="color:#f87171;font-size:12px;margin-bottom:12px">${esc(data.error)}</p>`;
+    if (data.stderr) html += `<pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;color:#f87171;font-size:11px;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${esc(data.stderr)}</pre>`;
+    return html;
+  }
+  if (!data.available) {
+    return '<p style="color:#555;font-size:12px">No test results yet — click "Run Tests" above (or run <code style="background:#1a1a1a;padding:1px 4px;border-radius:3px">npm test</code> in the terminal).</p>';
+  }
+
+  const passColor = '#4ade80', failColor = '#f87171';
+  const summaryColor = data.numFailedTests > 0 ? failColor : passColor;
+  const summaryText = data.numFailedTests > 0
+    ? `${data.numFailedTests} failed, ${data.numPassedTests} passed`
+    : `${data.numPassedTests} passed`;
+
+  let html = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #1e1e1e;">
+      <span style="font-size:14px;font-weight:600;color:${summaryColor}">${esc(summaryText)}</span>
+      <span style="font-size:11px;color:#555">${data.numTotalTests} tests · last run ${timeAgo(data.startTime)}</span>
+    </div>
+  `;
+
+  for (const file of data.files) {
+    const fileFailed = file.status === 'failed';
+    html += `
+      <div style="margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:600;color:${fileFailed ? failColor : '#888'};margin-bottom:6px;font-family:monospace;">
+          ${fileFailed ? '✕' : '✓'} ${esc(file.name)}
+        </div>
+        <div style="padding-left:16px;">
+    `;
+    for (const t of file.tests) {
+      const failed = t.status === 'failed';
+      html += `<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;padding:2px 0;color:${failed ? failColor : '#999'}">
+        <span>${failed ? '✕' : '✓'}</span><span>${esc(t.title)}</span>
+      </div>`;
+      if (failed && t.failureMessages?.length) {
+        html += `<pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:10px;margin:4px 0 8px;color:#e08080;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;">${esc(t.failureMessages[0])}</pre>`;
+      }
+    }
+    html += `</div></div>`;
+  }
+
+  return html;
+}
+
 function toggleDebugMode() {
   debugMode = !debugMode;
   const panel = document.getElementById('debug-panel');
@@ -1864,6 +1756,44 @@ function locDefaultImage(l) {
   return l.useRefAsDefault ? (l.referenceImage?.dataUrl || null) : (l.selectedImage || l.images?.[0] || null);
 }
 
+function locVariationImage(loc, angleKey) {
+  if (!loc || !angleKey) return locDefaultImage(loc);
+  if (angleKey.startsWith('cv:')) {
+    const cv = (loc.customViews || []).find(v => v.id === angleKey.slice(3));
+    if (!cv) return locDefaultImage(loc);
+    return (cv.useRef && cv.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : (cv.image || locDefaultImage(loc));
+  }
+  const entry = loc.shotAngles?.[angleKey];
+  if (!entry) return locDefaultImage(loc);
+  return (entry.useRef && entry.refImage) ? (entry.refImage.dataUrl || entry.refImage.url) : (entry.image || locDefaultImage(loc));
+}
+
+function locVariationsHTML(s) {
+  const loc = locations.find(l => l.id === s.locationId);
+  if (!loc) return '';
+  const thumbs = [];
+  for (const angle of Object.keys(loc.shotAngles || {})) {
+    const entry = loc.shotAngles[angle];
+    const img = (entry.useRef && entry.refImage) ? (entry.refImage.dataUrl || entry.refImage.url) : entry.image;
+    if (!img) continue;
+    const sel = s.locationAngleKey === angle;
+    thumbs.push(`<div class="loc-var-thumb${sel ? ' loc-var-thumb-sel' : ''}" onclick="selectLocVariation('${s.id}','${angle}')" title="${esc(angle)}">
+      <img src="${esc(img)}"><span class="loc-var-label">${esc(angle)}</span>
+    </div>`);
+  }
+  for (const cv of (loc.customViews || [])) {
+    const img = (cv.useRef && cv.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : cv.image;
+    if (!img) continue;
+    const key = `cv:${cv.id}`;
+    const sel = s.locationAngleKey === key;
+    thumbs.push(`<div class="loc-var-thumb${sel ? ' loc-var-thumb-sel' : ''}" onclick="selectLocVariation('${s.id}','${key}')" title="${esc(cv.name||'Custom')}">
+      <img src="${esc(img)}"><span class="loc-var-label">${esc(cv.name || 'Custom')}</span>
+    </div>`);
+  }
+  if (!thumbs.length) return '';
+  return `<div class="loc-variations-strip" id="loc-vars-${s.id}">${thumbs.join('')}</div>`;
+}
+
 function charDefaultImage(c) {
   if (!c) return null;
   if (c.selectedRefImageId) {
@@ -1900,7 +1830,7 @@ function deleteLocation(id) {
 }
 
 // ── shot helpers ──────────────────────────────────────────────────────────
-function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null, timestamp: '' }; }
+function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null, timestamp: '' }; }
 
 function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); autoSave(); }
 function addShotAfter(id) {
@@ -1936,9 +1866,37 @@ function removeShotRefImage(id, evt) {
   const shot = shots.find(s => s.id === id);
   if (shot) { shot.refImage = null; autoSave(); renderShots(); }
 }
+function selectLocVariation(shotId, angleKey) {
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return;
+  shot.locationAngleKey = (shot.locationAngleKey === angleKey) ? '' : angleKey;
+  // Refresh the thumbnail strip in place
+  const strip = document.getElementById(`loc-vars-${shotId}`);
+  if (strip) strip.outerHTML = locVariationsHTML(shot);
+  // Update final preview image
+  const finalCell = document.getElementById(`final-img-${shotId}`);
+  if (finalCell && !shot.finalImage) {
+    const loc = locations.find(l => l.id === shot.locationId);
+    const img = locVariationImage(loc, shot.locationAngleKey) || locDefaultImage(loc);
+    const preview = finalCell.querySelector('.final-image-loc-preview');
+    if (preview) {
+      const existing = preview.querySelector('.final-image-preview');
+      const empty = preview.querySelector('.final-image-loc-empty');
+      if (img) {
+        if (existing) existing.src = img;
+        else { if (empty) empty.remove(); const el = document.createElement('img'); el.className = 'final-image-preview'; el.src = img; preview.insertBefore(el, preview.firstChild); }
+      }
+    }
+  }
+  autoSave();
+}
+
 function onShotLocationChange(shotId, locationId) {
   const shot = shots.find(s => s.id === shotId);
-  if (shot) shot.locationId = locationId;
+  if (shot) { shot.locationId = locationId; shot.locationAngleKey = ''; }
+  // Refresh variation strip
+  const strip = document.getElementById(`loc-vars-${shotId}`);
+  if (strip) strip.outerHTML = locVariationsHTML(shot || { id: shotId, locationId, locationAngleKey: '' });
   // Sync final-image-cell dropdown
   const finalCell = document.getElementById(`final-img-${shotId}`);
   if (finalCell) {
@@ -2878,6 +2836,7 @@ function shotRowHTML(s, idx) {
     <td data-label="Visual"><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
     <td class="shot-card-chars" data-label="Characters"><div class="char-checks">${charChecks}</div></td>
     <td class="shot-card-loc" data-label="Location"><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select>
+${locVariationsHTML(s)}
 <div class="shot-ref-zone" onclick="triggerShotRefUpload('${s.id}')" title="Reference photo — overrides location when generating images">
   ${s.refImage
     ? `<img src="${esc(s.refImage.dataUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:3px"><button class="shot-ref-remove" onclick="removeShotRefImage('${s.id}',event)">✕</button>`
@@ -2893,7 +2852,7 @@ function shotRowHTML(s, idx) {
       <div class="final-image-cell" id="final-img-${s.id}">
         ${(() => {
           const loc = locations.find(l => l.id === s.locationId);
-          const locImg = locDefaultImage(loc);
+          const locImg = s.locationAngleKey ? locVariationImage(loc, s.locationAngleKey) : locDefaultImage(loc);
           const previewImg = s.finalImage || locImg;
           const shotCharsWithImg = (s.characterIds || [])
             .map(id => characters.find(c => c.id === id))

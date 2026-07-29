@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const { execFile } = require('child_process');
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -1634,11 +1635,78 @@ app.get('/api/admin/token', (req, res) => {
   });
 });
 
-// Nightly backup at 2am
-cron.schedule('0 2 * * *', () => {
-  log('info', 'cron backup triggered');
-  runBackup();
+// ── Test results panel ──────────────────────────────────────────────────────
+// vitest.config.js emits a JSON reporter alongside the normal terminal output on
+// every `vitest run`; this just reads that file back and reshapes it for the UI.
+const TEST_RESULTS_FILE = path.join(__dirname, 'test-results.json');
+
+function readTestResults() {
+  if (!fs.existsSync(TEST_RESULTS_FILE)) return null;
+  const raw = JSON.parse(fs.readFileSync(TEST_RESULTS_FILE, 'utf8'));
+  return {
+    success: raw.success,
+    numTotalTests: raw.numTotalTests,
+    numPassedTests: raw.numPassedTests,
+    numFailedTests: raw.numFailedTests,
+    startTime: raw.startTime,
+    files: (raw.testResults || []).map(f => ({
+      name: path.relative(__dirname, f.name),
+      status: f.status,
+      duration: (f.endTime && f.startTime) ? Math.round(f.endTime - f.startTime) : null,
+      tests: (f.assertionResults || []).map(t => ({
+        title: t.title,
+        fullName: t.fullName,
+        status: t.status,
+        duration: t.duration,
+        failureMessages: t.failureMessages || [],
+      })),
+    })),
+  };
+}
+
+app.get('/api/test-results', (req, res) => {
+  try {
+    const results = readTestResults();
+    res.json(results ? { available: true, ...results } : { available: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => log('info', `server started on port ${PORT}`, {}));
+let testsRunning = false;
+app.post('/api/run-tests', (req, res) => {
+  if (testsRunning) return res.status(409).json({ error: 'A test run is already in progress' });
+  testsRunning = true;
+  const t0 = Date.now();
+  log('info', 'test run started', {});
+  execFile('npm', ['test'], { cwd: __dirname, timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    testsRunning = false;
+    log('info', 'test run finished', { ms: Date.now() - t0, exitError: !!err });
+    try {
+      const results = readTestResults();
+      if (!results) {
+        // Most likely `vitest` isn't installed here (e.g. a production deploy without
+        // devDependencies) — surface the raw output so that's obvious in the UI.
+        return res.status(500).json({ error: 'Test run produced no results file', stdout: (stdout || '').slice(-4000), stderr: (stderr || '').slice(-4000) });
+      }
+      res.json({ available: true, ...results });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// Only bind a port / schedule cron when run directly (`node server.js`), not when
+// required by a test — lets Supertest exercise `app` without a live listener or timers.
+if (require.main === module) {
+  // Nightly backup at 2am
+  cron.schedule('0 2 * * *', () => {
+    log('info', 'cron backup triggered');
+    runBackup();
+  });
+
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, '0.0.0.0', () => log('info', `server started on port ${PORT}`, {}));
+}
+
+module.exports = app;
