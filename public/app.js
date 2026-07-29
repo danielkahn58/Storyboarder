@@ -5777,7 +5777,7 @@ function buildComposeLocThumbs(shot) {
     });
     (l.customViews || []).forEach(cv => {
       const img = (cv.useRef && cv.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : cv.image;
-      if (img) variations.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img, deletable: true, cvId: cv.id });
+      if (img) variations.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img, deletable: false, cvId: cv.id });
     });
 
     const varThumbs = variations.map(v => `
@@ -5820,10 +5820,11 @@ function onLocBgViewChange(locId, viewKey) {
   if (viewKey === 'default') {
     imgUrl = locDefaultImage(loc);
   } else if (viewKey.startsWith('angle-')) {
-    imgUrl = loc.shotAngles?.[viewKey.slice(6)]?.image || null;
+    const entry = loc.shotAngles?.[viewKey.slice(6)];
+    imgUrl = (entry?.useRef && entry?.refImage) ? (entry.refImage.dataUrl || entry.refImage.url) : (entry?.image || null);
   } else if (viewKey.startsWith('custom-')) {
     const cv = (loc.customViews || []).find(c => c.id === viewKey.slice(7));
-    imgUrl = cv?.image || null;
+    imgUrl = (cv?.useRef && cv?.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : (cv?.image || null);
   }
   const key = `loc-${locId}-${viewKey}`;
   captureUndoState();
