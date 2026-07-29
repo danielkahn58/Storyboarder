@@ -631,7 +631,7 @@ function renderHeader() {
         <div id="version-ui" class="version-bar"></div>
         <a href="/vrm-builder.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">VRM Builder</a>
         <a href="/reference.html" style="color:#818cf8;font-size:13px;text-decoration:none;font-weight:500;padding:7px 14px;border:1px solid #2e2e50;border-radius:6px;background:#1a1a2e;">Reference Images</a>
-        <button onclick="openRequirements()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Requirements</button>
+        <button onclick="openDocs()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Docs</button>
         <button id="btn-open-tests" onclick="openTestResults()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Tests</button>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
@@ -1460,72 +1460,85 @@ function resetLocRules() {
   autoSave();
 }
 
-async function openRequirements() {
-  const modal = document.getElementById('requirements-modal');
-  const body = document.getElementById('requirements-body');
-  if (!modal || !body) return;
+const _DOCS = {
+  spec:    { file: '/spec.md',     label: 'Product Spec' },
+  arch:    { file: '/CLAUDE.md',   label: 'Architecture' },
+  testing: { file: '/TESTING.md',  label: 'Testing' },
+};
+let _docsCache = {};
+let _docsActiveTab = 'spec';
+
+async function openDocs(tab = 'spec') {
+  const modal = document.getElementById('docs-modal');
+  if (!modal) return;
   modal.style.display = 'flex';
-  body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
+  await switchDocsTab(tab || _docsActiveTab);
+}
+
+async function switchDocsTab(tab) {
+  _docsActiveTab = tab;
+  document.querySelectorAll('.docs-tab-btn').forEach(b => b.classList.toggle('active', b.id === `docs-tab-${tab}`));
+  const body = document.getElementById('docs-body');
+  if (!body) return;
+  if (_docsCache[tab]) { body.innerHTML = _docsCache[tab]; return; }
+  body.innerHTML = '<p style="color:#555;font-size:12px;padding:8px 0">Loading…</p>';
   try {
-    const md = await fetch('/spec.md').then(r => r.text());
-    body.innerHTML = _renderSpecMd(md);
+    const md = await fetch(_DOCS[tab].file).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+    _docsCache[tab] = _renderMd(md);
+    body.innerHTML = _docsCache[tab];
   } catch(e) {
-    body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load spec.md: ' + e.message + '</p>';
+    body.innerHTML = `<p style="color:#f87171;font-size:12px">Failed to load ${_DOCS[tab].file}: ${e.message}</p>`;
   }
 }
 
-function _renderSpecMd(md) {
-  // Convert spec.md markdown to styled HTML with NEW/UPDATED badges
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function closeDocs() {
+  const modal = document.getElementById('docs-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function _renderMd(md) {
+  const _e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const badge = tag => `<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;vertical-align:middle;margin-left:5px;letter-spacing:.04em;background:${tag==='NEW'?'#14532d':'#1e3a5f'};color:${tag==='NEW'?'#4ade80':'#60a5fa'}">${tag}</span>`;
-  const inlineStyles = s => s
+  const inline = s => s
     .replace(/\*\*NEW\*\*/g, badge('NEW'))
     .replace(/\*\*UPDATED\*\*/g, badge('UPDATED'))
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code style="background:#1a1a1a;padding:1px 4px;border-radius:3px;font-size:10px">$1</code>');
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
 
   const lines = md.split('\n');
-  let html = '';
-  let inUl = false, inBlockquote = false;
+  let html = '', inUl = false, inBq = false, inPre = false, preLines = [];
 
-  const closeUl = () => { if (inUl) { html += '</ul>'; inUl = false; } };
-  const closeBq = () => { if (inBlockquote) { html += '</blockquote>'; inBlockquote = false; } };
+  const closeUl  = () => { if (inUl)  { html += '</ul>';         inUl  = false; } };
+  const closeBq  = () => { if (inBq)  { html += '</blockquote>'; inBq  = false; } };
+  const flushPre = () => { if (inPre) { html += `<pre>${_e(preLines.join('\n'))}</pre>`; inPre = false; preLines = []; } };
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith('# ')) {
-      closeUl(); closeBq();
-      html += `<h2 style="color:#e2e8f0;font-size:15px;margin:0 0 18px">${esc(line.slice(2))}</h2>`;
-    } else if (line.startsWith('## ')) {
-      closeUl(); closeBq();
-      html += `<h3 style="color:#818cf8;font-size:13px;margin:20px 0 8px;padding-top:4px;border-top:1px solid #1a1a1a">${inlineStyles(esc(line.slice(3)))}</h3>`;
-    } else if (line.startsWith('### ')) {
-      closeUl(); closeBq();
-      html += `<h4 style="color:#a78bfa;font-size:12px;margin:14px 0 6px">${inlineStyles(esc(line.slice(4)))}</h4>`;
-    } else if (line.startsWith('> ')) {
-      closeUl();
-      if (!inBlockquote) { html += '<blockquote style="border-left:2px solid #374151;margin:0 0 14px;padding:6px 12px;color:#6b7280;font-size:11px">'; inBlockquote = true; }
-      html += `<p style="margin:2px 0">${inlineStyles(esc(line.slice(2)))}</p>`;
-    } else if (line.startsWith('- ')) {
-      closeBq();
-      if (!inUl) { html += '<ul style="margin:0 0 8px;padding-left:18px">'; inUl = true; }
-      html += `<li style="margin-bottom:4px;font-size:12px;color:#c4c4c4;line-height:1.5">${inlineStyles(esc(line.slice(2)))}</li>`;
-    } else if (line.startsWith('---')) {
-      closeUl(); closeBq();
-    } else if (line.trim() === '') {
-      closeUl(); closeBq();
-    } else {
-      closeUl(); closeBq();
-      if (line.trim()) html += `<p style="font-size:12px;color:#c4c4c4;margin:0 0 8px;line-height:1.6">${inlineStyles(esc(line))}</p>`;
-    }
+  // table state
+  let inTable = false, tableRows = [];
+  const flushTable = () => {
+    if (!inTable) return;
+    const [head, , ...body] = tableRows;
+    const ths = head.split('|').filter(c => c.trim()).map(c => `<th>${inline(_e(c.trim()))}</th>`).join('');
+    const trs = body.map(row => '<tr>' + row.split('|').filter(c => c.trim()).map(c => `<td>${inline(_e(c.trim()))}</td>`).join('') + '</tr>').join('');
+    html += `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+    inTable = false; tableRows = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith('```')) { flushTable(); closeUl(); closeBq(); if (inPre) flushPre(); else inPre = true; continue; }
+    if (inPre) { preLines.push(line); continue; }
+    if (line.startsWith('|')) { closeUl(); closeBq(); inTable = true; tableRows.push(line); continue; }
+    if (inTable) flushTable();
+    if (line.startsWith('# '))   { closeUl(); closeBq(); html += `<h2>${_e(line.slice(2))}</h2>`; }
+    else if (line.startsWith('## '))  { closeUl(); closeBq(); html += `<h3>${inline(_e(line.slice(3)))}</h3>`; }
+    else if (line.startsWith('### ')) { closeUl(); closeBq(); html += `<h4>${inline(_e(line.slice(4)))}</h4>`; }
+    else if (line.startsWith('> '))   { closeUl(); if (!inBq) { html += '<blockquote>'; inBq = true; } html += `<p style="margin:2px 0">${inline(_e(line.slice(2)))}</p>`; }
+    else if (line.startsWith('- '))   { closeBq(); if (!inUl) { html += '<ul>'; inUl = true; } html += `<li>${inline(_e(line.slice(2)))}</li>`; }
+    else if (line.startsWith('---'))  { closeUl(); closeBq(); }
+    else if (!line.trim())            { closeUl(); closeBq(); }
+    else                              { closeUl(); closeBq(); html += `<p>${inline(_e(line))}</p>`; }
   }
-  closeUl(); closeBq();
+  flushPre(); flushTable(); closeUl(); closeBq();
   return html;
-}
-
-function closeRequirements() {
-  const modal = document.getElementById('requirements-modal');
-  if (modal) modal.style.display = 'none';
 }
 
 // ── Test results panel ──────────────────────────────────────────────────────
