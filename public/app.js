@@ -220,6 +220,9 @@ let versions = []; // { id, label, parentLabel, data, timestamp }
 let currentVersionLabel = null;
 let editsSinceVersion = 0;
 let _lastAutoSnapshotTime = 0;
+// When true: skip all local storage reads/writes; all data goes through Supabase; failures throw.
+// Stored in localStorage under a dedicated key that is always read/written regardless of this setting.
+let cloudOnlyMode = localStorage.getItem('sg-cloud-only') === '1';
 const AUTO_VERSION_EVERY = 100;
 
 let lastScriptText = null;
@@ -256,7 +259,7 @@ async function sbUpsertMeta(proj) {
   } catch(e) { console.warn('sb upsert meta:', e.message); }
 }
 
-async function sbUpsertData(id, stripped, imgs) {
+async function sbUpsertData(id, stripped, imgs, throwOnError = false) {
   const proj = projects.find(p => p.id === id);
   try {
     // Exclude scriptText from the DB row — it can be hundreds of KB and causes
@@ -286,8 +289,9 @@ async function sbUpsertData(id, stripped, imgs) {
     const isPaused = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError');
     const msg = isPaused
       ? 'Cloud sync failed — Supabase project may be paused. Visit supabase.com/dashboard to restore it.'
-      : `Cloud sync failed (${e.message || 'unknown error'}) — data saved locally only.`;
+      : `Cloud sync failed (${e.message || 'unknown error'})${throwOnError ? '' : ' — data saved locally only.'}.`;
     showToast(msg, true);
+    if (throwOnError) throw e;
   }
 }
 
@@ -805,39 +809,47 @@ async function loadData() {
     let saved = null;
     let imgs = null;
 
-    // Read local data as baseline before touching Supabase
-    const localSaved = localStorage.getItem(key);
-    let localImgs = null;
-    try { localImgs = await idbGet(key); } catch {}
-    const localCharCount = (() => { try { return JSON.parse(localSaved)?.characters?.length || 0; } catch { return 0; } })();
-
-    // Try Supabase — prefer whichever source is newer (by savedAt), but never replace local data with less data
-    if (currentProjectId) {
+    if (cloudOnlyMode && currentProjectId) {
+      // Cloud-only: fetch exclusively from Supabase, throw on failure
       const sbRow = await sbGetData(currentProjectId);
-      const sbCharCount = sbRow?.data?.characters?.length || 0;
-      if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
-        const sbSavedAt = sbRow.data.savedAt || 0;
-        const localSavedAt = (() => { try { return JSON.parse(localSaved)?.savedAt || 0; } catch { return 0; } })();
-        // Use local if it's strictly newer than Supabase (pending cloud sync not yet uploaded)
-        if (localSavedAt > sbSavedAt && localCharCount > 0) {
-          saved = localSaved;
-          imgs = localImgs;
-          // Re-push to Supabase now so other devices get the latest data
-          const { stripped: s2, imgs: i2 } = _buildPayloadFromSaved(JSON.parse(localSaved), localImgs);
-          sbUpsertData(currentProjectId, s2, i2);
-        } else {
-          saved = JSON.stringify(sbRow.data);
-          imgs = sbRow.images || {};
-          try { localStorage.setItem(key, saved); } catch {}
-          try { await idbSet(key, imgs); } catch {}
+      if (!sbRow?.data) throw new Error('Failed to load project data from cloud. Check your connection and try again.');
+      saved = JSON.stringify(sbRow.data);
+      imgs = sbRow.images || {};
+    } else {
+      // Read local data as baseline before touching Supabase
+      const localSaved = localStorage.getItem(key);
+      let localImgs = null;
+      try { localImgs = await idbGet(key); } catch {}
+      const localCharCount = (() => { try { return JSON.parse(localSaved)?.characters?.length || 0; } catch { return 0; } })();
+
+      // Try Supabase — prefer whichever source is newer (by savedAt), but never replace local data with less data
+      if (currentProjectId) {
+        const sbRow = await sbGetData(currentProjectId);
+        const sbCharCount = sbRow?.data?.characters?.length || 0;
+        if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
+          const sbSavedAt = sbRow.data.savedAt || 0;
+          const localSavedAt = (() => { try { return JSON.parse(localSaved)?.savedAt || 0; } catch { return 0; } })();
+          // Use local if it's strictly newer than Supabase (pending cloud sync not yet uploaded)
+          if (localSavedAt > sbSavedAt && localCharCount > 0) {
+            saved = localSaved;
+            imgs = localImgs;
+            // Re-push to Supabase now so other devices get the latest data
+            const { stripped: s2, imgs: i2 } = _buildPayloadFromSaved(JSON.parse(localSaved), localImgs);
+            sbUpsertData(currentProjectId, s2, i2);
+          } else {
+            saved = JSON.stringify(sbRow.data);
+            imgs = sbRow.images || {};
+            try { localStorage.setItem(key, saved); } catch {}
+            try { await idbSet(key, imgs); } catch {}
+          }
         }
       }
-    }
 
-    // Fall back to local if Supabase unavailable or had less data
-    if (!saved) {
-      saved = localSaved;
-      imgs = localImgs;
+      // Fall back to local if Supabase unavailable or had less data
+      if (!saved) {
+        saved = localSaved;
+        imgs = localImgs;
+      }
     }
 
     if (saved) {
@@ -1050,6 +1062,20 @@ function _buildPayload() {
 
 async function _persistData(key) {
   const { stripped, imgs } = extractImages(_buildPayload());
+  const hasContent = characters.length > 0 || locations.length > 0 || shots.length > 0;
+
+  if (cloudOnlyMode) {
+    // Cloud-only: write directly to Supabase, throw on failure
+    if (!currentProjectId || !hasContent) return;
+    await sbUpsertData(currentProjectId, stripped, imgs, true /* throwOnError */);
+    const now = Date.now();
+    if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
+      _lastAutoSnapshotTime = now;
+      await sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
+    }
+    return;
+  }
+
   // Local cache
   try {
     localStorage.setItem(key, JSON.stringify(stripped));
@@ -1064,10 +1090,9 @@ async function _persistData(key) {
     } catch(e2) { console.error('localStorage save failed:', e2.message); }
   }
   try { await idbSet(key, imgs); } catch(e) { console.warn('IDB save failed:', e.message); }
-  // Sync to Supabase (fire and forget) — only if we have real content to avoid overwriting with empty state
-  if (currentProjectId && (characters.length > 0 || locations.length > 0 || shots.length > 0)) {
+  // Sync to Supabase (fire and forget)
+  if (currentProjectId && hasContent) {
     sbUpsertData(currentProjectId, stripped, imgs);
-    // Auto-snapshot every 10 minutes
     const now = Date.now();
     if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
       _lastAutoSnapshotTime = now;
@@ -1127,6 +1152,7 @@ function debouncedSave() {
 }
 
 function saveVersionMeta() {
+  if (cloudOnlyMode) return; // versions fetched from Supabase snapshots in cloud-only mode
   const key = currentProjectId ? projectVersionsKey(currentProjectId) : 'character-generator-versions';
   // If the save fails due to quota, trim oldest auto-versions one at a time until it fits
   for (let attempt = 0; attempt < versions.length; attempt++) {
@@ -1144,6 +1170,7 @@ function saveVersionMeta() {
 }
 
 function loadVersions() {
+  if (cloudOnlyMode) return; // versions fetched from Supabase snapshots in loadData
   try {
     const key = currentProjectId ? projectVersionsKey(currentProjectId) : 'character-generator-versions';
     const saved = localStorage.getItem(key);
@@ -1448,6 +1475,21 @@ function renderVersionUI() {
     ${currentVersionLabel ? `<span class="version-badge">v${currentVersionLabel}</span>` : ''}
     <button onclick="forceLoadFromCloud()" title="Discard local data and reload from cloud" style="background:none;border:1px solid #2a2a2a;border-radius:5px;color:#555;font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap;flex-shrink:0;">↓ Cloud</button>
   `;
+}
+
+function setCloudOnlyMode(enabled) {
+  cloudOnlyMode = enabled;
+  if (enabled) {
+    localStorage.setItem('sg-cloud-only', '1');
+  } else {
+    localStorage.removeItem('sg-cloud-only');
+  }
+  showToast(enabled ? 'Cloud-only mode on — local cache disabled.' : 'Cloud-only mode off — local caching enabled.');
+}
+
+function initCloudOnlyToggle() {
+  const el = document.getElementById('cloud-only-toggle');
+  if (el) el.checked = cloudOnlyMode;
 }
 
 async function forceLoadFromCloud() {
@@ -2067,6 +2109,7 @@ function switchMainTab(tab) {
   });
   // if it's one of the shots sub-tabs, switch that inner panel too
   if (['shots','avscript','animatic'].includes(tab)) switchShotsTab(tab);
+  if (tab === 'config') initCloudOnlyToggle();
   window.scrollTo(0, 0);
 }
 
@@ -8491,7 +8534,7 @@ async function saveCompose() {
 // so refreshing or closing the tab never loses unsaved changes.
 // (IDB image writes are async and can't be guaranteed during unload — text is safe.)
 window.addEventListener('pagehide', () => {
-  if (!currentProjectId) return;
+  if (!currentProjectId || cloudOnlyMode) return;
   clearTimeout(_saveTimer);
   syncFromDOM();
   const key = projectDataKey(currentProjectId);
