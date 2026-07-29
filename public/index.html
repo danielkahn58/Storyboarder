@@ -303,10 +303,9 @@
   .compose-bg-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
   .compose-bg-card-empty { width: 100%; aspect-ratio: 16/9; background: #1a1a1a; display: flex; align-items: center; justify-content: center; color: #333; font-size: 18px; }
   .compose-bg-card-label { font-size: 10px; color: #888; padding: 3px 5px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .compose-loc-card-wrap { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0; }
-  .compose-loc-card-main { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-  .compose-loc-variations { display: none; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px 0 2px; }
-  .compose-loc-variations.open { display: grid; }
+  .compose-loc-card-wrap { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid #111; margin-bottom: 2px; }
+  .compose-loc-main-card { width: 100%; }
+  .compose-loc-variations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 0; }
   .compose-loc-var-thumb { background: #111; border: 1px solid #1e1e1e; border-radius: 4px; overflow: hidden; cursor: pointer; transition: border-color 0.12s; }
   .compose-loc-var-thumb:hover { border-color: #555; }
   .compose-loc-var-thumb.selected { border-color: #5865f2; }

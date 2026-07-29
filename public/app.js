@@ -5767,37 +5767,32 @@ function buildComposeLocThumbs(shot) {
   if (!thumbContainer) return;
   if (!locations.length) { thumbContainer.innerHTML = `<span class="compose-empty" style="padding:8px 10px;font-size:11px;color:#444">No locations yet.</span>`; return; }
 
-  // Build pairs for 2-col grid — each location gets a "wrap" spanning both cols
   thumbContainer.innerHTML = locations.map(l => {
-    const views = [{ key: 'default', label: 'Default', img: locDefaultImage(l) }];
-    LOC_ANGLES.forEach(a => { const img = l.shotAngles?.[a]?.image; if (img) views.push({ key: `angle-${a}`, label: a.replace('establishing shot','est.').replace(' shot',''), img }); });
-    (l.customViews || []).forEach(cv => { if (cv.image) views.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img: cv.image }); });
+    const defaultImg = locDefaultImage(l);
+    const variations = [];
+    LOC_ANGLES.forEach(a => {
+      const entry = l.shotAngles?.[a];
+      const img = (entry?.useRef && entry?.refImage) ? (entry.refImage.dataUrl || entry.refImage.url) : entry?.image;
+      if (img) variations.push({ key: `angle-${a}`, label: a.replace('establishing shot','est.').replace(' shot',''), img, deletable: false });
+    });
+    (l.customViews || []).forEach(cv => {
+      const img = (cv.useRef && cv.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : cv.image;
+      if (img) variations.push({ key: `custom-${cv.id}`, label: cv.name || 'Custom', img, deletable: true, cvId: cv.id });
+    });
 
-    const defaultImg = views[0]?.img;
-    const hasVariations = views.length > 1;
-    const variationThumbs = views.map(v => {
-      const isDeletable = v.key.startsWith('custom-');
-      const cvId = isDeletable ? v.key.slice(7) : null;
-      return `
+    const varThumbs = variations.map(v => `
       <div class="compose-loc-var-thumb" style="position:relative" data-loc-id="${esc(l.id)}" data-view-key="${esc(v.key)}" onclick="onLocBgViewChange('${esc(l.id)}','${esc(v.key)}')" title="${esc(v.label)}">
-        ${v.img ? `<img src="${esc(proxyUrl(v.img))}" crossorigin="anonymous">` : `<div class="compose-loc-var-thumb-empty">·</div>`}
+        <img src="${esc(proxyUrl(v.img))}" crossorigin="anonymous">
         <span class="compose-loc-var-label">${esc(v.label)}</span>
-        ${isDeletable ? `<button class="comp-thumb-delete" onclick="event.stopPropagation();deleteLocCustomViewById('${esc(l.id)}','${esc(cvId)}')" title="Delete variation">✕</button>` : ''}
-      </div>`;
-    }).join('');
+        ${v.deletable ? `<button class="comp-thumb-delete" onclick="event.stopPropagation();deleteLocCustomViewById('${esc(l.id)}','${esc(v.cvId)}')" title="Delete">✕</button>` : ''}
+      </div>`).join('');
 
     return `<div class="compose-loc-card-wrap" data-loc-id="${esc(l.id)}">
-      <div class="compose-loc-card-main">
-        <div class="compose-bg-card" data-bg-key="loc-${esc(l.id)}-default" onclick="onLocBgCardClick('${esc(l.id)}')">
-          ${defaultImg ? `<img src="${esc(proxyUrl(defaultImg))}" crossorigin="anonymous">` : `<div class="compose-bg-card-empty">·</div>`}
-          <span class="compose-bg-card-label">${esc(l.name || 'Unnamed')}</span>
-        </div>
-        ${hasVariations ? `<div class="compose-bg-card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;color:#555;font-size:10px" onclick="toggleLocVariations('${esc(l.id)}')">
-          <span style="font-size:18px;line-height:1">⊞</span>
-          <span>${views.length} views</span>
-        </div>` : ''}
+      <div class="compose-bg-card compose-loc-main-card" data-bg-key="loc-${esc(l.id)}-default" onclick="onLocBgCardClick('${esc(l.id)}')">
+        ${defaultImg ? `<img src="${esc(proxyUrl(defaultImg))}" crossorigin="anonymous">` : `<div class="compose-bg-card-empty">·</div>`}
+        <span class="compose-bg-card-label">${esc(l.name || 'Unnamed')}</span>
       </div>
-      ${hasVariations ? `<div class="compose-loc-variations" id="loc-vars-${esc(l.id)}">${variationThumbs}</div>` : ''}
+      ${variations.length ? `<div class="compose-loc-variations" id="loc-vars-${esc(l.id)}">${varThumbs}</div>` : ''}
     </div>`;
   }).join('');
 }
