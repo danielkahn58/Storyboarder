@@ -1866,13 +1866,79 @@ function removeShotRefImage(id, evt) {
   const shot = shots.find(s => s.id === id);
   if (shot) { shot.refImage = null; autoSave(); renderShots(); }
 }
+function openLocVariationPicker(shotId) {
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return;
+  const loc = locations.find(l => l.id === shot.locationId);
+  if (!loc) return;
+
+  // Remove any existing picker
+  document.getElementById('loc-var-picker-overlay')?.remove();
+
+  const btn = document.querySelector(`#shots-body tr[data-id="${shotId}"] .btn-loc-variation`);
+  const rect = btn ? btn.getBoundingClientRect() : { left: 0, bottom: 80 };
+
+  const views = [];
+  for (const angle of Object.keys(loc.shotAngles || {})) {
+    const entry = loc.shotAngles[angle];
+    const img = (entry.useRef && entry.refImage) ? (entry.refImage.dataUrl || entry.refImage.url) : entry.image;
+    if (!img) continue;
+    views.push({ key: angle, label: angle, img });
+  }
+  for (const cv of (loc.customViews || [])) {
+    const img = (cv.useRef && cv.refImage) ? (cv.refImage.dataUrl || cv.refImage.url) : cv.image;
+    if (!img) continue;
+    views.push({ key: `cv:${cv.id}`, label: cv.name || 'Custom', img });
+  }
+
+  if (!views.length) { showToast('No variations generated for this location yet.'); return; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'loc-var-picker-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  const popup = document.createElement('div');
+  popup.style.cssText = `position:absolute;background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:12px;box-shadow:0 8px 32px rgba(0,0,0,0.7);min-width:280px;max-width:400px;`;
+  // Position below button, keep on screen
+  const top = Math.min(rect.bottom + 8 + window.scrollY, window.innerHeight + window.scrollY - 260);
+  const left = Math.min(rect.left, window.innerWidth - 420);
+  popup.style.top = top + 'px';
+  popup.style.left = Math.max(8, left) + 'px';
+
+  popup.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:12px;font-weight:600;color:#aaa">${esc(loc.name || 'Location')} — Variations</span>
+      <button onclick="document.getElementById('loc-var-picker-overlay').remove()" style="background:none;border:none;color:#555;font-size:14px;cursor:pointer;line-height:1;padding:2px 4px">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+      ${views.map(v => {
+        const sel = shot.locationAngleKey === v.key;
+        return `<div onclick="selectLocVariation('${shotId}','${v.key}');document.getElementById('loc-var-picker-overlay').remove()"
+          style="border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid ${sel ? '#818cf8' : '#2a2a2a'};transition:border-color 0.12s"
+          onmouseover="this.style.borderColor='${sel ? '#818cf8' : '#555'}'" onmouseout="this.style.borderColor='${sel ? '#818cf8' : '#2a2a2a'}'">
+          <img src="${esc(v.img)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;display:block">
+          <div style="font-size:10px;color:#888;padding:3px 5px;background:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.label)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    ${shot.locationAngleKey ? `<button onclick="selectLocVariation('${shotId}','');document.getElementById('loc-var-picker-overlay').remove()" style="margin-top:10px;width:100%;background:none;border:1px solid #2a2a2a;border-radius:5px;color:#666;font-size:11px;padding:5px;cursor:pointer">Clear selection</button>` : ''}
+  `;
+
+  overlay.appendChild(popup);
+  document.body.appendChild(overlay);
+}
+
 function selectLocVariation(shotId, angleKey) {
   const shot = shots.find(s => s.id === shotId);
   if (!shot) return;
-  shot.locationAngleKey = (shot.locationAngleKey === angleKey) ? '' : angleKey;
-  // Refresh the thumbnail strip in place
-  const strip = document.getElementById(`loc-vars-${shotId}`);
-  if (strip) strip.outerHTML = locVariationsHTML(shot);
+  shot.locationAngleKey = angleKey;
+  // Update the button label
+  const btn = document.querySelector(`#shots-body tr[data-id="${shotId}"] .btn-loc-variation`);
+  if (btn) {
+    btn.textContent = angleKey ? '⬛ Variation set' : '⬛ Choose variation';
+    btn.classList.toggle('btn-loc-variation-set', !!angleKey);
+  }
   // Update final preview image
   const finalCell = document.getElementById(`final-img-${shotId}`);
   if (finalCell && !shot.finalImage) {
@@ -2836,7 +2902,7 @@ function shotRowHTML(s, idx) {
     <td data-label="Visual"><textarea class="field-desc" rows="3" placeholder="Visual description…" oninput="debouncedSave()">${esc(s.description)}</textarea></td>
     <td class="shot-card-chars" data-label="Characters"><div class="char-checks">${charChecks}</div></td>
     <td class="shot-card-loc" data-label="Location"><select class="field-loc-select" onchange="onShotLocationChange('${s.id}',this.value);autoSave()">${locOpts}</select>
-${locVariationsHTML(s)}
+${s.locationId ? `<button class="btn-loc-variation${s.locationAngleKey ? ' btn-loc-variation-set' : ''}" onclick="openLocVariationPicker('${s.id}')" title="Choose location variation">${s.locationAngleKey ? '⬛ Variation set' : '⬛ Choose variation'}</button>` : ''}
 <div class="shot-ref-zone" onclick="triggerShotRefUpload('${s.id}')" title="Reference photo — overrides location when generating images">
   ${s.refImage
     ? `<img src="${esc(s.refImage.dataUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:3px"><button class="shot-ref-remove" onclick="removeShotRefImage('${s.id}',event)">✕</button>`
@@ -5729,10 +5795,13 @@ function toggleLocVariations(locId) {
 }
 
 function onLocBgCardClick(locId) {
-  // Select default view and also open variations
-  onLocBgViewChange(locId, 'default');
+  // Collapse all other locations' variations, expand this one
+  document.querySelectorAll('.compose-loc-variations').forEach(el => {
+    if (el.id !== `loc-vars-${locId}`) el.classList.remove('open');
+  });
   const el = document.getElementById(`loc-vars-${locId}`);
-  if (el && !el.classList.contains('open')) el.classList.add('open');
+  if (el) el.classList.add('open');
+  onLocBgViewChange(locId, 'default');
 }
 
 function onLocBgViewChange(locId, viewKey) {
