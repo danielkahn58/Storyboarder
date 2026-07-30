@@ -2717,27 +2717,20 @@ function deleteAnimatic(index) {
 
 let _animaticTimeline = null;
 
-function renderAnimaticTimeline(videoEl, animatic) {
+function renderAnimaticTimeline(videoEl, _animatic) {
   const video = videoEl || document.querySelector('#animatic-history video');
   const wrap = document.getElementById('animatic-timeline-wrap');
   if (!video || !wrap) return;
   const duration = video.duration;
   if (!duration || !isFinite(duration)) return;
 
-  // Prefer the snapshot saved at generation time; fall back to current shots
-  let timedShots;
-  if (animatic?.shots?.length) {
-    timedShots = animatic.shots
-      .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
-      .filter(Boolean)
-      .sort((a, b) => a.secs - b.secs);
-  } else {
-    timedShots = shots
-      .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
-      .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
-      .filter(Boolean)
-      .sort((a, b) => a.secs - b.secs);
-  }
+  // Always build from live shots so drag updates always find the right shot by ID.
+  // Using the frozen snapshot caused ID-mismatch when shots were edited after generation.
+  const timedShots = shots
+    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
+    .filter(Boolean)
+    .sort((a, b) => a.secs - b.secs);
 
   if (!timedShots.length) return;
   _animaticTimeline = { duration, shots: timedShots };
