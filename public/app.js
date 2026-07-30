@@ -297,13 +297,43 @@ async function sbUpsertData(id, stripped, imgs, throwOnError = false) {
 
 // stripBase64ForSync now lives in lib/versioning.js (loaded before this script).
 
+const _snapQueueKey = (id) => `sg-snap-queue-${id}`;
+
 async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
+  const strippedImgs = stripBase64ForSync(imgs);
   try {
-    const strippedImgs = stripBase64ForSync(imgs);
     await apiFetch('/api/snapshots', {
       projectId, label: label || null, auto: isAuto, data: stripped, images: strippedImgs
     });
-  } catch(e) { console.warn('snapshot save failed:', e.message); }
+  } catch(e) {
+    console.warn('snapshot save failed:', e.message);
+    showToast('Version checkpoint couldn\'t reach the server — queued for retry on next load.', true);
+    try {
+      const key = _snapQueueKey(projectId);
+      const queue = JSON.parse(localStorage.getItem(key) || '[]');
+      queue.push({ label, isAuto, data: stripped, images: strippedImgs, queuedAt: Date.now() });
+      while (queue.length > 5) queue.shift(); // cap to avoid quota issues
+      localStorage.setItem(key, JSON.stringify(queue));
+    } catch(qe) { console.warn('snapshot queue store failed:', qe.message); }
+  }
+}
+
+async function flushSnapshotQueue(projectId) {
+  if (!projectId) return;
+  try {
+    const key = _snapQueueKey(projectId);
+    const queue = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!queue.length) return;
+    const remaining = [];
+    for (const item of queue) {
+      try {
+        await apiFetch('/api/snapshots', { projectId, label: item.label || null, auto: item.isAuto, data: item.data, images: item.images });
+      } catch(e) { remaining.push(item); }
+    }
+    if (remaining.length) localStorage.setItem(key, JSON.stringify(remaining));
+    else localStorage.removeItem(key);
+    if (remaining.length < queue.length) showToast(`Flushed ${queue.length - remaining.length} queued version checkpoint(s).`);
+  } catch(e) { console.warn('snapshot queue flush failed:', e.message); }
 }
 
 async function sbGetSnapshots(projectId) {
@@ -801,6 +831,7 @@ async function loadData() {
   restoreAudio();
   prefetchCharBgRemovals();
   migrateRefImages();
+  flushSnapshotQueue(currentProjectId);
 }
 
 // Migrate any non-Supabase images (fal.media URLs or base64 data URIs) to Supabase Storage
