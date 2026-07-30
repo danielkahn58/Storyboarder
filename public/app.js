@@ -1571,11 +1571,30 @@ function _renderMd(md) {
 }
 
 // ── Test results panel ──────────────────────────────────────────────────────
+let _testTab = 'unit';
+
+function switchTestTab(tab) {
+  _testTab = tab;
+  const unitBtn = document.getElementById('test-tab-unit');
+  const uiBtn = document.getElementById('test-tab-ui');
+  if (unitBtn) { unitBtn.style.borderColor = tab === 'unit' ? '#818cf8' : '#333'; unitBtn.style.background = tab === 'unit' ? '#1a1a2e' : 'none'; unitBtn.style.color = tab === 'unit' ? '#818cf8' : '#555'; }
+  if (uiBtn) { uiBtn.style.borderColor = tab === 'ui' ? '#818cf8' : '#333'; uiBtn.style.background = tab === 'ui' ? '#1a1a2e' : 'none'; uiBtn.style.color = tab === 'ui' ? '#818cf8' : '#555'; }
+  const runBtn = document.getElementById('btn-run-tests');
+  if (runBtn) runBtn.style.display = tab === 'unit' ? '' : 'none';
+  const body = document.getElementById('test-results-body');
+  if (!body) return;
+  if (tab === 'ui') { body.innerHTML = _renderUiTestCases(); return; }
+  // Re-load unit tab
+  openTestResults();
+}
+
 async function openTestResults() {
+  _testTab = 'unit';
   const modal = document.getElementById('test-results-modal');
   const body = document.getElementById('test-results-body');
   if (!modal || !body) return;
   modal.style.display = 'flex';
+  switchTestTab('unit');
   body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
   try {
     const data = await fetch('/api/test-results').then(r => r.json());
@@ -1651,6 +1670,114 @@ function _renderTestResults(data) {
       }
     }
     html += `</div></div>`;
+  }
+
+  return html;
+}
+
+function _renderUiTestCases() {
+  const sections = [
+    { label: 'Authentication', cases: [
+      ['Unauthenticated access redirects to Google login page', 'Prevents unauthorized use; catches accidental session expiry'],
+      ['After Google OAuth, user email appears in header', 'Confirms session cookie and user badge render correctly'],
+      ['Sign Out clears session and returns to login', 'Ensures logout fully revokes the session'],
+    ]},
+    { label: 'Project Management', cases: [
+      ['Projects grid loads on first visit with existing projects shown', 'Regression guard for the project list fetch and render'],
+      ['Creating a new project navigates to the editor with an empty state', 'Core onboarding flow; guards the new-project API and routing'],
+      ['Clicking the project name opens a rename prompt; save updates the title', 'Covers inline rename UX and project metadata persistence'],
+      ['Deleting a project removes it from the grid after confirmation', 'Guards destructive action guard and Supabase delete'],
+      ['↓ Cloud button reloads the project from Supabase and discards local changes', 'Cross-device sync escape hatch; verifies forceLoadFromCloud flow'],
+    ]},
+    { label: 'Characters', cases: [
+      ['Adding a character appends a new row with default name', 'Basic CRUD; regression guard for addCharacter()'],
+      ['Editing name and description updates the data on save', 'Confirms syncFromDOM picks up typed field values'],
+      ['Uploading a reference image displays a thumbnail and stores the URL', 'Image upload + Supabase storage pipeline'],
+      ['Generating a character image calls the AI and populates the image cell', 'End-to-end image generation flow including fal.ai polling'],
+      ['Deleting a character removes it and auto-saves', 'Guards deleteCharacter() and re-render after removal'],
+    ]},
+    { label: 'Locations', cases: [
+      ['Adding a location appends a card with default name', 'Basic CRUD parity with characters'],
+      ['Uploading an angle reference image appears in the angle slot', 'Location angle ref image upload pipeline'],
+      ['Adding a custom view shows it in the variations grid', 'Custom view creation and render'],
+      ['Generating a location image populates the default image', 'Location AI generation flow'],
+      ['Location variation picker opens on button click and closes on selection', 'Regression guard for openLocVariationPicker popup'],
+    ]},
+    { label: 'Shot Sequence', cases: [
+      ['Adding a shot appends a new row with empty fields', 'Basic CRUD for shots'],
+      ['Assigning a character to a shot updates the character column', 'Shot–character linking and re-render'],
+      ['Assigning a location to a shot shows the location name and variation button', 'Shot–location linking'],
+      ['Opening the location variation picker and selecting a variation updates the button label', 'selectLocVariation() round-trip'],
+      ['Setting a timestamp in the shot row persists on save and shows in the timeline', 'Timestamp field → syncFromDOM → save pipeline'],
+      ['Generating a shot image populates the Final Image column', 'Shot image generation end-to-end'],
+    ]},
+    { label: 'Audio & Transcript', cases: [
+      ['Importing an audio file displays the waveform and enables the bar-marker tools', 'Audio import pipeline and waveform render'],
+      ['Dragging a bar marker updates its timestamp in the marker list', 'Bar-marker drag handler (_dragMarkerIdx flow)'],
+      ['Transcribing audio populates the lyrics box with timestamped words', 'Whisper transcription → transcript display'],
+      ['Auto-assigning timestamps maps each shot lyric to the nearest transcript word', 'autoAssignTimestamps() correctness'],
+      ['Pinning the audio player keeps playback controls visible while scrolling', 'Pinned-player UX regression'],
+    ]},
+    { label: 'Image Editor (Compose)', cases: [
+      ['Opening the compose editor from a shot loads the shot\'s location as the default background', 'Editor init: openCompose() → loadComposeBackground()'],
+      ['Clicking a location card in the Background tab loads it on the canvas', 'onLocBgCardClick() → loadComposeBackground()'],
+      ['Clicking a location variation loads that angle as the background', 'onLocBgViewChange() image resolution fix'],
+      ['Location variation thumbnails do not show a delete button', 'Regression: delete should only appear in location management, not compose'],
+      ['Adding a character layer places it on the canvas and shows in the layers list', 'Layer add → renderCompose()'],
+      ['Adjusting brightness/saturation sliders changes the canvas rendering', 'Global effect parameters → renderCompose()'],
+      ['Saving the composition sets the shot\'s Final Image and closes the editor', 'saveComposeAsFinal() end-to-end'],
+    ]},
+    { label: 'Versions', cases: [
+      ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY threshold + createVersion(true)'],
+      ['Creating a named version labels it and resets the edit counter', 'createVersion() label generation'],
+      ['Switching to an older version restores that state across all tabs', 'loadVersion() data restoration'],
+      ['Version list appears on a second device after saving', 'Cross-device version sync via project_snapshots'],
+      ['Queued snapshot is flushed on next page load after a deploy interruption', 'flushSnapshotQueue() retry mechanism'],
+    ]},
+    { label: 'Animatic', cases: [
+      ['Generating an animatic produces a video and adds it as "Latest" in the history', 'generateAnimatic() full flow'],
+      ['The animatic timeline renders handles at the correct positions matching shot timestamps', 'Handle X-position: (secs - offset) / duration alignment fix'],
+      ['Dragging a timeline handle updates the segment widths and the handle position', 'startTlDrag() onMove: direct style update without innerHTML replacement'],
+      ['Releasing a dragged handle updates the shot timestamp in the shot sequence table', 'onUp: shot.timestamp update + autoSave()'],
+      ['The playhead moves as the video plays', 'updateAnimaticPlayhead() timeupdate listener'],
+    ]},
+    { label: 'Configuration & Cloud', cases: [
+      ['Toggling Cloud Only mode disables local caching and shows an indicator', 'setCloudOnlyMode() toggle and cloudOnlyMode flag'],
+      ['In Cloud Only mode, a save failure shows an error toast (not a silent fail)', 'sbUpsertData throwOnError branch'],
+      ['Saving a visual style applies it to all character and location prompt previews', 'setStyle() → applyStyleUI()'],
+      ['Script upload parses the script and populates shot descriptions', 'handleScriptUpload() → /api/parse-script'],
+    ]},
+    { label: 'Documentation', cases: [
+      ['Opening the Docs modal shows the Product Spec tab by default', 'openDocs() + _DOCS fetch'],
+      ['Switching to Architecture tab renders the CLAUDE.md content', 'switchDocsTab(\'arch\') → _renderMd()'],
+      ['Switching to Testing tab renders the TESTING.md content with NEW badges', 'switchDocsTab(\'testing\') + badge markup'],
+    ]},
+  ];
+
+  const labelStyle = 'font-size:12px;font-weight:600;color:#818cf8;margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid #1e1e1e;';
+  const noteStyle = 'font-size:10px;color:#444;font-style:italic;margin-left:8px;';
+  const rowStyle = 'display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;padding:3px 0;border-bottom:1px solid #111;';
+  const caseStyle = 'font-size:12px;color:#999;display:flex;align-items:baseline;gap:6px;';
+  const whyStyle = 'font-size:11px;color:#444;';
+
+  let html = `<div style="font-size:11px;color:#555;margin-bottom:16px;padding:10px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
+    Conceptual Playwright / Cypress test cases — not yet implemented. These cover the full user journey end-to-end.
+    Each row shows the test description and <em>why it matters</em>.
+  </div>`;
+
+  html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;padding:4px 0;margin-bottom:8px;border-bottom:1px solid #2a2a2a;">
+    <span style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Test case</span>
+    <span style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Why it matters</span>
+  </div>`;
+
+  for (const s of sections) {
+    html += `<div style="${labelStyle}">▸ ${esc(s.label)}</div>`;
+    for (const [desc, why] of s.cases) {
+      html += `<div style="${rowStyle}">
+        <div style="${caseStyle}"><span style="color:#444">▷</span><span>${esc(desc)}</span></div>
+        <div style="${whyStyle}">${esc(why)}</div>
+      </div>`;
+    }
   }
 
   return html;
@@ -2666,22 +2793,28 @@ function startTlDrag(e, shotId) {
   if (shotIdx <= 0) return;
 
   const tlRect = tl.getBoundingClientRect();
-  const minSecs = ts[shotIdx - 1].secs + 0.3;
-  const maxSecs = (shotIdx + 1 < ts.length ? ts[shotIdx + 1].secs : duration) - 0.3;
-
   const offset = ts[0].secs;
+  const minSecs = ts[shotIdx - 1].secs + 0.3;
+  // Last handle: max is end of the video in audio time (offset + video duration)
+  const maxSecs = (shotIdx + 1 < ts.length ? ts[shotIdx + 1].secs : offset + duration) - 0.3;
+
+  // Capture handle element now — full redraws during drag destroy it
+  const dragHandle = e.target.closest('.tl-handle');
+
   const onMove = (ev) => {
     const pct = Math.max(0, Math.min(1, (ev.clientX - tlRect.left) / tlRect.width));
     ts[shotIdx].secs = Math.max(minSecs, Math.min(maxSecs, pct * duration + offset));
-    _redrawAnimaticTimeline();
+    // Move just the handle element; avoid full innerHTML replacement mid-drag
+    if (dragHandle && dragHandle.isConnected) {
+      dragHandle.style.left = ((ts[shotIdx].secs - offset) / duration * 100) + '%';
+    }
   };
 
   const onUp = () => {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
     const newTs = formatTimestamp(ts[shotIdx].secs);
-    // Update the animatic snapshot so the handle stays in the right place
-    ts[shotIdx].timestamp = newTs;
+    // Update the animatic snapshot so handle position survives reload
     if (animatics[0]?.shots) {
       const snapShot = animatics[0].shots.find(s => s.id === shotId);
       if (snapShot) snapShot.timestamp = newTs;
@@ -2693,7 +2826,8 @@ function startTlDrag(e, shotId) {
       const inp = document.querySelector(`#shots-body tr[data-id="${shotId}"] .field-timestamp`);
       if (inp) inp.value = newTs;
     }
-    debouncedSave();
+    _redrawAnimaticTimeline(); // full redraw now to fix segment widths and labels
+    autoSave();
   };
 
   document.addEventListener('pointermove', onMove);
