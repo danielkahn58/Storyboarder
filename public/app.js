@@ -2819,14 +2819,12 @@ function startTlDrag(e, shotId) {
       const snapShot = animatics[0].shots.find(s => s.id === shotId);
       if (snapShot) snapShot.timestamp = newTs;
     }
-    // Update the live shot and its DOM input
+    // Preserve all other DOM edits first, then stamp the dragged shot's new timestamp
+    syncFromDOM();
     const shot = shots.find(s => s.id === shotId);
-    if (shot) {
-      shot.timestamp = newTs;
-      const inp = document.querySelector(`#shots-body tr[data-id="${shotId}"] .field-timestamp`);
-      if (inp) inp.value = newTs;
-    }
-    _redrawAnimaticTimeline(); // full redraw now to fix segment widths and labels
+    if (shot) shot.timestamp = newTs;
+    _redrawAnimaticTimeline();
+    renderShots(); // re-render shots table so the updated timestamp is immediately visible
     autoSave();
   };
 
