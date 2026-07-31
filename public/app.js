@@ -2717,15 +2717,14 @@ function deleteAnimatic(index) {
 
 let _animaticTimeline = null;
 
-function renderAnimaticTimeline(videoEl, _animatic) {
+function renderAnimaticTimeline(videoEl, animatic) {
   const video = videoEl || document.querySelector('#animatic-history video');
   const wrap = document.getElementById('animatic-timeline-wrap');
   if (!video || !wrap) return;
   const duration = video.duration;
   if (!duration || !isFinite(duration)) return;
 
-  // Always build from live shots so drag updates always find the right shot by ID.
-  // Using the frozen snapshot caused ID-mismatch when shots were edited after generation.
+  // Build from live shots — IDs always match the shots array so drag updates land correctly.
   const timedShots = shots
     .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
@@ -2793,6 +2792,8 @@ function startTlDrag(e, shotId) {
 
   // Capture handle element now — full redraws during drag destroy it
   const dragHandle = e.target.closest('.tl-handle');
+  // Store original position before drag so fallback timestamp-matching works in onUp
+  const originalSecs = ts[shotIdx].secs;
 
   const onMove = (ev) => {
     const pct = Math.max(0, Math.min(1, (ev.clientX - tlRect.left) / tlRect.width));
@@ -2807,17 +2808,32 @@ function startTlDrag(e, shotId) {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
     const newTs = formatTimestamp(ts[shotIdx].secs);
-    // Update the animatic snapshot so handle position survives reload
+
+    // Update the animatic snapshot so the handle position survives reload
     if (animatics[0]?.shots) {
-      const snapShot = animatics[0].shots.find(s => s.id === shotId);
-      if (snapShot) snapShot.timestamp = newTs;
+      const snap = animatics[0].shots.find(s => s.id === shotId);
+      if (snap) snap.timestamp = newTs;
     }
-    // Preserve all other DOM edits first, then stamp the dragged shot's new timestamp
+
+    // Find the live shot via three fallbacks (snapshot IDs may diverge from live IDs
+    // after version switches, re-imports, etc.):
+    //   1. ID match — exact, works when IDs haven't changed
+    //   2. Timestamp match — finds the shot whose current timestamp equals the
+    //      original snapshot timestamp (before this drag started)
+    //   3. Position match — shot at the same sorted index in the filtered live list
     syncFromDOM();
-    const shot = shots.find(s => s.id === shotId);
+    const originalTs = formatTimestamp(originalSecs);
+    const filteredLive = shots
+      .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+      .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
+
+    let shot = shots.find(s => s.id === shotId);
+    if (!shot) shot = shots.find(s => s.timestamp === originalTs);
+    if (!shot) shot = filteredLive[shotIdx] || null;
+
     if (shot) shot.timestamp = newTs;
     _redrawAnimaticTimeline();
-    renderShots(); // re-render shots table so the updated timestamp is immediately visible
+    renderShots();
     autoSave();
   };
 
