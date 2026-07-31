@@ -2809,6 +2809,8 @@ function startTlDrag(e, shotId) {
     document.removeEventListener('pointerup', onUp);
     const newTs = formatTimestamp(ts[shotIdx].secs);
 
+    console.log('[tlDrag] onUp fired. shotId:', shotId, '| newTs:', newTs, '| originalSecs:', originalSecs);
+
     // Update the animatic snapshot so the handle position survives reload
     if (animatics[0]?.shots) {
       const snap = animatics[0].shots.find(s => s.id === shotId);
@@ -2827,11 +2829,21 @@ function startTlDrag(e, shotId) {
       .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
       .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
 
-    let shot = shots.find(s => s.id === shotId);
-    if (!shot) shot = shots.find(s => s.timestamp === originalTs);
-    if (!shot) shot = filteredLive[shotIdx] || null;
+    console.log('[tlDrag] shots count:', shots.length, '| filteredLive count:', filteredLive.length);
+    console.log('[tlDrag] looking for id:', shotId, '| originalTs:', originalTs, '| shotIdx:', shotIdx);
+    console.log('[tlDrag] all shot ids:', shots.map(s => s.id));
 
-    if (shot) shot.timestamp = newTs;
+    let shot = shots.find(s => s.id === shotId);
+    console.log('[tlDrag] found by ID:', !!shot);
+    if (!shot) { shot = shots.find(s => s.timestamp === originalTs); console.log('[tlDrag] found by ts:', !!shot, '| originalTs:', originalTs); }
+    if (!shot) { shot = filteredLive[shotIdx] || null; console.log('[tlDrag] found by pos:', !!shot); }
+
+    if (shot) {
+      console.log('[tlDrag] updating shot.timestamp from', shot.timestamp, 'to', newTs);
+      shot.timestamp = newTs;
+    } else {
+      console.warn('[tlDrag] NO SHOT FOUND — timestamp NOT updated');
+    }
     _redrawAnimaticTimeline();
     renderShots();
     autoSave();
