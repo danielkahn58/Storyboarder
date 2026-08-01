@@ -659,8 +659,7 @@ function renderHeader() {
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div id="version-ui" class="version-bar"></div>
-<button onclick="openDocs()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Docs</button>
-        <button id="btn-open-tests" onclick="openTestResults()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;">Tests</button>
+<button id="btn-open-kb" onclick="openKb()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#666;font-size:12px;padding:7px 12px;cursor:pointer;position:relative">Docs &amp; Tests<span id="kb-nav-dot" style="display:none;position:absolute;top:4px;right:4px;width:6px;height:6px;background:#818cf8;border-radius:50%;pointer-events:none"></span></button>
         <button id="btn-debug-toggle" onclick="toggleDebugMode()" style="background:none;border:1px solid #222;border-radius:6px;color:#444;font-size:12px;padding:7px 12px;cursor:pointer;">Debug</button>
         <button class="save-btn" onclick="saveData()">Save</button>
         ${userBadgeHTML()}
@@ -1489,41 +1488,141 @@ function resetLocRules() {
   autoSave();
 }
 
-const _DOCS = {
-  spec:    { file: '/spec.md',     label: 'Product Spec' },
-  arch:    { file: '/CLAUDE.md',   label: 'Architecture' },
-  testing: { file: '/TESTING.md',  label: 'Testing' },
-};
-let _docsCache = {};
-let _docsActiveTab = 'spec';
+// ── Knowledge Base (unified Docs + Tests modal) ──────────────────────────────
+let _kbCache = {};
+let _kbActiveTab = 'spec';
 
-async function openDocs(tab = 'spec') {
-  const modal = document.getElementById('docs-modal');
-  if (!modal) return;
-  modal.style.display = 'flex';
-  await switchDocsTab(tab || _docsActiveTab);
+function _kbHashKey(tab) { return 'sg-kb-hash-' + tab; }
+
+function _simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (h * 33 ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
-async function switchDocsTab(tab) {
-  _docsActiveTab = tab;
-  document.querySelectorAll('.docs-tab-btn').forEach(b => b.classList.toggle('active', b.id === `docs-tab-${tab}`));
-  const body = document.getElementById('docs-body');
-  if (!body) return;
-  if (_docsCache[tab]) { body.innerHTML = _docsCache[tab]; return; }
-  body.innerHTML = '<p style="color:#555;font-size:12px;padding:8px 0">Loading…</p>';
+function _stripTestingWhatsCorvered(md) {
+  // Remove the "## What's Covered" section (and any trailing separator) from TESTING.md
+  return md.replace(/\n## What's Covered[\s\S]*?(?=\n## |\n---\s*\n## |\s*$)/, '');
+}
+
+async function _kbFetchContent(tab) {
+  if (tab === 'spec') {
+    const md = await fetch('/spec.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+    return { html: _renderMd(md), hash: _simpleHash(md) };
+  }
+  if (tab === 'arch') {
+    const [claudeMd, testingMd] = await Promise.all([
+      fetch('/CLAUDE.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }),
+      fetch('/TESTING.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }),
+    ]);
+    const combined = claudeMd + '\n\n---\n\n## Testing Guide\n\n' + _stripTestingWhatsCorvered(testingMd);
+    return { html: _renderMd(combined), hash: _simpleHash(claudeMd + testingMd) };
+  }
+  // JS-rendered tabs: hash from rendered content
+  if (tab === 'unit') {
+    const html = await _kbBuildUnitHtml();
+    return { html, hash: _simpleHash(html) };
+  }
+  if (tab === 'ui') {
+    const html = _renderUiTestCases();
+    return { html, hash: _simpleHash(Object.keys(_UNIT_TEST_META).join('|') + '_ui_v2') };
+  }
+  throw new Error('unknown tab: ' + tab);
+}
+
+async function _kbBuildUnitHtml() {
   try {
-    const md = await fetch(_DOCS[tab].file).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
-    _docsCache[tab] = _renderMd(md);
-    body.innerHTML = _docsCache[tab];
-  } catch(e) {
-    body.innerHTML = `<p style="color:#f87171;font-size:12px">Failed to load ${_DOCS[tab].file}: ${e.message}</p>`;
+    const data = await fetch('/api/test-results').then(r => r.json());
+    return _renderTestResults(data);
+  } catch (_) {
+    return _renderTestResults(null);
   }
 }
 
-function closeDocs() {
-  const modal = document.getElementById('docs-modal');
+async function openKb(tab) {
+  const modal = document.getElementById('kb-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  await switchKbTab(tab || _kbActiveTab);
+}
+
+function closeKb() {
+  const modal = document.getElementById('kb-modal');
   if (modal) modal.style.display = 'none';
 }
+
+async function switchKbTab(tab) {
+  _kbActiveTab = tab;
+  document.querySelectorAll('.kb-tab-btn').forEach(b => b.classList.toggle('active', b.id === `kb-tab-${tab}`));
+  const runBtn = document.getElementById('btn-run-tests');
+  if (runBtn) runBtn.style.display = tab === 'unit' ? '' : 'none';
+  const body = document.getElementById('kb-body');
+  if (!body) return;
+
+  if (_kbCache[tab]) {
+    body.innerHTML = _kbCache[tab].html;
+    _kbMarkSeen(tab, _kbCache[tab].hash);
+    return;
+  }
+
+  body.innerHTML = '<p style="color:#555;font-size:12px;padding:8px 0">Loading…</p>';
+  try {
+    const result = await _kbFetchContent(tab);
+    _kbCache[tab] = result;
+    body.innerHTML = result.html;
+    _kbMarkSeen(tab, result.hash);
+  } catch (e) {
+    body.innerHTML = `<p style="color:#f87171;font-size:12px">Failed to load: ${esc(e.message)}</p>`;
+  }
+}
+
+function _kbMarkSeen(tab, hash) {
+  localStorage.setItem(_kbHashKey(tab), hash);
+  // Remove NEW badge from this tab button
+  const btn = document.getElementById('kb-tab-' + tab);
+  if (btn) { const badge = btn.querySelector('.kb-new-badge'); if (badge) badge.remove(); }
+  // Update navbar dot
+  _kbRefreshNavDot();
+}
+
+function _kbRefreshNavDot() {
+  // Dot stays until all tabs with cached content are marked seen
+  const dot = document.getElementById('kb-nav-dot');
+  if (!dot) return;
+  const anyNew = ['spec','arch','unit','ui'].some(t => {
+    if (!_kbCache[t]) return false;
+    return localStorage.getItem(_kbHashKey(t)) !== _kbCache[t].hash;
+  });
+  dot.style.display = anyNew ? '' : 'none';
+}
+
+async function _kbCheckNewContentOnLoad() {
+  // Prefetch lightweight content to detect changes; runs in background on page load
+  try {
+    const tabs = ['spec', 'arch'];
+    await Promise.all(tabs.map(async tab => {
+      const result = await _kbFetchContent(tab);
+      _kbCache[tab] = result;
+      const stored = localStorage.getItem(_kbHashKey(tab));
+      if (stored && stored !== result.hash) {
+        _kbShowNewBadge(tab);
+      }
+    }));
+    _kbRefreshNavDot();
+  } catch (_) { /* ignore */ }
+}
+
+function _kbShowNewBadge(tab) {
+  const btn = document.getElementById('kb-tab-' + tab);
+  if (!btn || btn.querySelector('.kb-new-badge')) return;
+  btn.insertAdjacentHTML('beforeend', '<span class="kb-new-badge">NEW</span>');
+  const dot = document.getElementById('kb-nav-dot');
+  if (dot) dot.style.display = '';
+}
+
+// Legacy aliases so old callsites keep working
+function openDocs(tab) { return openKb(tab === 'testing' ? 'arch' : (tab || 'spec')); }
+function closeDocs() { closeKb(); }
 
 function _renderMd(md) {
   const _e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1570,50 +1669,15 @@ function _renderMd(md) {
   return html;
 }
 
-// ── Test results panel ──────────────────────────────────────────────────────
-let _testTab = 'unit';
-
-function switchTestTab(tab) {
-  _testTab = tab;
-  const unitBtn = document.getElementById('test-tab-unit');
-  const uiBtn = document.getElementById('test-tab-ui');
-  if (unitBtn) { unitBtn.style.borderColor = tab === 'unit' ? '#818cf8' : '#333'; unitBtn.style.background = tab === 'unit' ? '#1a1a2e' : 'none'; unitBtn.style.color = tab === 'unit' ? '#818cf8' : '#555'; }
-  if (uiBtn) { uiBtn.style.borderColor = tab === 'ui' ? '#818cf8' : '#333'; uiBtn.style.background = tab === 'ui' ? '#1a1a2e' : 'none'; uiBtn.style.color = tab === 'ui' ? '#818cf8' : '#555'; }
-  const runBtn = document.getElementById('btn-run-tests');
-  if (runBtn) runBtn.style.display = tab === 'unit' ? '' : 'none';
-  const body = document.getElementById('test-results-body');
-  if (!body) return;
-  if (tab === 'ui') { body.innerHTML = _renderUiTestCases(); return; }
-  _loadUnitTestResults();
-}
-
-async function _loadUnitTestResults() {
-  const body = document.getElementById('test-results-body');
-  if (!body) return;
-  body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
-  try {
-    const data = await fetch('/api/test-results').then(r => r.json());
-    if (_testTab === 'unit') body.innerHTML = _renderTestResults(data);
-  } catch (e) {
-    if (_testTab === 'unit') body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load test results: ' + esc(e.message) + '</p>';
-  }
-}
-
-async function openTestResults() {
-  const modal = document.getElementById('test-results-modal');
-  if (!modal) return;
-  modal.style.display = 'flex';
-  switchTestTab('unit');
-}
-
-function closeTestResults() {
-  const modal = document.getElementById('test-results-modal');
-  if (modal) modal.style.display = 'none';
-}
+// ── Test results (now part of KB modal) ─────────────────────────────────────
+// Legacy aliases
+function openTestResults() { return openKb('unit'); }
+function closeTestResults() { closeKb(); }
+function switchTestTab(tab) { return switchKbTab(tab); }
 
 async function runTestsNow() {
   const btn = document.getElementById('btn-run-tests');
-  const body = document.getElementById('test-results-body');
+  const body = document.getElementById('kb-body');
   if (!btn || !body) return;
   btn.disabled = true;
   btn.textContent = 'Running…';
@@ -1622,6 +1686,8 @@ async function runTestsNow() {
     const res = await fetch('/api/run-tests', { method: 'POST' });
     const data = await res.json();
     body.innerHTML = _renderTestResults(data);
+    // Invalidate cache so result shows fresh
+    delete _kbCache['unit'];
   } catch (e) {
     body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to run tests: ' + esc(e.message) + '</p>';
   } finally {
@@ -6112,6 +6178,8 @@ document.getElementById('toast').addEventListener('click', function(){ this.clas
 
 try {
   initApp();
+  // Check for new KB content in background after page loads
+  setTimeout(() => _kbCheckNewContentOnLoad().catch(() => {}), 2000);
 } catch(e) {
   console.error('initApp failed:', e);
   const hdr = document.getElementById('main-header');

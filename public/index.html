@@ -71,9 +71,10 @@
   .btn-cloud-restore { background: none; border: 1px solid #2a2a2a; border-radius: 5px; color: #666; font-size: 12px; padding: 6px 10px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
   .btn-cloud-restore:hover { border-color: #555; color: #aaa; }
   #cloud-restore-modal { display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.7); backdrop-filter:blur(2px); align-items:center; justify-content:center; }
-  .docs-tab-btn { background:none; border:none; border-bottom:2px solid transparent; color:#555; font-size:12px; font-weight:500; padding:6px 14px; cursor:pointer; border-radius:6px 6px 0 0; transition:color 0.15s; }
-  .docs-tab-btn:hover { color:#aaa; }
-  .docs-tab-btn.active { color:#818cf8; border-bottom-color:#818cf8; }
+  .kb-tab-btn { background:none; border:none; border-bottom:2px solid transparent; color:#555; font-size:12px; font-weight:500; padding:6px 14px; cursor:pointer; border-radius:6px 6px 0 0; transition:color 0.15s; position:relative; }
+  .kb-tab-btn:hover { color:#aaa; }
+  .kb-tab-btn.active { color:#818cf8; border-bottom-color:#818cf8; }
+  .kb-new-badge { display:inline-block;font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;vertical-align:middle;margin-left:4px;background:#14532d;color:#4ade80;letter-spacing:.03em; }
   #docs-body h2 { color:#e2e8f0; font-size:15px; margin:0 0 18px; }
   #docs-body h3 { color:#818cf8; font-size:13px; margin:20px 0 8px; padding-top:4px; border-top:1px solid #1a1a1a; }
   #docs-body h4 { color:#a78bfa; font-size:12px; margin:14px 0 6px; }
@@ -1004,38 +1005,22 @@
 
 <header id="main-header"><!-- rendered by renderHeader() --></header>
 
-<!-- ── Requirements Modal ── -->
-<div id="docs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto;" onclick="if(event.target===this)closeDocs()">
-  <div style="background:#111;border:1px solid #2a2a2a;border-radius:10px;width:min(860px,100%);position:relative;display:flex;flex-direction:column;max-height:88vh;">
+<!-- ── Knowledge Base Modal ── -->
+<div id="kb-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto;" onclick="if(event.target===this)closeKb()">
+  <div style="background:#111;border:1px solid #2a2a2a;border-radius:10px;width:min(900px,100%);position:relative;display:flex;flex-direction:column;max-height:88vh;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e1e1e;flex-shrink:0;">
-      <div style="display:flex;gap:2px;">
-        <button class="docs-tab-btn active" id="docs-tab-spec" onclick="switchDocsTab('spec')">Product Spec</button>
-        <button class="docs-tab-btn" id="docs-tab-arch" onclick="switchDocsTab('arch')">Architecture</button>
-        <button class="docs-tab-btn" id="docs-tab-testing" onclick="switchDocsTab('testing')">Testing</button>
+      <div style="display:flex;gap:2px;" id="kb-tab-bar">
+        <button class="kb-tab-btn active" id="kb-tab-spec" onclick="switchKbTab('spec')">Product Spec</button>
+        <button class="kb-tab-btn" id="kb-tab-arch" onclick="switchKbTab('arch')">Architecture</button>
+        <button class="kb-tab-btn" id="kb-tab-unit" onclick="switchKbTab('unit')">Unit / API Tests</button>
+        <button class="kb-tab-btn" id="kb-tab-ui" onclick="switchKbTab('ui')">UI Test Cases</button>
       </div>
-      <button onclick="closeDocs()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;padding:0 4px;">✕</button>
-    </div>
-    <div id="docs-body" style="padding:24px;font-size:13px;color:#aaa;line-height:1.7;overflow-y:auto;flex:1;"></div>
-  </div>
-</div>
-
-<!-- ── Test Results Modal ── -->
-<div id="test-results-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto;">
-  <div style="background:#111;border:1px solid #2a2a2a;border-radius:10px;width:min(860px,100%);position:relative;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #1e1e1e;">
-      <div style="display:flex;align-items:center;gap:16px;">
-        <span style="font-size:15px;font-weight:600;color:#ccc;">Tests</span>
-        <div style="display:flex;gap:4px;">
-          <button id="test-tab-unit" onclick="switchTestTab('unit')" style="font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid #818cf8;background:#1a1a2e;color:#818cf8;cursor:pointer;">Unit / API</button>
-          <button id="test-tab-ui" onclick="switchTestTab('ui')" style="font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid #333;background:none;color:#555;cursor:pointer;">UI Test Cases</button>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <button id="btn-run-tests" onclick="runTestsNow()" style="background:#1a1a2e;border:1px solid #2e2e50;border-radius:6px;color:#818cf8;font-size:12px;font-weight:500;padding:6px 12px;cursor:pointer;">Run Tests</button>
-        <button onclick="closeTestResults()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btn-run-tests" onclick="runTestsNow()" style="display:none;background:#1a1a2e;border:1px solid #2e2e50;border-radius:6px;color:#818cf8;font-size:12px;font-weight:500;padding:6px 12px;cursor:pointer;">Run Tests</button>
+        <button onclick="closeKb()" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;padding:0 4px;">✕</button>
       </div>
     </div>
-    <div id="test-results-body" style="padding:24px;font-size:13px;color:#aaa;line-height:1.6;max-height:80vh;overflow-y:auto;"></div>
+    <div id="kb-body" style="padding:24px;font-size:13px;color:#aaa;line-height:1.7;overflow-y:auto;flex:1;"></div>
   </div>
 </div>
 

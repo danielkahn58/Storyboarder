@@ -56,6 +56,12 @@ Three layers per project, per device:
 - `locVariationImage(loc, angleKey)`: resolves the image URL for a given angle key
 - Animatic snapshots store `shots: [{id, timestamp, lyric}]` at generation time so timeline handles stay accurate even after timestamps are edited
 
+## With every code commit / push
+
+- Update `public/spec.md` to reflect any product-facing changes (new features, changed behavior, removed flows)
+- Update `TESTING.md` to add or update test cases for any new or changed functionality
+- Update `_UNIT_TEST_META` in `app.js` and `_renderUiTestCases()` if new tests are added
+
 ## Things NOT to do
 - Do not use `sb.storage.from('images').download(...)` from the client — the anon key has no bucket access without a Supabase session. Always proxy through the server.
 - Do not `addEventListener` in HTML strings that get re-rendered — use inline `onclick=` instead
