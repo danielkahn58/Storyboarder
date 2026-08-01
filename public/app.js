@@ -2319,6 +2319,7 @@ function switchShotsTab(tab) {
   const titleEl = document.getElementById('shots-section-title');
   if (titleEl) titleEl.textContent = isAv ? 'AV Script' : isAnimatic ? 'Animatic' : 'Shot Sequence';
   if (isAv) renderAvScript();
+  if (isAnimatic) _syncAnimaticFromLiveShots();
 }
 
 function renderAvScript() {
@@ -4164,7 +4165,12 @@ function onTimestampInput(input) {
 }
 
 function _syncAnimaticFromLiveShots() {
-  if (!_animaticTimeline) return;
+  // If the video hasn't fired loadedmetadata yet, try to trigger a full init
+  if (!_animaticTimeline) {
+    const video = document.querySelector('#animatic-history video');
+    if (video && video.readyState >= 1) _initPrimaryAnimaticTimeline(video, 0);
+    return;
+  }
   const timedShots = shots
     .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
@@ -7158,6 +7164,7 @@ function closeCompose() {
       const shot = shots.find(s => s.id === shotId);
       if (!shot || !url) return;
       shot.finalImage = url;
+      _syncAnimaticFromLiveShots();
       // Update shot row preview
       const cell = document.getElementById(`final-img-${shotId}`);
       if (cell) {
@@ -8792,6 +8799,7 @@ async function saveCompose() {
     const shot = shots.find(s => s.id === _compose.shotId);
     if (shot) {
       shot.finalImage = url;
+      _syncAnimaticFromLiveShots();
       const cell = document.getElementById(`final-img-${shot.id}`);
       if (cell) {
         const badge = cell.querySelector('.final-image-badge');
