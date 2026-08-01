@@ -2001,14 +2001,14 @@ function deleteLocation(id) {
 // ── shot helpers ──────────────────────────────────────────────────────────
 function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null, timestamp: '' }; }
 
-function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); autoSave(); }
+function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); _syncAnimaticFromLiveShots(); autoSave(); }
 function addShotAfter(id) {
   syncFromDOM();
   const idx = shots.findIndex(s => s.id === id);
   shots.splice(idx + 1, 0, newShot());
-  renderShots(); autoSave();
+  renderShots(); _syncAnimaticFromLiveShots(); autoSave();
 }
-function deleteShot(id) { syncFromDOM(); shots = shots.filter(s => s.id !== id); renderShots(); autoSave(); }
+function deleteShot(id) { syncFromDOM(); shots = shots.filter(s => s.id !== id); renderShots(); _syncAnimaticFromLiveShots(); autoSave(); }
 function triggerShotRefUpload(id) { document.getElementById(`shotref-${id}`)?.click(); }
 function handleShotRefUpload(id, input) {
   const file = input.files?.[0];
@@ -2745,7 +2745,19 @@ function _startLiveCanvasPreview(videoEl) {
     for (const s of ts) { if (s.secs <= t) cur = s; else break; }
     const live = shots.find(sh => sh.id === cur.id);
     const url = live?.finalImage || live?.images?.[0];
-    if (!url) return;
+    if (!canvas.offsetWidth || !canvas.offsetHeight) return;
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    if (!url) {
+      // Placeholder for shots with no image yet
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#333';
+      ctx.font = `${Math.round(canvas.height * 0.06)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(live?.lyric?.slice(0, 60) || '(no image)', canvas.width / 2, canvas.height / 2);
+      return;
+    }
     const img = loadImg(url);
     const render = () => {
       if (!canvas.offsetWidth || !canvas.offsetHeight) return;
@@ -2790,7 +2802,7 @@ function renderAnimaticTimeline(videoEl, animatic) {
 
   // Build from live shots — IDs always match the shots array so drag updates land correctly.
   const timedShots = shots
-    .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .filter(s => s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
     .filter(Boolean)
     .sort((a, b) => a.secs - b.secs);
@@ -2889,7 +2901,7 @@ function startTlDrag(e, shotId) {
     syncFromDOM();
     const originalTs = formatTimestamp(originalSecs);
     const filteredLive = shots
-      .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+      .filter(s => s.timestamp)
       .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
 
     let shot = shots.find(s => s.id === shotId);
@@ -4177,7 +4189,7 @@ function _syncAnimaticFromLiveShots() {
     return;
   }
   const timedShots = shots
-    .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .filter(s => s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
     .filter(Boolean)
     .sort((a, b) => a.secs - b.secs);
