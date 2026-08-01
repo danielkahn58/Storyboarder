@@ -2846,7 +2846,11 @@ function startTlDrag(e, shotId) {
     }
     _redrawAnimaticTimeline();
     renderShots();
+    // Verify DOM was updated
+    const domInput = document.querySelector(`.field-timestamp[data-shot-id="${shotId}"]`);
+    console.log('[tlDrag] DOM input after renderShots:', domInput ? domInput.value : 'NOT FOUND IN DOM');
     autoSave();
+    console.log('[tlDrag] after autoSave, shot.timestamp in array:', shots.find(s => s.id === shotId)?.timestamp);
   };
 
   document.addEventListener('pointermove', onMove);
