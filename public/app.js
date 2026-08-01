@@ -1584,24 +1584,26 @@ function switchTestTab(tab) {
   const body = document.getElementById('test-results-body');
   if (!body) return;
   if (tab === 'ui') { body.innerHTML = _renderUiTestCases(); return; }
-  // Re-load unit tab
-  openTestResults();
+  _loadUnitTestResults();
 }
 
-async function openTestResults() {
-  _testTab = 'unit';
-  const modal = document.getElementById('test-results-modal');
+async function _loadUnitTestResults() {
   const body = document.getElementById('test-results-body');
-  if (!modal || !body) return;
-  modal.style.display = 'flex';
-  switchTestTab('unit');
+  if (!body) return;
   body.innerHTML = '<p style="color:#555;font-size:12px">Loading…</p>';
   try {
     const data = await fetch('/api/test-results').then(r => r.json());
-    body.innerHTML = _renderTestResults(data);
+    if (_testTab === 'unit') body.innerHTML = _renderTestResults(data);
   } catch (e) {
-    body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load test results: ' + esc(e.message) + '</p>';
+    if (_testTab === 'unit') body.innerHTML = '<p style="color:#f87171;font-size:12px">Failed to load test results: ' + esc(e.message) + '</p>';
   }
+}
+
+async function openTestResults() {
+  const modal = document.getElementById('test-results-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  switchTestTab('unit');
 }
 
 function closeTestResults() {
@@ -1628,158 +1630,270 @@ async function runTestsNow() {
   }
 }
 
+const _UNIT_TEST_META = {
+  'returns the timestamp extracted from the Claude response': ['fuzzyMatchTimestamp returns AI-extracted value', 'Core timestamp matching accuracy'],
+  'returns null timestamp when Claude responds with "none"': ['Handles no-match response gracefully', 'Prevents bad timestamp assignments'],
+  'returns null when lyric is missing (skips Claude call)': ['Short-circuits without lyric input', 'Avoids unnecessary AI calls'],
+  'returns null when transcript is missing (skips Claude call)': ['Short-circuits without transcript', 'Avoids unnecessary AI calls'],
+  'returns null (not 500) when Claude fails': ['Graceful degradation on AI error', 'Prevents 500s from reaching client'],
+  'passes lyric and transcript bounds to Claude': ['Correct prompt construction', 'Ensures AI has needed context'],
+  'returns the prompt text produced by Claude for a character': ['Character prompt generation', 'Core AI prompt generation path'],
+  'rejects requests with neither a reference description nor a reference image': ['Input validation', 'Guards against empty prompts'],
+  'returns 500 with the upstream error message when Claude fails': ['Error propagation', 'Surfaces AI errors to client'],
+  'returns imagePrompt and videoPrompt from Claude': ['Shot prompt dual-field response', 'Both prompt types generated correctly'],
+  'returns 400 when both lyric and description are missing': ['Input validation', 'Prevents empty shot prompts'],
+  'accepts description alone (no lyric)': ['Optional lyric field', 'Non-lyric shots are supported'],
+  'includes shot parameters in the Claude prompt': ['Prompt includes size/angle/movement', 'AI context completeness'],
+  'returns 500 when Claude fails': ['AI error propagation', 'Surfaces upstream errors'],
+  'handles JSON wrapped in markdown fences': ['Markdown code fence stripping', 'Claude often wraps JSON in fences'],
+  'returns a shots array from Claude': ['Shot sequence generation', 'Core AI shot generation path'],
+  'returns 400 when scriptText is missing': ['Input validation', 'Guards against empty script input'],
+  'includes character and location IDs in the Claude prompt': ['Prompt includes project context', 'Shot gen uses correct characters/locations'],
+  'works with empty characters and locations arrays': ['Empty context handling', 'Works on fresh projects'],
+  'returns parsed characters array from Claude': ['Character parsing from script', 'Script → characters pipeline'],
+  'returns 400 when body is empty': ['Empty body validation', 'Guards missing request body'],
+  'includes scriptText in the prompt sent to Claude': ['Prompt contains script', 'AI receives correct input'],
+  'handles a Claude response wrapped in markdown fences': ['Markdown fence stripping', 'Claude wraps JSON in fences'],
+  'returns parsed locations array from Claude': ['Location parsing from script', 'Script → locations pipeline'],
+  'includes scriptText in the Claude prompt': ['Prompt contains script text', 'AI receives correct input'],
+  'handles locations wrapped in markdown fences': ['Markdown fence stripping', 'Location JSON extraction'],
+  'returns parsed characters and locations for a plain-text upload': ['Full script parse pipeline', 'End-to-end script import'],
+  'returns 400 when no file is attached': ['File attachment validation', 'Guards missing file upload'],
+  'sends the extracted script text to Claude in the request body': ['Text extraction → Claude', 'File text is correctly forwarded'],
+  'returns 500 when Claude returns an error': ['AI error propagation', 'Surfaces parse errors to client'],
+  'handles a Claude response wrapped in markdown code fences': ['Markdown fence stripping', 'Claude wraps JSON in fences'],
+  'returns 503 when Supabase is not configured': ['Supabase config guard', 'Fails fast without credentials'],
+  'the route exists and is handled (not 404)': ['Route registration check', 'Ensures endpoint is registered'],
+  'returns 404 when auth is disabled (route not registered)': ['Auth-gated route protection', 'Signed upload URL only available when auth enabled'],
+  'returns 400 when no file is attached': ['File attachment validation', 'Guards missing audio upload'],
+  'returns transcribed text and word timestamps from OpenAI Whisper': ['Whisper transcription pipeline', 'Core transcription end-to-end'],
+  'returns 500 when OPENAI_API_KEY is not set': ['API key guard', 'Fails fast without credentials'],
+  'returns 500 when the OpenAI API returns an error': ['OpenAI error propagation', 'Surfaces Whisper errors to client'],
+  'returns only word/start/end fields from the words array (strips extra Whisper fields)': ['Response field filtering', 'Keeps payload lean'],
+};
+
 function _renderTestResults(data) {
   if (data.error) {
     let html = `<p style="color:#f87171;font-size:12px;margin-bottom:12px">${esc(data.error)}</p>`;
     if (data.stderr) html += `<pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;color:#f87171;font-size:11px;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${esc(data.stderr)}</pre>`;
     return html;
   }
-  if (!data.available) {
-    return '<p style="color:#555;font-size:12px">No test results yet — click "Run Tests" above (or run <code style="background:#1a1a1a;padding:1px 4px;border-radius:3px">npm test</code> in the terminal).</p>';
-  }
 
-  const passColor = '#4ade80', failColor = '#f87171';
-  const summaryColor = data.numFailedTests > 0 ? failColor : passColor;
-  const summaryText = data.numFailedTests > 0
-    ? `${data.numFailedTests} failed, ${data.numPassedTests} passed`
-    : `${data.numPassedTests} passed`;
-
-  let html = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #1e1e1e;">
-      <span style="font-size:14px;font-weight:600;color:${summaryColor}">${esc(summaryText)}</span>
-      <span style="font-size:11px;color:#555">${data.numTotalTests} tests · last run ${timeAgo(data.startTime)}</span>
-    </div>
-  `;
-
-  for (const file of data.files) {
-    const fileFailed = file.status === 'failed';
-    html += `
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:600;color:${fileFailed ? failColor : '#888'};margin-bottom:6px;font-family:monospace;">
-          ${fileFailed ? '✕' : '✓'} ${esc(file.name)}
-        </div>
-        <div style="padding-left:16px;">
-    `;
-    for (const t of file.tests) {
-      const failed = t.status === 'failed';
-      html += `<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;padding:2px 0;color:${failed ? failColor : '#999'}">
-        <span>${failed ? '✕' : '✓'}</span><span>${esc(t.title)}</span>
-      </div>`;
-      if (failed && t.failureMessages?.length) {
-        html += `<pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:10px;margin:4px 0 8px;color:#e08080;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;">${esc(t.failureMessages[0])}</pre>`;
+  // Build status lookup from run results
+  const statusMap = {};
+  let failMsgs = {};
+  if (data.available && data.files) {
+    for (const f of data.files) {
+      for (const t of f.tests) {
+        statusMap[t.title] = t.status;
+        if (t.status === 'failed' && t.failureMessages?.length) failMsgs[t.title] = t.failureMessages[0];
       }
     }
-    html += `</div></div>`;
   }
 
+  const thStyle = 'font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid #2a2a2a;text-align:left;';
+  const tdStyle = 'font-size:11px;padding:5px 8px;vertical-align:top;border-bottom:1px solid #111;';
+
+  let summary = '';
+  if (data.available) {
+    const passColor = '#4ade80', failColor = '#f87171';
+    const sc = data.numFailedTests > 0 ? failColor : passColor;
+    const st = data.numFailedTests > 0 ? `${data.numFailedTests} failed, ${data.numPassedTests} passed` : `${data.numPassedTests} passed`;
+    summary = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 10px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
+      <span style="font-size:12px;font-weight:600;color:${sc}">${esc(st)}</span>
+      <span style="font-size:10px;color:#555">${data.numTotalTests} tests · last run ${timeAgo(data.startTime)}</span>
+    </div>`;
+  } else {
+    summary = `<div style="font-size:11px;color:#555;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
+      Click <strong>Run Tests</strong> above to execute the test suite and populate the ✓ column.
+    </div>`;
+  }
+
+  let html = summary + `<table style="width:100%;border-collapse:collapse;">
+  <thead><tr>
+    <th style="${thStyle};width:22%">File</th>
+    <th style="${thStyle}">Test Case</th>
+    <th style="${thStyle}">What it Verifies</th>
+    <th style="${thStyle}">Why it Matters</th>
+    <th style="${thStyle};width:36px;text-align:center">✓</th>
+  </tr></thead><tbody>`;
+
+  const files = data.available ? data.files : null;
+  const seenFiles = new Set();
+
+  if (files) {
+    for (const f of files) {
+      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;color:#818cf8;font-family:monospace;border-bottom:1px solid #1e1e1e;">${esc(f.name)}</td></tr>`;
+      for (const t of f.tests) {
+        const status = t.status;
+        const [verifies, why] = _UNIT_TEST_META[t.title] || ['', ''];
+        const mark = status === 'passed' ? '✓' : '✗';
+        const markColor = status === 'passed' ? '#4ade80' : '#f87171';
+        html += `<tr>
+          <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(f.name.split('/').pop())}</td>
+          <td style="${tdStyle};color:#999">${esc(t.title)}</td>
+          <td style="${tdStyle};color:#666">${esc(verifies)}</td>
+          <td style="${tdStyle};color:#444">${esc(why)}</td>
+          <td style="${tdStyle};text-align:center;font-size:14px;color:${markColor}">${mark}</td>
+        </tr>`;
+        if (status === 'failed' && failMsgs[t.title]) {
+          html += `<tr><td colspan="5" style="padding:0 8px 8px"><pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:4px;padding:8px;color:#e08080;font-size:10px;white-space:pre-wrap;max-height:120px;overflow-y:auto;margin:0">${esc(failMsgs[t.title])}</pre></td></tr>`;
+        }
+      }
+    }
+  } else {
+    // No run yet — show static list with ○ placeholders
+    const staticFiles = {
+      'fuzzy-match-timestamp.test.js': ['returns the timestamp extracted from the Claude response','returns null timestamp when Claude responds with "none"','returns null when lyric is missing (skips Claude call)','returns null when transcript is missing (skips Claude call)','returns null (not 500) when Claude fails','passes lyric and transcript bounds to Claude'],
+      'generate-prompt.test.js': ['returns the prompt text produced by Claude for a character','rejects requests with neither a reference description nor a reference image','returns 500 with the upstream error message when Claude fails'],
+      'generate-shot-prompts.test.js': ['returns imagePrompt and videoPrompt from Claude','returns 400 when both lyric and description are missing','accepts description alone (no lyric)','includes shot parameters in the Claude prompt','returns 500 when Claude fails','handles JSON wrapped in markdown fences'],
+      'generate-shot-sequence.test.js': ['returns a shots array from Claude','returns 400 when scriptText is missing','includes character and location IDs in the Claude prompt','works with empty characters and locations arrays','returns 500 when Claude fails'],
+      'parse-characters.test.js': ['returns parsed characters array from Claude','returns 400 when scriptText is missing','returns 400 when body is empty','includes scriptText in the prompt sent to Claude','returns 500 when Claude fails','handles a Claude response wrapped in markdown fences'],
+      'parse-locations.test.js': ['returns parsed locations array from Claude','returns 400 when scriptText is missing','includes scriptText in the Claude prompt','returns 500 when Claude fails','handles locations wrapped in markdown fences'],
+      'parse-script.test.js': ['returns parsed characters and locations for a plain-text upload','returns 400 when no file is attached','sends the extracted script text to Claude in the request body','returns 500 when Claude returns an error','handles a Claude response wrapped in markdown code fences'],
+      'project-data.test.js': ['returns 503 when Supabase is not configured','the route exists and is handled (not 404)'],
+      'snapshots.test.js': ['returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when projectId is missing and Supabase is not configured'],
+      'storage-upload-url.test.js': ['returns 404 when auth is disabled (route not registered)'],
+      'transcribe-audio.test.js': ['returns 400 when no file is attached','returns transcribed text and word timestamps from OpenAI Whisper','returns 500 when OPENAI_API_KEY is not set','returns 500 when the OpenAI API returns an error','returns only word/start/end fields from the words array (strips extra Whisper fields)'],
+    };
+    for (const [file, tests] of Object.entries(staticFiles)) {
+      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;color:#818cf8;font-family:monospace;border-bottom:1px solid #1e1e1e;">tests/api/${file}</td></tr>`;
+      for (const title of tests) {
+        const [verifies, why] = _UNIT_TEST_META[title] || ['', ''];
+        html += `<tr>
+          <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(file)}</td>
+          <td style="${tdStyle};color:#999">${esc(title)}</td>
+          <td style="${tdStyle};color:#666">${esc(verifies)}</td>
+          <td style="${tdStyle};color:#444">${esc(why)}</td>
+          <td style="${tdStyle};text-align:center;font-size:14px;color:#333">○</td>
+        </tr>`;
+      }
+    }
+  }
+
+  html += '</tbody></table>';
   return html;
+}
+
+const _UI_TEST_STORAGE_KEY = 'sg-ui-test-checks';
+function _getUiTestChecks() { try { return JSON.parse(localStorage.getItem(_UI_TEST_STORAGE_KEY) || '{}'); } catch { return {}; } }
+function toggleUiTestCheck(key) {
+  const checks = _getUiTestChecks();
+  checks[key] = !checks[key];
+  localStorage.setItem(_UI_TEST_STORAGE_KEY, JSON.stringify(checks));
+  const el = document.getElementById('uitc-' + key);
+  if (el) el.textContent = checks[key] ? '✓' : '○';
 }
 
 function _renderUiTestCases() {
   const sections = [
-    { label: 'Authentication', cases: [
-      ['Unauthenticated access redirects to Google login page', 'Prevents unauthorized use; catches accidental session expiry'],
-      ['After Google OAuth, user email appears in header', 'Confirms session cookie and user badge render correctly'],
-      ['Sign Out clears session and returns to login', 'Ensures logout fully revokes the session'],
+    { label: 'Authentication', file: 'e2e/auth.spec.ts', cases: [
+      ['Unauthenticated access redirects to Google login', 'Session guard on all routes', 'Prevents unauthorized use; catches accidental session expiry'],
+      ['After Google OAuth user email appears in header', 'Session cookie + user badge render', 'Confirms passport.js session works end-to-end'],
+      ['Sign Out clears session and returns to login', 'Full logout flow', 'Ensures logout fully revokes the session'],
     ]},
-    { label: 'Project Management', cases: [
-      ['Projects grid loads on first visit with existing projects shown', 'Regression guard for the project list fetch and render'],
-      ['Creating a new project navigates to the editor with an empty state', 'Core onboarding flow; guards the new-project API and routing'],
-      ['Clicking the project name opens a rename prompt; save updates the title', 'Covers inline rename UX and project metadata persistence'],
-      ['Deleting a project removes it from the grid after confirmation', 'Guards destructive action guard and Supabase delete'],
-      ['↓ Cloud button reloads the project from Supabase and discards local changes', 'Cross-device sync escape hatch; verifies forceLoadFromCloud flow'],
+    { label: 'Project Management', file: 'e2e/projects.spec.ts', cases: [
+      ['Projects grid loads with existing projects shown', 'Project list fetch and render', 'Regression guard for the projects API and card render'],
+      ['Creating a new project navigates to editor with empty state', 'New-project API and routing', 'Core onboarding flow'],
+      ['Project name rename prompt saves and updates title', 'Inline rename UX + metadata persistence', 'Covers project metadata update round-trip'],
+      ['Deleting a project removes it after confirmation', 'Destructive action guard + Supabase delete', 'Guards delete confirmation UX'],
+      ['↓ Cloud button reloads from Supabase discarding local changes', 'forceLoadFromCloud() flow', 'Cross-device sync escape hatch'],
     ]},
-    { label: 'Characters', cases: [
-      ['Adding a character appends a new row with default name', 'Basic CRUD; regression guard for addCharacter()'],
-      ['Editing name and description updates the data on save', 'Confirms syncFromDOM picks up typed field values'],
-      ['Uploading a reference image displays a thumbnail and stores the URL', 'Image upload + Supabase storage pipeline'],
-      ['Generating a character image calls the AI and populates the image cell', 'End-to-end image generation flow including fal.ai polling'],
-      ['Deleting a character removes it and auto-saves', 'Guards deleteCharacter() and re-render after removal'],
+    { label: 'Characters', file: 'e2e/characters.spec.ts', cases: [
+      ['Adding a character appends a new row with default name', 'addCharacter() CRUD', 'Basic CRUD regression guard'],
+      ['Editing name and description updates on save', 'syncFromDOM field values', 'Confirms DOM → data sync'],
+      ['Uploading a reference image shows thumbnail and stores URL', 'Image upload + Supabase storage', 'Image upload pipeline'],
+      ['Generating a character image populates the image cell', 'fal.ai generation + polling', 'End-to-end image generation'],
+      ['Deleting a character removes it and auto-saves', 'deleteCharacter() + re-render', 'CRUD delete path'],
     ]},
-    { label: 'Locations', cases: [
-      ['Adding a location appends a card with default name', 'Basic CRUD parity with characters'],
-      ['Uploading an angle reference image appears in the angle slot', 'Location angle ref image upload pipeline'],
-      ['Adding a custom view shows it in the variations grid', 'Custom view creation and render'],
-      ['Generating a location image populates the default image', 'Location AI generation flow'],
-      ['Location variation picker opens on button click and closes on selection', 'Regression guard for openLocVariationPicker popup'],
+    { label: 'Locations', file: 'e2e/locations.spec.ts', cases: [
+      ['Adding a location appends a card with default name', 'CRUD parity with characters', 'Basic location CRUD'],
+      ['Uploading an angle reference image appears in angle slot', 'Angle ref image upload pipeline', 'Location angle image upload'],
+      ['Adding a custom view shows it in the variations grid', 'Custom view creation + render', 'Custom view flow'],
+      ['Generating a location image populates the default image', 'Location AI generation', 'Location image gen end-to-end'],
+      ['Variation picker opens on click and closes on selection', 'openLocVariationPicker popup', 'Variation picker UX regression'],
     ]},
-    { label: 'Shot Sequence', cases: [
-      ['Adding a shot appends a new row with empty fields', 'Basic CRUD for shots'],
-      ['Assigning a character to a shot updates the character column', 'Shot–character linking and re-render'],
-      ['Assigning a location to a shot shows the location name and variation button', 'Shot–location linking'],
-      ['Opening the location variation picker and selecting a variation updates the button label', 'selectLocVariation() round-trip'],
-      ['Setting a timestamp in the shot row persists on save and shows in the timeline', 'Timestamp field → syncFromDOM → save pipeline'],
-      ['Generating a shot image populates the Final Image column', 'Shot image generation end-to-end'],
+    { label: 'Shot Sequence', file: 'e2e/shots.spec.ts', cases: [
+      ['Adding a shot appends a new row with empty fields', 'addShot() CRUD', 'Basic shot CRUD'],
+      ['Assigning a character updates the character column', 'Shot–character linking + re-render', 'Shot–character association'],
+      ['Assigning a location shows name and variation button', 'Shot–location linking', 'Shot–location association'],
+      ['Setting a timestamp persists and shows in timeline', 'Timestamp field → syncFromDOM → save', 'Timestamp persistence pipeline'],
+      ['Generating a shot image populates the Final Image column', 'Shot image generation end-to-end', 'Shot image gen flow'],
+      ['New shot added mid-sequence appears in animatic timeline', '_syncAnimaticFromLiveShots on addShot', 'Guards animatic sync for inserted shots'],
+      ['Editing a timestamp updates the animatic segment instantly', 'onTimestampInput → _syncAnimaticFromLiveShots', 'Live animatic sync regression'],
     ]},
-    { label: 'Audio & Transcript', cases: [
-      ['Importing an audio file displays the waveform and enables the bar-marker tools', 'Audio import pipeline and waveform render'],
-      ['Dragging a bar marker updates its timestamp in the marker list', 'Bar-marker drag handler (_dragMarkerIdx flow)'],
-      ['Transcribing audio populates the lyrics box with timestamped words', 'Whisper transcription → transcript display'],
-      ['Auto-assigning timestamps maps each shot lyric to the nearest transcript word', 'autoAssignTimestamps() correctness'],
-      ['Pinning the audio player keeps playback controls visible while scrolling', 'Pinned-player UX regression'],
+    { label: 'Audio & Transcript', file: 'e2e/audio.spec.ts', cases: [
+      ['Importing audio displays waveform and enables bar-marker tools', 'Audio import + waveform render', 'Audio import pipeline'],
+      ['Dragging a bar marker updates its timestamp', 'Bar-marker drag handler', 'Bar marker drag UX'],
+      ['Transcribing audio populates lyrics with timestamped words', 'Whisper transcription → display', 'Transcription end-to-end'],
+      ['Auto-assigning timestamps maps shot lyrics to nearest word', 'autoAssignTimestamps() correctness', 'Timestamp auto-assignment accuracy'],
+      ['Pinning the audio player keeps controls visible while scrolling', 'Pinned-player UX', 'Pinned player regression'],
     ]},
-    { label: 'Image Editor (Compose)', cases: [
-      ['Opening the compose editor from a shot loads the shot\'s location as the default background', 'Editor init: openCompose() → loadComposeBackground()'],
-      ['Clicking a location card in the Background tab loads it on the canvas', 'onLocBgCardClick() → loadComposeBackground()'],
-      ['Clicking a location variation loads that angle as the background', 'onLocBgViewChange() image resolution fix'],
-      ['Location variation thumbnails do not show a delete button', 'Regression: delete should only appear in location management, not compose'],
-      ['Adding a character layer places it on the canvas and shows in the layers list', 'Layer add → renderCompose()'],
-      ['Adjusting brightness/saturation sliders changes the canvas rendering', 'Global effect parameters → renderCompose()'],
-      ['Saving the composition sets the shot\'s Final Image and closes the editor', 'saveComposeAsFinal() end-to-end'],
+    { label: 'Image Editor (Compose)', file: 'e2e/compose.spec.ts', cases: [
+      ['Opening compose from a shot loads its location as background', 'openCompose() → loadComposeBackground()', 'Compose editor init'],
+      ['Clicking a location card loads it on the canvas', 'onLocBgCardClick() flow', 'Background selection'],
+      ['Clicking a variation loads that angle as background', 'onLocBgViewChange() image resolution', 'Variation background load'],
+      ['Variation thumbnails do not show a delete button', 'Regression: no delete in compose', 'Delete button regression'],
+      ['Adding a character layer places it on canvas and layers list', 'Layer add → renderCompose()', 'Character layer add'],
+      ['Adjusting brightness/saturation sliders changes rendering', 'Effect params → renderCompose()', 'Effect slider regression'],
+      ['Saving sets the shot Final Image and closes editor', 'saveComposeAsFinal() end-to-end', 'Compose save pipeline'],
+      ['Double-clicking animatic segment opens compose for that shot', 'dblclick on .tl-segment → openCompose()', 'Animatic-to-compose shortcut'],
     ]},
-    { label: 'Versions', cases: [
-      ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY threshold + createVersion(true)'],
-      ['Creating a named version labels it and resets the edit counter', 'createVersion() label generation'],
-      ['Switching to an older version restores that state across all tabs', 'loadVersion() data restoration'],
-      ['Version list appears on a second device after saving', 'Cross-device version sync via project_snapshots'],
-      ['Queued snapshot is flushed on next page load after a deploy interruption', 'flushSnapshotQueue() retry mechanism'],
+    { label: 'Versions', file: 'e2e/versions.spec.ts', cases: [
+      ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY + createVersion(true)', 'Auto-version threshold'],
+      ['Creating a named version labels it and resets edit counter', 'createVersion() label generation', 'Named version flow'],
+      ['Switching to an older version restores state across all tabs', 'loadVersion() data restoration', 'Version restore regression'],
+      ['Version list appears on a second device after saving', 'Cross-device sync via project_snapshots', 'Cross-device version sync'],
+      ['Queued snapshot is flushed on next page load after deploy', 'flushSnapshotQueue() retry mechanism', 'Snapshot queue flush'],
     ]},
-    { label: 'Animatic', cases: [
-      ['Generating an animatic produces a video and adds it as "Latest" in the history', 'generateAnimatic() full flow'],
-      ['The animatic timeline renders handles at the correct positions matching shot timestamps', 'Handle X-position: (secs - offset) / duration alignment fix'],
-      ['Dragging a timeline handle updates the segment widths and the handle position', 'startTlDrag() onMove: direct style update without innerHTML replacement'],
-      ['Releasing a dragged handle updates the shot timestamp in the shot sequence table', 'onUp: shot.timestamp update + autoSave()'],
-      ['The playhead moves as the video plays', 'updateAnimaticPlayhead() timeupdate listener'],
+    { label: 'Animatic', file: 'e2e/animatic.spec.ts', cases: [
+      ['Generating an animatic produces a video and adds it as Latest', 'generateAnimatic() full flow', 'Animatic generation pipeline'],
+      ['Timeline handles render at correct positions for shot timestamps', 'Handle X-position: (secs - offset) / duration', 'Handle position accuracy'],
+      ['Dragging a handle updates segment widths and handle position', 'startTlDrag() onMove CSS update', 'Drag handle UX'],
+      ['Releasing a handle updates the shot timestamp in Shot Sequence', 'onUp: shot.timestamp + autoSave()', 'Drag → timestamp save'],
+      ['Playhead moves as video plays', 'updateAnimaticPlayhead() timeupdate', 'Playhead regression'],
+      ['Canvas shows correct shot image at current playback position', 'drawShot() from _animaticTimeline', 'Live canvas preview'],
+      ['↺ Sync button refreshes timeline from current shot timestamps', '_syncAnimaticFromLiveShots()', 'Manual sync escape hatch'],
     ]},
-    { label: 'Configuration & Cloud', cases: [
-      ['Toggling Cloud Only mode disables local caching and shows an indicator', 'setCloudOnlyMode() toggle and cloudOnlyMode flag'],
-      ['In Cloud Only mode, a save failure shows an error toast (not a silent fail)', 'sbUpsertData throwOnError branch'],
-      ['Saving a visual style applies it to all character and location prompt previews', 'setStyle() → applyStyleUI()'],
-      ['Script upload parses the script and populates shot descriptions', 'handleScriptUpload() → /api/parse-script'],
-    ]},
-    { label: 'Documentation', cases: [
-      ['Opening the Docs modal shows the Product Spec tab by default', 'openDocs() + _DOCS fetch'],
-      ['Switching to Architecture tab renders the CLAUDE.md content', 'switchDocsTab(\'arch\') → _renderMd()'],
-      ['Switching to Testing tab renders the TESTING.md content with NEW badges', 'switchDocsTab(\'testing\') + badge markup'],
+    { label: 'Configuration & Cloud', file: 'e2e/config.spec.ts', cases: [
+      ['Toggling Cloud Only mode disables local caching and shows indicator', 'setCloudOnlyMode() toggle', 'Cloud-only mode toggle'],
+      ['In Cloud Only mode a save failure shows an error toast', 'sbUpsertData throwOnError branch', 'Cloud-only error handling'],
+      ['Saving a visual style applies it to all prompt previews', 'setStyle() → applyStyleUI()', 'Visual style persistence'],
+      ['Script upload parses the script and populates shot descriptions', 'handleScriptUpload() → /api/parse-script', 'Script import pipeline'],
     ]},
   ];
 
-  const labelStyle = 'font-size:12px;font-weight:600;color:#818cf8;margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid #1e1e1e;';
-  const noteStyle = 'font-size:10px;color:#444;font-style:italic;margin-left:8px;';
-  const rowStyle = 'display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;padding:3px 0;border-bottom:1px solid #111;';
-  const caseStyle = 'font-size:12px;color:#999;display:flex;align-items:baseline;gap:6px;';
-  const whyStyle = 'font-size:11px;color:#444;';
+  const checks = _getUiTestChecks();
+  const thStyle = 'font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid #2a2a2a;text-align:left;';
+  const tdStyle = 'font-size:11px;padding:5px 8px;vertical-align:top;border-bottom:1px solid #111;color:#888;';
 
-  let html = `<div style="font-size:11px;color:#555;margin-bottom:16px;padding:10px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
-    Conceptual Playwright / Cypress test cases — not yet implemented. These cover the full user journey end-to-end.
-    Each row shows the test description and <em>why it matters</em>.
-  </div>`;
-
-  html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;padding:4px 0;margin-bottom:8px;border-bottom:1px solid #2a2a2a;">
-    <span style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Test case</span>
-    <span style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Why it matters</span>
-  </div>`;
+  let html = `<div style="font-size:11px;color:#555;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
+    Playwright / Cypress test cases — not yet implemented. Click ○ to mark a case as manually verified.
+  </div><table style="width:100%;border-collapse:collapse;">
+  <thead><tr>
+    <th style="${thStyle};width:18%">File</th>
+    <th style="${thStyle}">Test Case</th>
+    <th style="${thStyle}">What it Verifies</th>
+    <th style="${thStyle}">Why it Matters</th>
+    <th style="${thStyle};width:36px;text-align:center">✓</th>
+  </tr></thead><tbody>`;
 
   for (const s of sections) {
-    html += `<div style="${labelStyle}">▸ ${esc(s.label)}</div>`;
-    for (const [desc, why] of s.cases) {
-      html += `<div style="${rowStyle}">
-        <div style="${caseStyle}"><span style="color:#444">▷</span><span>${esc(desc)}</span></div>
-        <div style="${whyStyle}">${esc(why)}</div>
-      </div>`;
+    html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:11px;font-weight:600;color:#818cf8;border-bottom:1px solid #1e1e1e;">▸ ${esc(s.label)}</td></tr>`;
+    for (const [desc, verifies, why] of s.cases) {
+      const key = btoa(s.label + ':' + desc).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
+      const checked = checks[key];
+      html += `<tr>
+        <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(s.file)}</td>
+        <td style="${tdStyle};color:#999">${esc(desc)}</td>
+        <td style="${tdStyle}">${esc(verifies)}</td>
+        <td style="${tdStyle};color:#444">${esc(why)}</td>
+        <td style="${tdStyle};text-align:center"><span id="uitc-${key}" onclick="toggleUiTestCheck('${key}')" style="cursor:pointer;color:${checked ? '#4ade80' : '#333'};font-size:14px">${checked ? '✓' : '○'}</span></td>
+      </tr>`;
     }
   }
 
+  html += '</tbody></table>';
   return html;
 }
 
@@ -2833,7 +2947,7 @@ function _redrawAnimaticTimeline() {
     const w = Math.max(x2 - x1, 0.2);
     const hasHandle = i > 0;
     return `
-      <div style="position:absolute;left:${x1}%;width:${w}%;height:100%;background:${colors[i % colors.length]};border-right:1px solid #222;box-sizing:border-box;overflow:hidden">
+      <div style="position:absolute;left:${x1}%;width:${w}%;height:100%;background:${colors[i % colors.length]};border-right:1px solid #222;box-sizing:border-box;overflow:hidden;cursor:pointer" title="Double-click to edit shot" ondblclick="openCompose('${s.id}')">
         <span style="position:absolute;left:5px;top:4px;font-size:9px;color:#555;white-space:nowrap;overflow:hidden;max-width:calc(100% - 8px)">${esc(s.lyric.slice(0, 28))}</span>
         <span style="position:absolute;bottom:4px;left:5px;font-size:8px;color:#383838;font-family:monospace">${formatTimestamp(s.secs)}</span>
       </div>
