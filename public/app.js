@@ -1675,6 +1675,55 @@ function openTestResults() { return openKb('unit'); }
 function closeTestResults() { closeKb(); }
 function switchTestTab(tab) { return switchKbTab(tab); }
 
+async function runE2eTestsNow() {
+  const btn = document.getElementById('btn-run-e2e');
+  const out = document.getElementById('e2e-results');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+  if (out) out.innerHTML = '<p style="color:#555;font-size:12px;padding:4px 0">Running Playwright tests — this may take 30–60 seconds…</p>';
+  try {
+    const res = await fetch('/api/run-e2e-tests', { method: 'POST' });
+    const data = await res.json();
+    if (!out) return;
+    if (!res.ok || data.error) {
+      out.innerHTML = `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;margin-bottom:8px">
+        <p style="color:#f87171;font-size:12px;margin:0 0 6px">${esc(data.error || 'Unknown error')}</p>
+        ${data.stdout ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:0;max-height:200px;overflow-y:auto">${esc(data.stdout)}</pre>` : ''}
+      </div>`;
+      return;
+    }
+    // Render results
+    const stats = data.stats || {};
+    const passed = stats.expected ?? 0;
+    const failed = (stats.unexpected ?? 0) + (stats.flaky ?? 0);
+    const total = stats.tests ?? (passed + failed);
+    const color = failed > 0 ? '#f87171' : '#4ade80';
+    let html = `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;margin-bottom:8px">
+      <span style="font-size:13px;font-weight:600;color:${color}">${failed === 0 ? '✓ All passed' : `✗ ${failed} failed`}</span>
+      <span style="font-size:11px;color:#555">${passed}/${total} tests · ${Math.round((stats.duration || 0) / 1000)}s</span>
+    </div>`;
+    for (const suite of (data.suites || [])) {
+      const failedSpecs = suite.specs.filter(s => !s.ok);
+      if (failedSpecs.length === 0) continue;
+      html += `<div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#818cf8">${esc(suite.title || suite.file)}</div>`;
+      for (const spec of failedSpecs) {
+        const msg = spec.tests?.[0]?.results?.[0]?.error?.message || '';
+        html += `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:5px;padding:8px 10px;margin-bottom:4px">
+          <span style="color:#f87171;font-size:11px">✗ ${esc(spec.title)}</span>
+          ${msg ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:4px 0 0;max-height:120px;overflow-y:auto">${esc(msg)}</pre>` : ''}
+        </div>`;
+      }
+    }
+    out.innerHTML = html;
+  } catch (e) {
+    if (out) out.innerHTML = `<p style="color:#f87171;font-size:12px">Failed: ${esc(e.message)}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run E2E Tests';
+  }
+}
+
 async function runTestsNow() {
   const btn = document.getElementById('btn-run-tests');
   const body = document.getElementById('kb-body');
@@ -1933,9 +1982,12 @@ function _renderUiTestCases() {
   const thStyle = 'font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid #2a2a2a;text-align:left;';
   const tdStyle = 'font-size:11px;padding:5px 8px;vertical-align:top;border-bottom:1px solid #111;color:#888;';
 
-  let html = `<div style="font-size:11px;color:#555;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
-    Playwright e2e tests — run with <code>npm run test:e2e</code>. Click ○ to mark a case as manually verified in the browser.
-  </div><table style="width:100%;border-collapse:collapse;">
+  let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
+    <span style="font-size:11px;color:#555;flex:1">Playwright e2e tests. Click ○ to mark a case as manually verified.</span>
+    <button id="btn-run-e2e" onclick="runE2eTestsNow()" style="background:#1a1a2e;border:1px solid #2e2e50;border-radius:6px;color:#818cf8;font-size:12px;font-weight:500;padding:5px 12px;cursor:pointer;white-space:nowrap">▶ Run E2E Tests</button>
+  </div>
+  <div id="e2e-results" style="margin-bottom:12px"></div>
+  <table style="width:100%;border-collapse:collapse;">
   <thead><tr>
     <th style="${thStyle};width:18%">File</th>
     <th style="${thStyle}">Test Case</th>

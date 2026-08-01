@@ -1696,6 +1696,39 @@ app.post('/api/run-tests', (req, res) => {
   });
 });
 
+let e2eTestsRunning = false;
+
+app.post('/api/run-e2e-tests', (req, res) => {
+  if (e2eTestsRunning) return res.status(409).json({ error: 'E2E test run already in progress' });
+  e2eTestsRunning = true;
+  const t0 = Date.now();
+  log('info', 'e2e test run started', {});
+  const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' };
+  execFile('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, timeout: 180000, maxBuffer: 10 * 1024 * 1024, env }, (err, stdout, stderr) => {
+    e2eTestsRunning = false;
+    log('info', 'e2e test run finished', { ms: Date.now() - t0, exitCode: err?.code });
+    try {
+      const raw = require('fs').readFileSync('/tmp/pw-e2e-results.json', 'utf8');
+      const pw = JSON.parse(raw);
+      // Reshape Playwright JSON into a simple { suites, stats } format
+      const suites = (pw.suites || []).flatMap(f => (f.suites || [f]).map(s => ({
+        title: s.title || f.title,
+        file: f.file || f.title,
+        specs: (s.specs || []).map(sp => ({
+          title: sp.title,
+          ok: sp.ok,
+          tests: sp.tests || [],
+        })),
+      })));
+      const stats = pw.stats || {};
+      res.json({ available: true, suites, stats, stdout: (stdout || '').slice(-3000), stderr: (stderr || '').slice(-2000) });
+    } catch (e2) {
+      // JSON output file missing — return raw output
+      res.status(500).json({ error: 'No results file produced', stdout: (stdout || '').slice(-4000), stderr: (stderr || '').slice(-2000) });
+    }
+  });
+});
+
 // Only bind a port / schedule cron when run directly (`node server.js`), not when
 // required by a test — lets Supertest exercise `app` without a live listener or timers.
 if (require.main === module) {
