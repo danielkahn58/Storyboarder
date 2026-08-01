@@ -2701,7 +2701,10 @@ function renderAnimaticHistory() {
         ${i === 0 ? `<canvas class="animatic-live-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:8px"></canvas>` : ''}
       </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
-        <div style="font-size:10px;color:#444;margin-bottom:4px">Shot boundaries — drag handles to adjust timestamps</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:10px;color:#444;flex:1">Shot boundaries — drag handles to adjust timestamps</span>
+          <button onclick="_syncAnimaticFromLiveShots();showToast('Synced from shot sequence')" style="font-size:10px;color:#818cf8;background:none;border:1px solid #2a2a3a;border-radius:3px;padding:2px 8px;cursor:pointer">↺ Sync</button>
+        </div>
         <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer"></div>
       </div>` : ''}
     </div>
@@ -4165,6 +4168,8 @@ function onTimestampInput(input) {
 }
 
 function _syncAnimaticFromLiveShots() {
+  // DOM is source of truth for text fields — always sync before reading shots
+  syncFromDOM();
   // If the video hasn't fired loadedmetadata yet, try to trigger a full init
   if (!_animaticTimeline) {
     const video = document.querySelector('#animatic-history video');
