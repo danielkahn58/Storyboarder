@@ -4152,10 +4152,28 @@ function onTimestampInput(input) {
   const shotId = input.dataset.shotId;
   const val = input.value.trim();
   const btn = document.getElementById(`btn-play-${shotId}`);
-  if (!btn) return;
-  const hasTs = val && val !== '0:00';
-  btn.style.opacity = hasTs ? '1' : '0.2';
-  btn.style.pointerEvents = hasTs ? '' : 'none';
+  if (btn) {
+    const hasTs = val && val !== '0:00';
+    btn.style.opacity = hasTs ? '1' : '0.2';
+    btn.style.pointerEvents = hasTs ? '' : 'none';
+  }
+  // Update the shot in memory immediately so the animatic timeline reflects the new value
+  const shot = shots.find(s => s.id === shotId);
+  if (shot) shot.timestamp = val;
+  _syncAnimaticFromLiveShots();
+}
+
+function _syncAnimaticFromLiveShots() {
+  if (!_animaticTimeline) return;
+  const timedShots = shots
+    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
+    .filter(Boolean)
+    .sort((a, b) => a.secs - b.secs);
+  if (!timedShots.length) return;
+  _animaticTimeline.shots = timedShots;
+  _redrawAnimaticTimeline();
+  _redrawLiveCanvas?.();
 }
 
 function parseTimestamp(ts) {
