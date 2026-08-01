@@ -1947,7 +1947,7 @@ function _renderUiTestCases() {
   for (const s of sections) {
     html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:11px;font-weight:600;color:#818cf8;border-bottom:1px solid #1e1e1e;">▸ ${esc(s.label)}</td></tr>`;
     for (const [desc, verifies, why] of s.cases) {
-      const key = btoa(s.label + ':' + desc).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
+      const key = btoa(unescape(encodeURIComponent(s.label + ':' + desc))).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
       const checked = checks[key];
       html += `<tr>
         <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(s.file)}</td>
