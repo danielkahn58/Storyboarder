@@ -2695,7 +2695,10 @@ function renderAnimaticHistory() {
         <a href="${esc(a.url)}" download="animatic-${a.createdAt}.mp4" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #222;border-radius:3px;padding:2px 7px">↓ Download</a>
         <button onclick="deleteAnimatic(${i})" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:2px 7px;cursor:pointer">✕ Remove</button>
       </div>
-      <video src="${esc(a.url)}" controls style="width:100%;max-width:900px;border-radius:8px;background:#000;display:block" data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
+      <div style="position:relative;width:100%;max-width:900px">
+        <video src="${esc(a.url)}" controls style="width:100%;border-radius:8px;background:#000;display:block" data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
+        ${i === 0 ? `<canvas class="animatic-live-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:8px"></canvas>` : ''}
+      </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
         <div style="font-size:10px;color:#444;margin-bottom:4px">Shot boundaries — drag handles to adjust timestamps</div>
         <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer"></div>
@@ -2707,6 +2710,63 @@ function renderAnimaticHistory() {
 function _initPrimaryAnimaticTimeline(videoEl, animaticIdx) {
   renderAnimaticTimeline(videoEl, animaticIdx != null ? animatics[animaticIdx] : null);
   videoEl.addEventListener('timeupdate', updateAnimaticPlayhead, { passive: true });
+  _startLiveCanvasPreview(videoEl);
+}
+
+let _redrawLiveCanvas = null;
+
+function _startLiveCanvasPreview(videoEl) {
+  const canvas = document.querySelector('.animatic-live-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const imgCache = {};
+
+  function loadImg(url) {
+    if (!imgCache[url]) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = url;
+      imgCache[url] = img;
+    }
+    return imgCache[url];
+  }
+
+  function drawShot() {
+    if (!_animaticTimeline) return;
+    const { shots: ts } = _animaticTimeline;
+    if (!ts.length) return;
+    const offset = ts[0].secs;
+    const t = (videoEl.currentTime || 0) + offset;
+    let cur = ts[0];
+    for (const s of ts) { if (s.secs <= t) cur = s; else break; }
+    const live = shots.find(sh => sh.id === cur.id);
+    const url = live?.finalImage;
+    if (!url) return;
+    const img = loadImg(url);
+    const render = () => {
+      if (!canvas.offsetWidth || !canvas.offsetHeight) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      const scale = Math.max(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+      ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    };
+    if (img.complete && img.naturalWidth) render();
+    else img.onload = render;
+  }
+
+  // Pre-load all shot images
+  if (_animaticTimeline) {
+    _animaticTimeline.shots.forEach(s => {
+      const live = shots.find(sh => sh.id === s.id);
+      if (live?.finalImage) loadImg(live.finalImage);
+    });
+  }
+
+  _redrawLiveCanvas = drawShot;
+  videoEl.addEventListener('timeupdate', drawShot, { passive: true });
+  videoEl.addEventListener('seeked', drawShot, { passive: true });
+  drawShot();
 }
 
 function deleteAnimatic(index) {
@@ -2809,7 +2869,6 @@ function startTlDrag(e, shotId) {
     document.removeEventListener('pointerup', onUp);
     const newTs = formatTimestamp(ts[shotIdx].secs);
 
-    console.log('[tlDrag] onUp fired. shotId:', shotId, '| newTs:', newTs, '| originalSecs:', originalSecs);
 
     // Update the animatic snapshot so the handle position survives reload
     if (animatics[0]?.shots) {
@@ -2829,28 +2888,19 @@ function startTlDrag(e, shotId) {
       .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
       .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
 
-    console.log('[tlDrag] shots count:', shots.length, '| filteredLive count:', filteredLive.length);
-    console.log('[tlDrag] looking for id:', shotId, '| originalTs:', originalTs, '| shotIdx:', shotIdx);
-    console.log('[tlDrag] all shot ids:', shots.map(s => s.id));
-
     let shot = shots.find(s => s.id === shotId);
-    console.log('[tlDrag] found by ID:', !!shot);
-    if (!shot) { shot = shots.find(s => s.timestamp === originalTs); console.log('[tlDrag] found by ts:', !!shot, '| originalTs:', originalTs); }
-    if (!shot) { shot = filteredLive[shotIdx] || null; console.log('[tlDrag] found by pos:', !!shot); }
+    if (!shot) shot = shots.find(s => s.timestamp === originalTs);
+    if (!shot) shot = filteredLive[shotIdx] || null;
 
     if (shot) {
-      console.log('[tlDrag] updating shot.timestamp from', shot.timestamp, 'to', newTs);
       shot.timestamp = newTs;
     } else {
       console.warn('[tlDrag] NO SHOT FOUND — timestamp NOT updated');
     }
     _redrawAnimaticTimeline();
+    _redrawLiveCanvas?.();
     renderShots();
-    // Verify DOM was updated
-    const domInput = document.querySelector(`.field-timestamp[data-shot-id="${shotId}"]`);
-    console.log('[tlDrag] DOM input after renderShots:', domInput ? domInput.value : 'NOT FOUND IN DOM');
     autoSave();
-    console.log('[tlDrag] after autoSave, shot.timestamp in array:', shots.find(s => s.id === shotId)?.timestamp);
   };
 
   document.addEventListener('pointermove', onMove);
