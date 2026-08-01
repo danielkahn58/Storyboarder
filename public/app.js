@@ -1934,7 +1934,7 @@ function _renderUiTestCases() {
   const tdStyle = 'font-size:11px;padding:5px 8px;vertical-align:top;border-bottom:1px solid #111;color:#888;';
 
   let html = `<div style="font-size:11px;color:#555;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
-    Playwright / Cypress test cases — not yet implemented. Click ○ to mark a case as manually verified.
+    Playwright e2e tests — run with <code>npm run test:e2e</code>. Click ○ to mark a case as manually verified in the browser.
   </div><table style="width:100%;border-collapse:collapse;">
   <thead><tr>
     <th style="${thStyle};width:18%">File</th>
