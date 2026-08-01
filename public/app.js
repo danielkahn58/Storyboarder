@@ -2561,7 +2561,7 @@ async function generateAnimatic() {
   const btn = document.getElementById('btn-gen-animatic');
   const status = document.getElementById('animatic-status');
 
-  const filteredShots = shots.filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp);
+  const filteredShots = shots.filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp);
   const rawFrames = filteredShots
     .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.motionVideoUrl || s.videoUrl || null, timestamp: s.timestamp }));
   const shotSnapshot = filteredShots.map(s => ({ id: s.id, timestamp: s.timestamp, lyric: s.lyric || '' }));
@@ -2744,7 +2744,7 @@ function _startLiveCanvasPreview(videoEl) {
     let cur = ts[0];
     for (const s of ts) { if (s.secs <= t) cur = s; else break; }
     const live = shots.find(sh => sh.id === cur.id);
-    const url = live?.finalImage;
+    const url = live?.finalImage || live?.images?.[0];
     if (!url) return;
     const img = loadImg(url);
     const render = () => {
@@ -2790,7 +2790,7 @@ function renderAnimaticTimeline(videoEl, animatic) {
 
   // Build from live shots — IDs always match the shots array so drag updates land correctly.
   const timedShots = shots
-    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
     .filter(Boolean)
     .sort((a, b) => a.secs - b.secs);
@@ -2889,7 +2889,7 @@ function startTlDrag(e, shotId) {
     syncFromDOM();
     const originalTs = formatTimestamp(originalSecs);
     const filteredLive = shots
-      .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+      .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
       .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
 
     let shot = shots.find(s => s.id === shotId);
@@ -4177,7 +4177,7 @@ function _syncAnimaticFromLiveShots() {
     return;
   }
   const timedShots = shots
-    .filter(s => (s.finalImage || s.videoUrl || s.motionVideoUrl) && s.timestamp)
+    .filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp)
     .map(s => { const secs = parseTimestamp(s.timestamp); return secs !== null ? { id: s.id, secs, lyric: s.lyric || '' } : null; })
     .filter(Boolean)
     .sort((a, b) => a.secs - b.secs);
@@ -5776,6 +5776,7 @@ async function generateShotImages(id) {
     grid.innerHTML = imageSlots(shot.images, shot.images.length);
     addImagesToLocation(locationId2, data.images);
     if (_compose?.shotId === id) refreshShotBgThumbs();
+    _syncAnimaticFromLiveShots();
     autoSave();
     showToast(`${data.images.length} image${data.images.length !== 1 ? 's' : ''} generated.`);
   } catch(e) { grid.innerHTML = emptySlots(2); showToast('Error: ' + e.message, true); }
@@ -5800,6 +5801,7 @@ async function generateShotVideo(id) {
     const data = await apiFetch('/api/generate-shot-video', { prompt: videoPrompt, referenceImageUrl });
     const shot = shots.find(s => s.id === id);
     if (shot) shot.videoUrl = data.url;
+    _syncAnimaticFromLiveShots();
     autoSave();
     cell.innerHTML = data.url ? `<video src="${data.url}" controls style="width:100%;border-radius:6px"></video>` : '<span class="placeholder">·</span>';
     showToast(data.url ? 'Video generated.' : 'No video returned.', !data.url);
@@ -7294,6 +7296,7 @@ async function createTalkingVideo() {
     // Save video to shot
     shot.videoUrl = videoUrl;
     _compose.videoUrl = videoUrl;
+    _syncAnimaticFromLiveShots();
     autoSave();
 
     // Show the video in the sidebar panel
@@ -7553,7 +7556,7 @@ async function generateMotionVideo() {
     const uploadData = await apiFetch('/api/upload-video', { base64: b64, mediaType: 'video/webm', projectId: currentProjectId, shotId: shot?.id });
     const videoUrl = uploadData.url;
 
-    if (shot) { shot.motionVideoUrl = videoUrl; autoSave(); }
+    if (shot) { shot.motionVideoUrl = videoUrl; _syncAnimaticFromLiveShots(); autoSave(); }
     _compose.motionVideoUrl = videoUrl;
 
     const sideVid = document.getElementById('compose-video-player');
