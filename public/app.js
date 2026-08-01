@@ -2698,7 +2698,7 @@ function renderAnimaticHistory() {
       </div>
       <div style="position:relative;width:100%;max-width:900px">
         <video src="${esc(a.url)}" controls style="width:100%;border-radius:8px;background:#000;display:block" data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
-        ${i === 0 ? `<canvas class="animatic-live-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:8px"></canvas>` : ''}
+        ${i === 0 ? `<canvas class="animatic-live-canvas" style="position:absolute;top:0;left:0;width:100%;height:calc(100% - 44px);pointer-events:none;border-radius:8px 8px 0 0"></canvas>` : ''}
       </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
