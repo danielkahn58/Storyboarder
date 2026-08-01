@@ -12,6 +12,9 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
     trace: 'off',
     headless: true,
+    extraHTTPHeaders: process.env.E2E_SECRET
+      ? { 'x-e2e-auth': process.env.E2E_SECRET }
+      : {},
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

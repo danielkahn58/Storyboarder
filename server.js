@@ -92,6 +92,18 @@ if (AUTH_ENABLED) {
     else res.status(401).json({ error: 'not authenticated' });
   });
 
+  // E2E test bypass: requests with the correct X-E2E-Auth header get a fake session
+  const E2E_SECRET = process.env.E2E_SECRET;
+  if (E2E_SECRET) {
+    app.use((req, res, next) => {
+      if (req.headers['x-e2e-auth'] === E2E_SECRET) {
+        req.user = { email: 'e2e@test.local', name: 'E2E Test' };
+        req.isAuthenticated = () => true;
+      }
+      next();
+    });
+  }
+
   // Protect everything except auth routes and login page
   app.use((req, res, next) => {
     if (req.path.startsWith('/auth/') || req.path === '/login.html') return next();
@@ -1704,7 +1716,7 @@ app.post('/api/run-e2e-tests', (req, res) => {
   const t0 = Date.now();
   log('info', 'e2e test run started', {});
   const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' };
-  execFile('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, timeout: 180000, maxBuffer: 10 * 1024 * 1024, env }, (err, stdout, stderr) => {
+  execFile('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, timeout: 600000, maxBuffer: 10 * 1024 * 1024, env }, (err, stdout, stderr) => {
     e2eTestsRunning = false;
     log('info', 'e2e test run finished', { ms: Date.now() - t0, exitCode: err?.code });
     try {
