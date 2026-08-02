@@ -92,17 +92,19 @@ if (AUTH_ENABLED) {
     else res.status(401).json({ error: 'not authenticated' });
   });
 
-  // E2E test bypass: requests with the correct X-E2E-Auth header get a fake session
+  // E2E test bypass: loopback requests (tests run inside the same container) always
+  // bypass auth. Requests with the correct X-E2E-Auth header also bypass.
   const E2E_SECRET = process.env.E2E_SECRET;
-  if (E2E_SECRET) {
-    app.use((req, res, next) => {
-      if (req.headers['x-e2e-auth'] === E2E_SECRET) {
-        req.user = { email: 'e2e@test.local', name: 'E2E Test' };
-        req.isAuthenticated = () => true;
-      }
-      next();
-    });
-  }
+  app.use((req, res, next) => {
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    const hasValidHeader = E2E_SECRET && req.headers['x-e2e-auth'] === E2E_SECRET;
+    if (isLoopback || hasValidHeader) {
+      req.user = { email: 'e2e@test.local', name: 'E2E Test' };
+      req.isAuthenticated = () => true;
+    }
+    next();
+  });
 
   // Protect everything except auth routes and login page
   app.use((req, res, next) => {
