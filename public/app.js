@@ -3221,7 +3221,7 @@ function _loadImg(url) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => { if (!_livePreviewPlaying) _drawCanvasFrame(); };
-    img.src = url;
+    img.src = proxyUrl(url);
     _imgCache[url] = img;
   }
   return _imgCache[url];
