@@ -3046,6 +3046,7 @@ async function generateAnimatic() {
           }
         } else {
           meta.videoUrl = f.videoUrl;
+          if (f.imageUrl && !f.imageUrl.startsWith('blob:')) meta.imageUrl = f.imageUrl;
         }
       } else if (f.imageUrl) {
         if (f.imageUrl.startsWith('blob:')) {
@@ -3085,11 +3086,18 @@ async function generateAnimatic() {
     if (!data.url) throw new Error('No URL returned from server');
     const permanentUrl = data.url;
 
+    // Show frame debug log so it's easy to see which shots used video vs image
+    if (data.frameLog) {
+      const summary = data.frameLog.map(f => `${f.ts}: ${f.type}${f.dur ? ` (${f.dur.toFixed(1)}s)` : ''}${f.error ? ' ERR:'+f.error : ''}`).join('\n');
+      status.textContent = 'Frame log: ' + data.frameLog.filter(f=>f.type==='video-ok').length + ' video / ' + data.frameLog.filter(f=>f.type==='image-ok'||f.type==='image-fallback-ok').length + ' still';
+      console.log('[animatic frameLog]\n' + summary);
+    }
+
     const entry = { url: permanentUrl, createdAt: Date.now(), label: new Date().toLocaleString(), shots: shotSnapshot };
     animatics = [entry, ...(animatics || [])];
     autoSave();
 
-    status.textContent = '';
+    setTimeout(() => { status.textContent = ''; }, 5000);
     renderAnimaticHistory();
   } catch(e) {
     showToast('Animatic failed: ' + e.message, true);

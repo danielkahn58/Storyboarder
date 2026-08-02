@@ -1006,30 +1006,39 @@ app.post('/api/generate-animatic', async (req, res) => {
 
     // Download all shot assets — video with image fallback on any per-shot failure
     const frames = [];
+    const frameLog = []; // included in response for debugging
     for (const shot of shots) {
       const secs = toSecs(shot.timestamp);
       if (secs === null) continue;
       if (shot.videoUrl) {
+        let vidOk = false;
         try {
           const vidPath = tmp('.webm');
           await download(shot.videoUrl, vidPath);
-          // Verify ffprobe can read it as video before committing
+          const fileSize = fs.statSync(vidPath).size;
           const dur = await ffprobe(vidPath);
+          log('info', 'video frame probe', { url: shot.videoUrl.slice(-60), fileSize, dur });
+          frameLog.push({ ts: shot.timestamp, type: 'video-attempt', url: shot.videoUrl.slice(-60), fileSize, dur });
           if (dur && dur > 0) {
             frames.push({ type: 'video', path: vidPath, secs, videoDur: dur, motionDuration: shot.motionDuration || null });
-            continue;
+            frameLog.push({ ts: shot.timestamp, type: 'video-ok', dur });
+            vidOk = true;
+          } else {
+            frameLog.push({ ts: shot.timestamp, type: 'video-bad-probe', fileSize, dur });
           }
         } catch(e) {
-          log('warn', 'video download failed, falling back to image', { url: shot.videoUrl, error: e.message });
+          log('warn', 'video download failed', { url: shot.videoUrl, error: e.message });
+          frameLog.push({ ts: shot.timestamp, type: 'video-error', error: e.message });
         }
-        // Video failed — fall through to image if available
-        if (shot.imageUrl) {
+        if (!vidOk && shot.imageUrl) {
           try {
             const imgPath = tmp('.jpg');
             await download(shot.imageUrl, imgPath);
             frames.push({ type: 'image', path: imgPath, secs });
+            frameLog.push({ ts: shot.timestamp, type: 'image-fallback-ok' });
           } catch(e) {
             log('warn', 'image fallback also failed', { url: shot.imageUrl, error: e.message });
+            frameLog.push({ ts: shot.timestamp, type: 'image-fallback-error', error: e.message });
           }
         }
       } else if (shot.imageUrl) {
@@ -1037,13 +1046,16 @@ app.post('/api/generate-animatic', async (req, res) => {
           const imgPath = tmp('.jpg');
           await download(shot.imageUrl, imgPath);
           frames.push({ type: 'image', path: imgPath, secs });
+          frameLog.push({ ts: shot.timestamp, type: 'image-ok' });
         } catch(e) {
           log('warn', 'image download failed', { url: shot.imageUrl, error: e.message });
+          frameLog.push({ ts: shot.timestamp, type: 'image-error', error: e.message });
         }
       }
     }
+    log('info', 'animatic frame summary', { frameLog });
 
-    if (!frames.length) return res.status(400).json({ error: 'No valid frames' });
+    if (!frames.length) return res.status(400).json({ error: 'No valid frames', frameLog });
     frames.sort((a, b) => a.secs - b.secs);
 
     // Get audio duration via ffprobe
@@ -1136,7 +1148,7 @@ app.post('/api/generate-animatic', async (req, res) => {
       res.set('Content-Disposition', 'inline; filename="animatic.mp4"');
       return res.send(videoBuffer);
     }
-    res.json({ url: resultUrl });
+    res.json({ url: resultUrl, frameLog });
   } catch(e) {
     console.error('Animatic error:', e);
     res.status(500).json({ error: e.message });
