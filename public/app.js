@@ -2160,7 +2160,7 @@ function _renderUiTestCases() {
     { label: 'Versions', file: 'e2e/versions.spec.ts', cases: [
       ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY + createVersion(true)', 'Auto-version threshold'],
       ['Creating a named version labels it and resets edit counter', 'createVersion() label generation', 'Named version flow'],
-      ['Switching to an older version restores state across all tabs', 'loadVersion() data restoration', 'Version restore regression'],
+      ['Switching to older version restores shots/characters data from that snapshot', 'loadVersion() → versionSelect.selectOption(v1Label)', 'Version restore round-trip'],
       ['Version list appears on a second device after saving', 'Cross-device sync via project_snapshots', 'Cross-device version sync'],
       ['Queued snapshot is flushed on next page load after deploy', 'flushSnapshotQueue() retry mechanism', 'Snapshot queue flush'],
     ]},
@@ -2458,6 +2458,36 @@ function addShotAfter(id) {
   syncFromDOM();
   const idx = shots.findIndex(s => s.id === id);
   shots.splice(idx + 1, 0, newShot());
+  renderShots(); _syncAnimaticFromLiveShots(); autoSave();
+}
+function duplicateShot(id) {
+  syncFromDOM();
+  const idx = shots.findIndex(s => s.id === id);
+  if (idx < 0) return;
+  const src = shots[idx];
+  const next = shots[idx + 1];
+  // Compute midpoint timestamp between this shot and next (or +5s if last)
+  const srcSecs = parseTimestamp(src.timestamp) ?? null;
+  const nextSecs = next ? (parseTimestamp(next.timestamp) ?? null) : null;
+  let midTs = '';
+  if (srcSecs !== null) {
+    const endSecs = nextSecs !== null ? nextSecs : srcSecs + 10;
+    midTs = formatTimestamp((srcSecs + endSecs) / 2);
+  }
+  const dupe = {
+    ...src,
+    id: genId(),
+    timestamp: midTs,
+    images: [],
+    videoUrl: '',
+    motionVideoUrl: '',
+    motionDuration: null,
+    motionConfig: null,
+    finalImage: src.finalImage || '',
+    composeMeta: src.composeMeta ? { ...src.composeMeta } : null,
+    composeLayers: src.composeLayers ? src.composeLayers.map(l => ({ ...l })) : [],
+  };
+  shots.splice(idx + 1, 0, dupe);
   renderShots(); _syncAnimaticFromLiveShots(); autoSave();
 }
 function deleteShot(id) { syncFromDOM(); shots = shots.filter(s => s.id !== id); renderShots(); _syncAnimaticFromLiveShots(); autoSave(); }
@@ -3162,6 +3192,7 @@ function renderAnimaticHistory() {
         <div id="animatic-preview-controls" style="display:flex;align-items:center;gap:8px;margin-top:4px">
           <button onclick="_toggleAnimaticPlayback()" style="background:none;border:1px solid #333;border-radius:4px;color:#aaa;font-size:11px;padding:3px 10px;cursor:pointer" id="animatic-play-btn">▶ Play</button>
           <span id="animatic-time-display" style="font-size:10px;color:#555;font-family:monospace">0:00 / 0:00</span>
+          <button onclick="_insertShotAtPlayhead()" title="Insert a new shot at the current playhead position" style="background:none;border:1px solid #333;border-radius:4px;color:#818cf8;font-size:11px;padding:3px 10px;cursor:pointer">+ Insert Shot</button>
         </div>` : ''}
       </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
@@ -3332,6 +3363,44 @@ function _livePreviewRafLoop() {
   if (_livePreviewPlaying) {
     _livePreviewRafId = requestAnimationFrame(_livePreviewRafLoop);
   }
+}
+
+function _insertShotAtPlayhead() {
+  const audioEl = _livePreviewVideoEl;
+  const currentTime = audioEl ? audioEl.currentTime : 0;
+  syncFromDOM();
+  // Sort shots by timestamp to find the shot before the playhead
+  const timed = shots
+    .filter(s => s.timestamp)
+    .map(s => ({ shot: s, secs: parseTimestamp(s.timestamp) }))
+    .filter(s => s.secs !== null)
+    .sort((a, b) => a.secs - b.secs);
+  // Find the shot whose window contains currentTime (or the last shot before it)
+  let prevShot = timed.length ? timed[timed.length - 1].shot : (shots.length ? shots[shots.length - 1] : null);
+  for (let i = 0; i < timed.length - 1; i++) {
+    if (timed[i].secs <= currentTime && timed[i + 1].secs > currentTime) {
+      prevShot = timed[i].shot;
+      break;
+    }
+  }
+  if (!prevShot) { showToast('No shots to duplicate — add a shot first.', true); return; }
+  const newTs = formatTimestamp(currentTime);
+  const idx = shots.findIndex(s => s.id === prevShot.id);
+  const dupe = {
+    ...prevShot,
+    id: genId(),
+    timestamp: newTs,
+    images: [],
+    videoUrl: '',
+    motionVideoUrl: '',
+    motionDuration: null,
+    motionConfig: null,
+    composeMeta: prevShot.composeMeta ? { ...prevShot.composeMeta } : null,
+    composeLayers: prevShot.composeLayers ? prevShot.composeLayers.map(l => ({ ...l })) : [],
+  };
+  shots.splice(idx + 1, 0, dupe);
+  renderShots(); _syncAnimaticFromLiveShots(); autoSave();
+  showToast(`Shot inserted at ${newTs}`);
 }
 
 function _toggleAnimaticPlayback() {
@@ -3822,6 +3891,7 @@ function shotRowHTML(s, idx) {
       <button class="btn-ord" onclick="moveShot('${s.id}',1)" ${idx===shots.length-1?'disabled':''}>▼</button>
       <button class="btn-ord btn-detail-toggle" onclick="toggleShotDetail('${s.id}')" title="Character details">▶</button>
       <button class="btn-ord" onclick="addShotAfter('${s.id}')" title="Add shot below" style="color:#4ade80;border-color:#254a31">+</button>
+      <button class="btn-ord" onclick="duplicateShot('${s.id}')" title="Duplicate shot" style="color:#818cf8;border-color:#2a2a45">⎘</button>
       <button class="btn-ord" onclick="deleteShot('${s.id}')" title="Delete shot" style="color:#e05050;border-color:#4a1a1a">✕</button>
     </div></td>
     <td class="shot-card-timestamp" style="text-align:center">
