@@ -1675,53 +1675,80 @@ function openTestResults() { return openKb('unit'); }
 function closeTestResults() { closeKb(); }
 function switchTestTab(tab) { return switchKbTab(tab); }
 
+function _renderE2eResults(data) {
+  if (data.error) {
+    return `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;margin-bottom:8px">
+      <p style="color:#f87171;font-size:12px;margin:0 0 6px">${esc(data.error)}</p>
+      ${data.stdout ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:0;max-height:200px;overflow-y:auto">${esc(data.stdout)}</pre>` : ''}
+    </div>`;
+  }
+  const stats = data.stats || {};
+  const passed = stats.expected ?? 0;
+  const failed = (stats.unexpected ?? 0) + (stats.flaky ?? 0);
+  const total = stats.tests ?? (passed + failed);
+  const color = failed > 0 ? '#f87171' : '#4ade80';
+  let html = `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;margin-bottom:8px">
+    <span style="font-size:13px;font-weight:600;color:${color}">${failed === 0 ? '✓ All passed' : `✗ ${failed} failed`}</span>
+    <span style="font-size:11px;color:#555">${passed}/${total} tests · ${Math.round((stats.duration || 0) / 1000)}s</span>
+  </div>`;
+  for (const suite of (data.suites || [])) {
+    const failedSpecs = suite.specs.filter(s => !s.ok);
+    if (failedSpecs.length === 0) continue;
+    html += `<div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#818cf8">${esc(suite.title || suite.file)}</div>`;
+    for (const spec of failedSpecs) {
+      const msg = spec.tests?.[0]?.results?.[0]?.error?.message || '';
+      html += `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:5px;padding:8px 10px;margin-bottom:4px">
+        <span style="color:#f87171;font-size:11px">✗ ${esc(spec.title)}</span>
+        ${msg ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:4px 0 0;max-height:120px;overflow-y:auto">${esc(msg)}</pre>` : ''}
+      </div>`;
+    }
+  }
+  return html;
+}
+
+let _e2ePollInterval = null;
+
 async function runE2eTestsNow() {
   const btn = document.getElementById('btn-run-e2e');
   const out = document.getElementById('e2e-results');
   if (!btn) return;
   btn.disabled = true;
   btn.textContent = '⏳ Running…';
-  if (out) out.innerHTML = '<p style="color:#555;font-size:12px;padding:4px 0">Running Playwright tests — this may take 30–60 seconds…</p>';
+  if (out) out.innerHTML = '<p style="color:#555;font-size:12px;padding:4px 0">Starting Playwright tests…</p>';
+
+  clearInterval(_e2ePollInterval);
   try {
-    const res = await fetch('/api/run-e2e-tests', { method: 'POST' });
-    const data = await res.json();
-    if (!out) return;
-    if (!res.ok || data.error) {
-      out.innerHTML = `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;margin-bottom:8px">
-        <p style="color:#f87171;font-size:12px;margin:0 0 6px">${esc(data.error || 'Unknown error')}</p>
-        ${data.stdout ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:0;max-height:200px;overflow-y:auto">${esc(data.stdout)}</pre>` : ''}
-      </div>`;
-      return;
-    }
-    // Render results
-    const stats = data.stats || {};
-    const passed = stats.expected ?? 0;
-    const failed = (stats.unexpected ?? 0) + (stats.flaky ?? 0);
-    const total = stats.tests ?? (passed + failed);
-    const color = failed > 0 ? '#f87171' : '#4ade80';
-    let html = `<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;margin-bottom:8px">
-      <span style="font-size:13px;font-weight:600;color:${color}">${failed === 0 ? '✓ All passed' : `✗ ${failed} failed`}</span>
-      <span style="font-size:11px;color:#555">${passed}/${total} tests · ${Math.round((stats.duration || 0) / 1000)}s</span>
-    </div>`;
-    for (const suite of (data.suites || [])) {
-      const failedSpecs = suite.specs.filter(s => !s.ok);
-      if (failedSpecs.length === 0) continue;
-      html += `<div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#818cf8">${esc(suite.title || suite.file)}</div>`;
-      for (const spec of failedSpecs) {
-        const msg = spec.tests?.[0]?.results?.[0]?.error?.message || '';
-        html += `<div style="background:#1a0505;border:1px solid #3a1a1a;border-radius:5px;padding:8px 10px;margin-bottom:4px">
-          <span style="color:#f87171;font-size:11px">✗ ${esc(spec.title)}</span>
-          ${msg ? `<pre style="color:#888;font-size:10px;white-space:pre-wrap;margin:4px 0 0;max-height:120px;overflow-y:auto">${esc(msg)}</pre>` : ''}
-        </div>`;
-      }
-    }
-    out.innerHTML = html;
+    await fetch('/api/run-e2e-tests', { method: 'POST' });
   } catch (e) {
-    if (out) out.innerHTML = `<p style="color:#f87171;font-size:12px">Failed: ${esc(e.message)}</p>`;
-  } finally {
+    if (out) out.innerHTML = `<p style="color:#f87171;font-size:12px">Failed to start: ${esc(e.message)}</p>`;
     btn.disabled = false;
     btn.textContent = '▶ Run E2E Tests';
+    return;
   }
+
+  let elapsed = 0;
+  _e2ePollInterval = setInterval(async () => {
+    elapsed += 3;
+    if (out) out.innerHTML = `<p style="color:#555;font-size:12px;padding:4px 0">Running Playwright tests… ${elapsed}s</p>`;
+    try {
+      const res = await fetch('/api/e2e-results');
+      const data = await res.json();
+      if (data.running) return; // still going
+      clearInterval(_e2ePollInterval);
+      btn.disabled = false;
+      btn.textContent = '▶ Run E2E Tests';
+      if (!data.results) {
+        if (out) out.innerHTML = '<p style="color:#555;font-size:12px">No results yet.</p>';
+        return;
+      }
+      if (out) out.innerHTML = _renderE2eResults(data.results);
+    } catch (e) {
+      clearInterval(_e2ePollInterval);
+      btn.disabled = false;
+      btn.textContent = '▶ Run E2E Tests';
+      if (out) out.innerHTML = `<p style="color:#f87171;font-size:12px">Poll error: ${esc(e.message)}</p>`;
+    }
+  }, 3000);
 }
 
 async function runTestsNow() {
