@@ -3220,6 +3220,7 @@ function _loadImg(url) {
   if (!_imgCache[url]) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    img.onload = () => { if (!_livePreviewPlaying) _drawCanvasFrame(); };
     img.src = url;
     _imgCache[url] = img;
   }
