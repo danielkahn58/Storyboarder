@@ -1427,7 +1427,7 @@ app.post('/api/relight-image', async (req, res) => {
   }
 });
 
-app.get('/api/storage-images', requireAuth, async (req, res) => {
+app.get('/api/storage-images', async (req, res) => {
   try {
     const { data: files, error } = await sbAdmin.storage.from('images').list('projects', {
       limit: 5000,
