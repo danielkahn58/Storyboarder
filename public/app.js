@@ -1027,15 +1027,6 @@ function saveData() {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
   }
-  // Update the snapshot stored in the current version so switching away and back shows latest saved state
-  if (currentVersionLabel) {
-    const v = versions.find(v => v.label === currentVersionLabel);
-    if (v) {
-      v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
-      v.timestamp = Date.now();
-      saveVersionMeta();
-    }
-  }
   const btn = document.querySelector('.save-btn');
   if (btn) { btn.textContent = 'Saved!'; btn.classList.add('saved'); setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800); }
 }
@@ -1047,11 +1038,6 @@ function autoSave() {
   if (currentProjectId) {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
-  }
-  // Keep current version snapshot in sync so switching away and back reflects latest state
-  if (currentVersionLabel) {
-    const v = versions.find(v => v.label === currentVersionLabel);
-    if (v) v.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
   }
   editsSinceVersion++;
   if (editsSinceVersion >= AUTO_VERSION_EVERY) {
@@ -1159,16 +1145,8 @@ async function loadVersion(label) {
   if (!label) return;
   const v = versions.find(v => v.label === label);
   if (!v) return;
-  // Save current state into the current version snapshot before switching
+  // Snapshot audio for the version being left (so it can be restored if the user returns to it)
   if (currentVersionLabel) {
-    const cur = versions.find(v => v.label === currentVersionLabel);
-    if (cur) {
-      syncFromDOM();
-      cur.data = stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics });
-      cur.timestamp = Date.now();
-      const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-      _persistData(key);
-    }
     await _snapshotCurrentAudio();
   }
   let d = v.data;
