@@ -1836,6 +1836,18 @@ function _renderE2eResults(data) {
 }
 
 let _e2ePollInterval = null;
+let _lastE2eResults = null; // { titleMap: { [testTitle]: 'passed'|'failed' } }
+
+function _buildE2eTitleMap(results) {
+  const map = {};
+  if (!results?.suites) return map;
+  for (const suite of results.suites) {
+    for (const spec of (suite.specs || [])) {
+      map[spec.title] = spec.ok ? 'passed' : 'failed';
+    }
+  }
+  return map;
+}
 
 async function runE2eTestsNow() {
   const btn = document.getElementById('btn-run-e2e');
@@ -1870,7 +1882,16 @@ async function runE2eTestsNow() {
         if (out) out.innerHTML = '<p style="color:#555;font-size:12px">No results yet.</p>';
         return;
       }
+      _lastE2eResults = { titleMap: _buildE2eTitleMap(data.results) };
+      delete _kbCache['ui'];
       if (out) out.innerHTML = _renderE2eResults(data.results);
+      // Re-render the table body so pass/fail marks appear in the rows
+      const body = document.getElementById('kb-body');
+      if (body && _kbActiveTab === 'ui') {
+        const bar = _kbSpecFilterBar();
+        const { html } = await _kbFetchContent('ui');
+        body.innerHTML = bar + html;
+      }
     } catch (e) {
       clearInterval(_e2ePollInterval);
       btn.disabled = false;
@@ -2161,6 +2182,7 @@ function _renderUiTestCases() {
   ];
 
   const checks = _getUiTestChecks();
+  const e2eMap = _lastE2eResults?.titleMap || {};
   const thStyle = 'font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid #2a2a2a;text-align:left;';
   const tdStyle = 'font-size:11px;padding:5px 8px;vertical-align:top;border-bottom:1px solid #111;color:#888;';
 
@@ -2191,12 +2213,17 @@ function _renderUiTestCases() {
     for (const [desc, verifies, why] of s.cases) {
       const key = btoa(unescape(encodeURIComponent(s.label + ':' + desc))).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
       const checked = checks[key];
-      html += `<tr style="${rowStyle}">
+      const e2eStatus = e2eMap[desc]; // 'passed' | 'failed' | undefined
+      const mark = e2eStatus === 'passed' ? { icon: '✓', color: '#4ade80', title: 'Playwright: passed' }
+                 : e2eStatus === 'failed' ? { icon: '✗', color: '#f87171', title: 'Playwright: failed' }
+                 : checked               ? { icon: '✓', color: '#818cf8', title: 'Manually verified' }
+                 :                         { icon: '○', color: '#333',    title: 'Not yet verified' };
+      html += `<tr style="${rowStyle}${e2eStatus === 'failed' ? 'background:rgba(248,113,113,0.06);border-left:2px solid #f87171;' : ''}">
         <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(s.file)}</td>
         <td style="${tdStyle};color:#999">${esc(desc)}</td>
         <td style="${tdStyle}">${esc(verifies)}</td>
         <td style="${tdStyle};color:#444">${esc(why)}</td>
-        <td style="${tdStyle};text-align:center"><span id="uitc-${key}" onclick="toggleUiTestCheck('${key}')" style="cursor:pointer;color:${checked ? '#4ade80' : '#333'};font-size:14px">${checked ? '✓' : '○'}</span></td>
+        <td style="${tdStyle};text-align:center"><span id="uitc-${key}" onclick="${e2eStatus ? '' : `toggleUiTestCheck('${key}')`}" style="cursor:${e2eStatus ? 'default' : 'pointer'};color:${mark.color};font-size:14px" title="${mark.title}">${mark.icon}</span></td>
       </tr>`;
     }
   }
