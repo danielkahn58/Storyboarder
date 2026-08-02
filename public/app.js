@@ -5571,11 +5571,11 @@ function _libThumbHTML(e, idx) {
     onmouseover="this.querySelector('.lib-thumb-overlay').style.opacity='1'"
     onmouseout="this.querySelector('.lib-thumb-overlay').style.opacity='0'"
     style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#111;position:relative">
-    <div style="width:100%;height:130px;background:#0e0e0e;overflow:hidden">
+    <div style="width:100%;background:#0e0e0e;display:flex;align-items:center;justify-content:center;min-height:80px">
       <img src="${src}" loading="lazy"
-        style="width:100%;height:130px;object-fit:cover;display:block"
+        style="width:100%;height:auto;max-height:200px;object-fit:contain;display:block"
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-      <div style="display:none;width:100%;height:130px;align-items:center;justify-content:center;color:#333;font-size:22px">🖼</div>
+      <div style="display:none;width:100%;height:80px;align-items:center;justify-content:center;color:#333;font-size:22px">🖼</div>
     </div>
     <div class="lib-thumb-overlay" style="position:absolute;inset:0;background:rgba(129,140,248,0.18);opacity:0;transition:opacity 0.15s;pointer-events:none;display:flex;align-items:center;justify-content:center">
       <span style="background:#818cf8;color:#fff;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px">Select</span>
