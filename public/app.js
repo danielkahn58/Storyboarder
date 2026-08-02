@@ -8158,6 +8158,39 @@ function openVideoTab() {
   switchComposeTab('video');
 }
 
+function _audioBufferToWavBlob(buffer) {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const numFrames = buffer.length;
+  const bytesPerSample = 2;
+  const dataLen = numFrames * numChannels * bytesPerSample;
+  const wavBuf = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(wavBuf);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataLen, true);
+  let off = 44;
+  for (let i = 0; i < numFrames; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const s = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Blob([wavBuf], { type: 'audio/wav' });
+}
+
 async function createTalkingVideo() {
   if (!_compose) return;
   const shot = shots.find(s => s.id === _compose.shotId);
@@ -8186,15 +8219,45 @@ async function createTalkingVideo() {
     // Extract audio clip for this shot's timestamp range
     if (btn) btn.textContent = '⏳ Preparing audio…';
     let audioUrl = null;
-    const player = getPinnedPlayer();
-    if (player?.src && shot.timestamp && shot.timestamp !== '0:00') {
-      // Upload the full audio file — the API will use the image + audio together
-      const audioFile = await idbGet(_audioKey() + '-file');
-      if (audioFile) {
-        const audioB64 = await fileToBase64(audioFile);
-        const audioUpload = await apiFetch('/api/upload-reference', { base64: audioB64.split(',')[1], mediaType: audioFile.type || 'audio/mpeg' });
-        audioUrl = audioUpload.url;
+    const audioFile = await idbGet(_audioKey() + '-file');
+    if (audioFile) {
+      // Determine clip start/end from shot timestamps
+      const startSecs = shot.timestamp ? (parseTimestamp(shot.timestamp) ?? 0) : 0;
+      // Find the next shot's timestamp to determine clip end
+      syncFromDOM();
+      const sortedShots = shots
+        .filter(s => s.timestamp)
+        .map(s => ({ id: s.id, secs: parseTimestamp(s.timestamp) }))
+        .filter(s => s.secs !== null)
+        .sort((a, b) => a.secs - b.secs);
+      const shotIdx = sortedShots.findIndex(s => s.id === shot.id);
+      const endSecs = sortedShots[shotIdx + 1]?.secs ?? (startSecs + 10); // max 10s if last shot
+      const clipDur = Math.min(endSecs - startSecs, 30); // cap at 30s for sadtalker
+
+      // Trim audio to clip duration using Web Audio API
+      const arrayBuf = await audioFile.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(arrayBuf);
+      audioCtx.close();
+
+      const clipFrames = Math.floor(clipDur * decoded.sampleRate);
+      const startFrame = Math.floor(startSecs * decoded.sampleRate);
+      const offCtx = new OfflineAudioContext(decoded.numberOfChannels, clipFrames, decoded.sampleRate);
+      const src = offCtx.createBufferSource();
+      const clipBuf = offCtx.createBuffer(decoded.numberOfChannels, clipFrames, decoded.sampleRate);
+      for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+        clipBuf.copyToChannel(decoded.getChannelData(ch).slice(startFrame, startFrame + clipFrames), ch);
       }
+      src.buffer = clipBuf;
+      src.connect(offCtx.destination);
+      src.start();
+      const rendered = await offCtx.startRendering();
+
+      // Encode to WAV for upload (browser-safe, no encoder needed)
+      const wavBlob = _audioBufferToWavBlob(rendered);
+      const wavB64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(wavBlob); });
+      const audioUpload = await apiFetch('/api/upload-reference', { base64: wavB64, mediaType: 'audio/wav' });
+      audioUrl = audioUpload.url;
     }
 
     if (btn) btn.textContent = '⏳ Generating video…';
