@@ -1233,6 +1233,7 @@ async function loadVersion(label) {
       videoUrl: vs.videoUrl || cur.videoUrl || '',
       motionVideoUrl: vs.motionVideoUrl || cur.motionVideoUrl || '',
       motionDuration: vs.motionDuration ?? cur.motionDuration ?? null,
+      motionConfig: vs.motionConfig || cur.motionConfig || null,
       refImage: cur.refImage || null,
       composeMeta: vs.composeMeta || cur.composeMeta || null,
       composeLayers: vs.composeLayers || cur.composeLayers || null,
@@ -2420,7 +2421,7 @@ function deleteLocation(id) {
 }
 
 // ── shot helpers ──────────────────────────────────────────────────────────
-function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', motionVideoUrl: '', motionDuration: null, characterDetails: {}, refImage: null, timestamp: '' }; }
+function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', motionVideoUrl: '', motionDuration: null, motionConfig: null, characterDetails: {}, refImage: null, timestamp: '' }; }
 
 function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); _syncAnimaticFromLiveShots(); autoSave(); }
 function addShotAfter(id) {
@@ -3131,10 +3132,15 @@ function renderAnimaticHistory() {
       </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span style="font-size:10px;color:#444;flex:1">Shot boundaries — drag handles to adjust timestamps</span>
+          <span style="font-size:10px;color:#444;flex:1">Shot boundaries — drag handles to adjust · scroll to zoom</span>
+          <span id="tl-zoom-label" style="font-size:10px;color:#818cf8;min-width:28px;text-align:right"></span>
+          <button onclick="_tlZoomBy(2)" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:1px 7px;cursor:pointer">+</button>
+          <button onclick="_tlZoomBy(0.5)" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:1px 7px;cursor:pointer">−</button>
           <button onclick="_syncAnimaticFromLiveShots();showToast('Synced from shot sequence')" style="font-size:10px;color:#818cf8;background:none;border:1px solid #2a2a3a;border-radius:3px;padding:2px 8px;cursor:pointer">↺ Sync</button>
         </div>
-        <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer"></div>
+        <div id="animatic-timeline-scroll" style="overflow-x:auto;border-radius:4px" onwheel="(function(e){e.preventDefault();const sc=document.getElementById('animatic-timeline-scroll');const pivot=(e.clientX-sc.getBoundingClientRect().left+sc.scrollLeft)/sc.scrollWidth;_tlZoomBy(e.deltaY<0?1.25:0.8,pivot);})(event)">
+          <div id="animatic-timeline" style="position:relative;height:48px;background:#0e0e0e;border-radius:4px;overflow:visible;border:1px solid #1e1e1e;cursor:pointer;width:100%"></div>
+        </div>
       </div>` : ''}
     </div>
   `).join('');
@@ -3224,10 +3230,25 @@ function deleteAnimatic(index) {
 }
 
 let _animaticTimeline = null;
+let _tlZoom = 1; // timeline zoom level (1 = full width, 2 = 2x, etc.)
+
+function _tlZoomBy(delta, pivotPct) {
+  const wrap = document.getElementById('animatic-timeline-scroll');
+  if (!wrap) return;
+  const prev = _tlZoom;
+  _tlZoom = Math.max(1, Math.min(8, _tlZoom * delta));
+  // Adjust scroll so the point under cursor stays fixed
+  if (pivotPct !== undefined) {
+    wrap.scrollLeft = pivotPct * wrap.scrollWidth - (pivotPct * wrap.clientWidth);
+  }
+  _redrawAnimaticTimeline();
+  document.getElementById('tl-zoom-label').textContent = _tlZoom === 1 ? '' : `${_tlZoom.toFixed(1)}×`;
+}
 
 function renderAnimaticTimeline(videoEl, animatic) {
   const video = videoEl || document.querySelector('#animatic-history video');
   const wrap = document.getElementById('animatic-timeline-wrap');
+  const scrollEl = document.getElementById('animatic-timeline-scroll');
   if (!video || !wrap) return;
   const duration = video.duration;
   if (!duration || !isFinite(duration)) return;
@@ -3256,6 +3277,7 @@ function renderAnimaticTimeline(videoEl, animatic) {
 function _redrawAnimaticTimeline() {
   const tl = document.getElementById('animatic-timeline');
   if (!tl || !_animaticTimeline) return;
+  tl.style.width = (_tlZoom * 100) + '%';
   const { duration, shots: ts } = _animaticTimeline;
   const colors = ['#141a2e','#0e1a0e','#1e1208','#180e1e','#0c1818'];
   const offset = ts[0].secs;
@@ -3269,8 +3291,10 @@ function _redrawAnimaticTimeline() {
         <span style="position:absolute;left:5px;top:4px;font-size:9px;color:#555;white-space:nowrap;overflow:hidden;max-width:calc(100% - 8px)">${esc(s.lyric.slice(0, 28))}</span>
         <span style="position:absolute;bottom:4px;left:5px;font-size:8px;color:#383838;font-family:monospace">${formatTimestamp(s.secs)}</span>
       </div>
-      ${hasHandle ? `<div class="tl-handle" data-shot-id="${s.id}" style="position:absolute;left:${x1}%;top:0;width:14px;height:100%;margin-left:-7px;cursor:ew-resize;z-index:10;display:flex;align-items:center;justify-content:center;touch-action:none" onpointerdown="startTlDrag(event,'${s.id}')">
-        <div style="width:2px;height:75%;background:#818cf8;border-radius:1px;pointer-events:none"></div>
+      ${hasHandle ? `<div class="tl-handle" data-shot-id="${s.id}" style="position:absolute;left:${x1}%;top:0;width:14px;height:100%;margin-left:-7px;z-index:10;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:8px;height:100%;display:flex;align-items:center;justify-content:center;cursor:ew-resize;pointer-events:all;touch-action:none" onpointerdown="startTlDrag(event,'${s.id}')">
+          <div style="width:2px;height:75%;background:#818cf8;border-radius:1px;pointer-events:none"></div>
+        </div>
       </div>` : ''}`;
   }).join('') +
   `<div id="animatic-playhead" style="position:absolute;left:0%;top:0;width:2px;height:100%;background:#f59e0b;pointer-events:none;z-index:20"></div>`;
@@ -3292,14 +3316,14 @@ function startTlDrag(e, shotId) {
   const shotIdx = ts.findIndex(s => s.id === shotId);
   if (shotIdx <= 0) return;
 
-  const tlRect = tl.getBoundingClientRect();
+  const tlRect = tl.getBoundingClientRect(); // zoomed element — correct for drag math
   const offset = ts[0].secs;
   const minSecs = ts[shotIdx - 1].secs + 0.3;
   // Last handle: max is end of the video in audio time (offset + video duration)
   const maxSecs = (shotIdx + 1 < ts.length ? ts[shotIdx + 1].secs : offset + duration) - 0.3;
 
   // Capture handle element now — full redraws during drag destroy it
-  const dragHandle = e.target.closest('.tl-handle');
+  const dragHandle = e.target.closest('[data-shot-id]');
   // Store original position before drag so fallback timestamp-matching works in onUp
   const originalSecs = ts[shotIdx].secs;
 
@@ -3349,6 +3373,46 @@ function startTlDrag(e, shotId) {
     _redrawLiveCanvas?.();
     renderShots();
     autoSave();
+
+    // Re-render motion videos for shots whose duration just changed.
+    // The handle is the LEFT boundary of shot[shotIdx], so shot[shotIdx-1]'s
+    // duration changed (its end moved) and shot[shotIdx]'s duration changed too.
+    const affectedIds = [ts[shotIdx]?.id, ts[shotIdx - 1]?.id].filter(Boolean);
+    for (const affectedId of affectedIds) {
+      const affShot = shots.find(s => s.id === affectedId);
+      if (!affShot?.motionVideoUrl || !affShot?.motionConfig) continue;
+      // Compute new slot duration for this shot
+      const sortedTs = shots.filter(s => s.timestamp).map(s => ({ id: s.id, secs: parseTimestamp(s.timestamp) })).filter(s => s.secs !== null).sort((a, b) => a.secs - b.secs);
+      const affIdx = sortedTs.findIndex(s => s.id === affectedId);
+      if (affIdx < 0) continue;
+      const affSecs = sortedTs[affIdx].secs;
+      const nextSecs = sortedTs[affIdx + 1]?.secs ?? (affSecs + (affShot.motionConfig.durationSecs || 4));
+      const newDur = Math.max(0.5, nextSecs - affSecs);
+      // Clear video immediately and show still while re-rendering in background
+      const prevUrl = affShot.motionVideoUrl;
+      affShot.motionVideoUrl = '';
+      renderShots();
+      autoSave();
+      (async () => {
+        try {
+          const imgUrl = affShot.finalImage || affShot.images?.[0];
+          if (!imgUrl) { affShot.motionVideoUrl = prevUrl; return; }
+          const img = await new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = imgUrl; });
+          const blob = await _renderMotionVideoBlob(img, affShot.motionConfig, newDur, null);
+          const b64 = await new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result.split(',')[1]); r.readAsDataURL(blob); });
+          const uploadData = await apiFetch('/api/upload-video', { base64: b64, mediaType: 'video/webm', projectId: currentProjectId, shotId: affectedId });
+          affShot.motionVideoUrl = uploadData.url;
+          affShot.motionConfig = { ...affShot.motionConfig, durationSecs: newDur };
+          _syncAnimaticFromLiveShots();
+          renderShots();
+          autoSave();
+          showToast('Motion video updated for resized shot.');
+        } catch(e) {
+          affShot.motionVideoUrl = prevUrl; // restore on failure
+          console.warn('motion re-render failed', e.message);
+        }
+      })();
+    }
   };
 
   document.addEventListener('pointermove', onMove);
@@ -3612,7 +3676,7 @@ ${s.locationId ? `<button class="btn-loc-variation${s.locationAngleKey ? ' btn-l
     <td class="shot-card-movement" data-label="Movement"><select class="field-movement" onchange="autoSave()">${moveOpts}</select></td>
     <td data-label="Image Prompt"><textarea class="field-imgprompt" rows="3" placeholder="Image prompt (opening frame)…" oninput="debouncedSave()">${esc(s.imagePrompt)}</textarea></td>
     <td data-label="Video Prompt"><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea>
-      ${s.motionVideoUrl ? `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><label style="font-size:10px;color:#555;white-space:nowrap">Motion duration (s):</label><input type="number" class="field-motion-duration" min="0.5" step="0.5" value="${esc(String(s.motionDuration || ''))}" placeholder="full clip" style="width:70px;background:#111;border:1px solid #222;border-radius:4px;color:#888;font-size:11px;padding:2px 6px" oninput="debouncedSave()" title="Override how many seconds of motion play before holding on the last frame. Leave blank to use full clip length."></div>` : ''}
+      ${s.motionVideoUrl ? (() => { const timedSorted = shots.filter(sh=>sh.timestamp).map(sh=>({id:sh.id,secs:parseTimestamp(sh.timestamp)})).filter(sh=>sh.secs!==null).sort((a,b)=>a.secs-b.secs); const myIdx=timedSorted.findIndex(sh=>sh.id===s.id); const slotDur = myIdx>=0&&timedSorted[myIdx+1] ? (timedSorted[myIdx+1].secs-timedSorted[myIdx].secs) : null; return `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><label style="font-size:10px;color:#555;white-space:nowrap">Motion duration (s):</label><input type="number" class="field-motion-duration" min="0.5" step="0.5" value="${esc(String(s.motionDuration ?? (slotDur ? slotDur.toFixed(1) : '')))}\" placeholder="${slotDur ? slotDur.toFixed(1) : 'full clip'}" style="width:70px;background:#111;border:1px solid #222;border-radius:4px;color:#888;font-size:11px;padding:2px 6px" oninput="debouncedSave()" title="Seconds of motion before holding last frame. Defaults to shot slot length."></div>`; })() : ''}
     </td>
     <td data-label="Generated Images"><div class="images-grid" id="shot-imgs-${s.id}">${imgsHTML}</div></td>
     <td>
@@ -7935,6 +7999,50 @@ function onMotionPanScale(which, input) {
   renderMotionPreview();
 }
 
+// Render a pan/zoom motion video from an image + config and upload it.
+// Returns the Supabase CDN URL. onProgress(pct) called during render.
+async function _renderMotionVideoBlob(img, config, durationSecs, onProgress) {
+  let startRect, endRect;
+  const { preset } = config;
+  if (preset === 'zoom-in') {
+    startRect = { cx: 0.5, cy: 0.5, scale: 1.0 };
+    endRect   = { cx: config.zoomTarget.x, cy: config.zoomTarget.y, scale: config.zoomScale };
+  } else if (preset === 'zoom-out') {
+    startRect = { cx: config.zoomTarget.x, cy: config.zoomTarget.y, scale: config.zoomScale };
+    endRect   = { cx: 0.5, cy: 0.5, scale: 1.0 };
+  } else {
+    startRect = config.panStart;
+    endRect   = config.panEnd;
+  }
+  const W = 1024, H = 576;
+  const offscreen = document.createElement('canvas');
+  offscreen.width = W; offscreen.height = H;
+  const ctx = offscreen.getContext('2d');
+  const imgW = img.naturalWidth, imgH = img.naturalHeight;
+  const fps = 30, totalFrames = Math.round(durationSecs * fps);
+  const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+  const stream = offscreen.captureStream(fps);
+  const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 4_000_000 });
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  recorder.start();
+  for (let f = 0; f < totalFrames; f++) {
+    const t = ease(f / Math.max(1, totalFrames - 1));
+    const cx    = startRect.cx    + (endRect.cx    - startRect.cx)    * t;
+    const cy    = startRect.cy    + (endRect.cy    - startRect.cy)    * t;
+    const scale = startRect.scale + (endRect.scale - startRect.scale) * t;
+    const vpW = imgW / scale, vpH = imgH / scale;
+    const sx = Math.max(0, Math.min(imgW - vpW, cx * imgW - vpW / 2));
+    const sy = Math.max(0, Math.min(imgH - vpH, cy * imgH - vpH / 2));
+    ctx.drawImage(img, sx, sy, vpW, vpH, 0, 0, W, H);
+    if (f % 15 === 0 && onProgress) onProgress(Math.round(f / totalFrames * 100));
+    await new Promise(r => setTimeout(r, 1000 / fps));
+  }
+  recorder.stop();
+  await new Promise(r => { recorder.onstop = r; });
+  return new Blob(chunks, { type: 'video/webm' });
+}
+
 async function generateMotionVideo() {
   const { preset } = _motionConfig;
   if (!preset) return;
@@ -7947,52 +8055,10 @@ async function generateMotionVideo() {
   if (genBtn) { genBtn.disabled = true; genBtn.textContent = '⏳ Rendering…'; }
 
   try {
-    const dataUrl = _getComposeDataUrl();
     const img = _motionImg || (() => { throw new Error('No preview image'); })();
+    const savedConfig = JSON.parse(JSON.stringify(_motionConfig));
 
-    // Build start/end rects from config
-    let startRect, endRect;
-    if (preset === 'zoom-in') {
-      startRect = { cx: 0.5, cy: 0.5, scale: 1.0 };
-      endRect   = { cx: _motionConfig.zoomTarget.x, cy: _motionConfig.zoomTarget.y, scale: _motionConfig.zoomScale };
-    } else if (preset === 'zoom-out') {
-      startRect = { cx: _motionConfig.zoomTarget.x, cy: _motionConfig.zoomTarget.y, scale: _motionConfig.zoomScale };
-      endRect   = { cx: 0.5, cy: 0.5, scale: 1.0 };
-    } else {
-      startRect = _motionConfig.panStart;
-      endRect   = _motionConfig.panEnd;
-    }
-
-    const W = 1024, H = 576;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = W; offscreen.height = H;
-    const ctx = offscreen.getContext('2d');
-    const imgW = img.naturalWidth, imgH = img.naturalHeight;
-    const fps = 30, totalFrames = durationSecs * fps;
-    const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-    const stream = offscreen.captureStream(fps);
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 4_000_000 });
-    const chunks = [];
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.start();
-
-    for (let f = 0; f < totalFrames; f++) {
-      const t = ease(f / Math.max(1, totalFrames - 1));
-      const cx    = startRect.cx    + (endRect.cx    - startRect.cx)    * t;
-      const cy    = startRect.cy    + (endRect.cy    - startRect.cy)    * t;
-      const scale = startRect.scale + (endRect.scale - startRect.scale) * t;
-      const vpW = imgW / scale, vpH = imgH / scale;
-      const sx = Math.max(0, Math.min(imgW - vpW, cx * imgW - vpW / 2));
-      const sy = Math.max(0, Math.min(imgH - vpH, cy * imgH - vpH / 2));
-      ctx.drawImage(img, sx, sy, vpW, vpH, 0, 0, W, H);
-      if (f % 15 === 0) setStatus(`Rendering… ${Math.round(f / totalFrames * 100)}%`);
-      await new Promise(r => setTimeout(r, 1000 / fps));
-    }
-
-    recorder.stop();
-    await new Promise(r => { recorder.onstop = r; });
-    const blob = new Blob(chunks, { type: 'video/webm' });
+    const blob = await _renderMotionVideoBlob(img, savedConfig, durationSecs, pct => setStatus(`Rendering… ${pct}%`));
 
     // Upload to Supabase for persistence
     setStatus('Uploading…');
@@ -8004,7 +8070,12 @@ async function generateMotionVideo() {
     const uploadData = await apiFetch('/api/upload-video', { base64: b64, mediaType: 'video/webm', projectId: currentProjectId, shotId: shot?.id });
     const videoUrl = uploadData.url;
 
-    if (shot) { shot.motionVideoUrl = videoUrl; _syncAnimaticFromLiveShots(); autoSave(); }
+    if (shot) {
+      shot.motionVideoUrl = videoUrl;
+      shot.motionConfig = { ...savedConfig, durationSecs };
+      _syncAnimaticFromLiveShots();
+      autoSave();
+    }
     _compose.motionVideoUrl = videoUrl;
 
     const sideVid = document.getElementById('compose-video-player');
