@@ -645,7 +645,11 @@ app.post('/api/generate-prompt', async (req, res) => {
   try {
     const userContent = [];
     if (referenceImage) {
-      userContent.push({ type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } });
+      if (referenceImage.base64) {
+        userContent.push({ type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } });
+      } else if (referenceImage.url) {
+        userContent.push({ type: 'image', source: { type: 'url', url: referenceImage.url } });
+      }
     }
     const { customRules } = req.body;
     const defaultLocationRules = `- Every object, architectural feature, and environmental element MUST come directly from the reference. Do not invent new rooms, furniture, exterior features, props, or setting details not mentioned.
@@ -700,7 +704,11 @@ app.post('/api/generate-shot-prompts', async (req, res) => {
     if (characters?.length) {
       for (const char of characters) {
         if (char.referenceImage) {
-          userContent.push({ type: 'image', source: { type: 'base64', media_type: char.referenceImage.mediaType, data: char.referenceImage.base64 } });
+          if (char.referenceImage.base64) {
+            userContent.push({ type: 'image', source: { type: 'base64', media_type: char.referenceImage.mediaType, data: char.referenceImage.base64 } });
+          } else if (char.referenceImage.url) {
+            userContent.push({ type: 'image', source: { type: 'url', url: char.referenceImage.url } });
+          }
           userContent.push({ type: 'text', text: `Reference image for character: ${char.name}` });
         }
       }

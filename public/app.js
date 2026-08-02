@@ -5870,7 +5870,7 @@ async function generateLocPrompt(id) {
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Generating…';
   try {
     const body = { referenceDescription: reference, visualStyle: selectedStyleId, isLocation: true, customRules: locationGenRules };
-    if (loc?.referenceImage) body.referenceImage = { base64: loc.referenceImage.base64, mediaType: loc.referenceImage.mediaType };
+    if (loc?.referenceImage) body.referenceImage = { base64: loc.referenceImage.base64 || null, mediaType: loc.referenceImage.mediaType, url: loc.referenceImage.url || loc.referenceImage.dataUrl || null };
     const data = await apiFetch('/api/generate-prompt', body);
     row.querySelector('.field-prompt').value = data.prompt;
     if (loc) { loc.reference = reference; loc.prompt = data.prompt; }
@@ -5979,7 +5979,7 @@ async function generateCharPrompt(id) {
       : '';
     const referenceWithHint = reference + variantHint;
     const body = { referenceDescription: referenceWithHint, visualStyle: selectedStyleId, customRules: charGenRules };
-    if (char?.referenceImage) body.referenceImage = { base64: char.referenceImage.base64, mediaType: char.referenceImage.mediaType };
+    if (char?.referenceImage) body.referenceImage = { base64: char.referenceImage.base64 || null, mediaType: char.referenceImage.mediaType, url: char.referenceImage.url || char.referenceImage.dataUrl || null };
     const data = await apiFetch('/api/generate-prompt', body);
     row.querySelector('.field-prompt').value = data.prompt;
     if (char) { char.reference = reference; char.prompt = data.prompt; }
