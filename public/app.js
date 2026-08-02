@@ -7720,6 +7720,216 @@ function addImagesToLocation(locationId, imageUrls) {
   if (grid) grid.innerHTML = imageSlots(loc.images, loc.images.length);
 }
 
+// ── Draw / sketch tool ────────────────────────────────────────────────────────
+let _drawTool = 'pencil'; // 'pencil' | 'eraser'
+let _drawActive = false;
+
+function _drawGetCanvas() { return document.getElementById('compose-draw-canvas'); }
+
+function _drawSyncSize() {
+  const dc = _drawGetCanvas();
+  const cc = document.getElementById('compose-canvas');
+  if (!dc || !cc) return;
+  if (dc.width !== COMPOSE_W || dc.height !== COMPOSE_H) {
+    dc.width = COMPOSE_W; dc.height = COMPOSE_H;
+  }
+}
+
+function _drawSetTool(tool) {
+  _drawTool = tool;
+  const pencilBtn = document.getElementById('draw-tool-pencil');
+  const eraserBtn = document.getElementById('draw-tool-eraser');
+  if (pencilBtn) { pencilBtn.style.background = tool === 'pencil' ? '#2a1a0a' : '#1a1a1a'; pencilBtn.style.color = tool === 'pencil' ? '#fb923c' : '#666'; pencilBtn.style.borderColor = tool === 'pencil' ? '#fb923c' : '#333'; }
+  if (eraserBtn) { eraserBtn.style.background = tool === 'eraser' ? '#2a1a0a' : '#1a1a1a'; eraserBtn.style.color = tool === 'eraser' ? '#fb923c' : '#666'; eraserBtn.style.borderColor = tool === 'eraser' ? '#fb923c' : '#333'; }
+}
+
+function _drawEnableCanvas() {
+  const dc = _drawGetCanvas();
+  if (!dc) return;
+  dc.style.pointerEvents = 'all';
+  dc.style.cursor = 'crosshair';
+  _drawSyncSize();
+  dc.onpointerdown = _drawPointerDown;
+}
+
+function _drawDisableCanvas() {
+  const dc = _drawGetCanvas();
+  if (!dc) return;
+  dc.style.pointerEvents = 'none';
+  dc.style.cursor = '';
+  dc.onpointerdown = null;
+  _drawActive = false;
+}
+
+function _drawPointerDown(e) {
+  e.preventDefault();
+  _drawActive = true;
+  _drawSyncSize();
+  const dc = _drawGetCanvas();
+  dc.setPointerCapture(e.pointerId);
+  dc.onpointermove = _drawPointerMove;
+  dc.onpointerup = dc.onpointercancel = _drawPointerUp;
+  _drawStroke(e, true);
+}
+
+function _drawPointerMove(e) {
+  if (!_drawActive) return;
+  _drawStroke(e, false);
+}
+
+function _drawPointerUp(e) {
+  _drawActive = false;
+  const dc = _drawGetCanvas();
+  dc.onpointermove = null; dc.onpointerup = null; dc.onpointercancel = null;
+}
+
+function _drawStroke(e, isStart) {
+  const dc = _drawGetCanvas();
+  if (!dc) return;
+  const rect = dc.getBoundingClientRect();
+  const scaleX = COMPOSE_W / rect.width;
+  const scaleY = COMPOSE_H / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+  const ctx = dc.getContext('2d');
+  const size = parseInt(document.getElementById('draw-size')?.value || '8');
+  const color = document.getElementById('draw-color')?.value || '#ff4444';
+
+  if (_drawTool === 'eraser') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = color;
+  }
+
+  if (isStart) {
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.lineWidth = size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = _drawTool === 'eraser' ? 'rgba(0,0,0,1)' : color;
+    if (!dc._lastX) { dc._lastX = x; dc._lastY = y; }
+    ctx.beginPath();
+    ctx.moveTo(dc._lastX, dc._lastY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  dc._lastX = x; dc._lastY = y;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function _drawClear() {
+  const dc = _drawGetCanvas();
+  if (!dc) return;
+  _drawSyncSize();
+  dc.getContext('2d').clearRect(0, 0, COMPOSE_W, COMPOSE_H);
+}
+
+function _drawHasContent() {
+  const dc = _drawGetCanvas();
+  if (!dc || dc.width === 0) return false;
+  const data = dc.getContext('2d').getImageData(0, 0, dc.width, dc.height).data;
+  for (let i = 3; i < data.length; i += 4) { if (data[i] > 10) return true; }
+  return false;
+}
+
+function _drawGetBoundingBox() {
+  const dc = _drawGetCanvas();
+  if (!dc) return null;
+  const { data, width, height } = dc.getContext('2d').getImageData(0, 0, dc.width, dc.height);
+  let minX = width, minY = height, maxX = 0, maxY = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > 10) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return null;
+  const pad = 30;
+  return { x: Math.max(0, minX - pad), y: Math.max(0, minY - pad), w: Math.min(COMPOSE_W, maxX + pad) - Math.max(0, minX - pad), h: Math.min(COMPOSE_H, maxY + pad) - Math.max(0, minY - pad) };
+}
+
+async function _drawReplaceWithCharacter() {
+  if (!_compose) return;
+  if (!_drawHasContent()) { showToast('Draw a sketch first.', true); return; }
+  const charId = document.getElementById('draw-char-select')?.value;
+  if (!charId) { showToast('Select a character to replace the sketch with.', true); return; }
+  const char = characters.find(c => c.id === charId);
+  if (!char) return;
+
+  const refImg = charDefaultImage(char) || char.images?.[0] || char.bgRemovedImage;
+  if (!refImg) { showToast('Character has no generated images yet — generate a character image first.', true); return; }
+
+  const btn = document.getElementById('btn-draw-replace');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+
+  try {
+    // Composite: compose canvas + sketch overlay → single image for the AI
+    const bbox = _drawGetBoundingBox();
+    const comp = document.createElement('canvas');
+    comp.width = COMPOSE_W; comp.height = COMPOSE_H;
+    const compCtx = comp.getContext('2d');
+    // Draw compose background
+    compCtx.drawImage(document.getElementById('compose-canvas'), 0, 0);
+    // Draw sketch on top (red so AI can see the intended pose)
+    compCtx.drawImage(_drawGetCanvas(), 0, 0);
+
+    const b64 = comp.toDataURL('image/jpeg', 0.92).split(',')[1];
+    const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: 'image/jpeg' });
+
+    const poseHint = document.getElementById('draw-pose-hint')?.value.trim();
+    const charDesc = char.reference || char.name || 'the character';
+    const prompt = `Place ${charDesc} as a character layer into this scene, matching the pose and position of the red sketch/stick figure exactly. ${poseHint ? poseHint + '. ' : ''}Keep the background unchanged. Only add the character where the sketch indicates.`;
+
+    if (btn) btn.textContent = '⏳ Generating image…';
+    const genData = await apiFetch('/api/generate-char-variant', {
+      prompt,
+      referenceImageUrls: [refImg, uploaded.url],
+      stylePrompt: getStylePrompt(),
+    });
+    const rawUrl = genData.url;
+    if (!rawUrl) throw new Error('No image returned');
+
+    if (btn) btn.textContent = '⏳ Removing background…';
+    const bgData = await apiFetch('/api/remove-background', { imageUrl: rawUrl });
+    const finalUrl = bgData.url || rawUrl;
+
+    // Position the new layer centered on the sketch bounding box
+    const cx = bbox ? bbox.x + bbox.w / 2 : COMPOSE_W / 2;
+    const cy = bbox ? bbox.y + bbox.h / 2 : COMPOSE_H * 0.65;
+    const scaleH = bbox ? Math.min(0.7, bbox.h / COMPOSE_H * 1.4) : 0.4;
+
+    captureUndoState();
+    const imgEl = new Image();
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.onload = () => {
+      if (!_compose) return;
+      const h = COMPOSE_H * scaleH;
+      const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
+      _compose.layers.push({ imgEl, imgUrl: finalUrl, label: char.name || 'Character', charId, cx, cy, scale: scaleH, w, h, opacity: 1, contrast: 100, saturation: 100 });
+      _compose.selectedIdx = _compose.layers.length - 1;
+      _drawClear(); // clear the sketch now that it's been replaced
+      updateComposeLayerPanel();
+      renderCompose();
+      saveComposeLayers();
+      showToast('Character placed! Sketch cleared.');
+    };
+    imgEl.onerror = () => showToast('Character generated but failed to load — try again.', true);
+    imgEl.src = proxyUrl(finalUrl);
+    if (char && finalUrl !== rawUrl) { char.bgRemovedImage = finalUrl; autoSave(); }
+  } catch(e) {
+    showToast('Replace failed: ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Replace Sketch with Character'; }
+  }
+}
+
 // ── Inpaint mask painting ─────────────────────────────────────────────────────
 function toggleMaskMode() {
   if (!_compose) return;
@@ -7851,6 +8061,8 @@ async function applyInpaint() {
 
 function closeCompose() {
   if (!_compose) return;
+  _drawClear();
+  _drawDisableCanvas();
   saveComposeLayers();
 
   // Auto-save current canvas state as the shot's final image (fire-and-forget)
@@ -8434,6 +8646,24 @@ function switchComposeTab(tab) {
   const panel = document.getElementById(`compose-tabpanel-${tab}`);
   if (panel) panel.style.display = '';
   if (tab === 'layer') renderComposeLayerTab();
+  if (tab === 'draw') {
+    _drawEnableCanvas();
+    _drawSetTool(_drawTool);
+    // Populate character select
+    const sel = document.getElementById('draw-char-select');
+    if (sel) {
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">— select character —</option>' +
+        characters.map(c => `<option value="${esc(c.id)}">${esc(c.name || 'Unnamed')}</option>`).join('');
+      if (prev) sel.value = prev;
+    }
+    // Wire size display
+    const sizeEl = document.getElementById('draw-size');
+    const sizeVal = document.getElementById('draw-size-val');
+    if (sizeEl && sizeVal) sizeEl.oninput = () => { sizeVal.textContent = sizeEl.value; };
+  } else {
+    _drawDisableCanvas();
+  }
   if (tab === 'video') {
     resetMotionPreview();
     // Restore persisted motion video if it exists
