@@ -1232,6 +1232,7 @@ async function loadVersion(label) {
       finalImage: vs.finalImage || cur.finalImage || null,
       videoUrl: vs.videoUrl || cur.videoUrl || '',
       motionVideoUrl: vs.motionVideoUrl || cur.motionVideoUrl || '',
+      motionDuration: vs.motionDuration ?? cur.motionDuration ?? null,
       refImage: cur.refImage || null,
       composeMeta: vs.composeMeta || cur.composeMeta || null,
       composeLayers: vs.composeLayers || cur.composeLayers || null,
@@ -1423,6 +1424,8 @@ function syncFromDOM() {
     shot.description = row.querySelector('.field-desc').value;
     shot.imagePrompt = row.querySelector('.field-imgprompt').value;
     shot.videoPrompt = row.querySelector('.field-vidprompt').value;
+    const mdVal = row.querySelector('.field-motion-duration')?.value?.trim();
+    shot.motionDuration = mdVal ? (parseFloat(mdVal) || null) : null;
     shot.shotSize = row.querySelector('.field-size').value;
     shot.shotAngle = row.querySelector('.field-angle')?.value || shot.shotAngle;
     shot.shotMovement = row.querySelector('.field-movement').value;
@@ -2404,7 +2407,7 @@ function deleteLocation(id) {
 }
 
 // ── shot helpers ──────────────────────────────────────────────────────────
-function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', characterDetails: {}, refImage: null, timestamp: '' }; }
+function newShot() { return { id: genId(), lyric: '', description: '', characterIds: [], locationId: '', locationAngleKey: '', shotSize: 'Medium Shot', shotAngle: 'Eye Level', shotMovement: 'Static', imagePrompt: '', videoPrompt: '', images: [], videoUrl: '', motionVideoUrl: '', motionDuration: null, characterDetails: {}, refImage: null, timestamp: '' }; }
 
 function addShot() { syncFromDOM(); shots.push(newShot()); renderShots(); _syncAnimaticFromLiveShots(); autoSave(); }
 function addShotAfter(id) {
@@ -2968,7 +2971,7 @@ async function generateAnimatic() {
 
   const filteredShots = shots.filter(s => (s.finalImage || s.images?.[0] || s.videoUrl || s.motionVideoUrl) && s.timestamp);
   const rawFrames = filteredShots
-    .map(s => ({ imageUrl: s.finalImage || null, videoUrl: s.motionVideoUrl || s.videoUrl || null, timestamp: s.timestamp }));
+    .map(s => ({ imageUrl: s.finalImage || s.images?.[0] || null, videoUrl: s.motionVideoUrl || s.videoUrl || null, motionDuration: s.motionDuration || null, timestamp: s.timestamp }));
   const shotSnapshot = filteredShots.map(s => ({ id: s.id, timestamp: s.timestamp, lyric: s.lyric || '' }));
 
   if (!rawFrames.length) {
@@ -3013,7 +3016,7 @@ async function generateAnimatic() {
     const shotMeta = [];
     for (let i = 0; i < rawFrames.length; i++) {
       const f = rawFrames[i];
-      const meta = { timestamp: f.timestamp };
+      const meta = { timestamp: f.timestamp, motionDuration: f.motionDuration || null };
       const tryFetchBlob = async (url) => {
         try { return await fetch(url).then(r => r.blob()); } catch { return null; }
       };
@@ -3149,10 +3152,13 @@ function _startLiveCanvasPreview(videoEl) {
     let cur = ts[0];
     for (const s of ts) { if (s.secs <= t) cur = s; else break; }
     const live = shots.find(sh => sh.id === cur.id);
-    const url = live?.finalImage || live?.images?.[0];
     if (!canvas.offsetWidth || !canvas.offsetHeight) return;
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetHeight;
+    // For shots with a motion video the animatic already contains the video — clear the
+    // overlay canvas so it shows through rather than covering it with a still frame.
+    if (live?.motionVideoUrl) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+    const url = live?.finalImage || live?.images?.[0];
     if (!url) {
       // Placeholder for shots with no image yet
       ctx.fillStyle = '#0a0a0a';
@@ -3584,7 +3590,9 @@ ${s.locationId ? `<button class="btn-loc-variation${s.locationAngleKey ? ' btn-l
     <td class="shot-card-size" data-label="Size"><select class="field-size" onchange="autoSave()">${sizeOpts}</select></td>
     <td class="shot-card-movement" data-label="Movement"><select class="field-movement" onchange="autoSave()">${moveOpts}</select></td>
     <td data-label="Image Prompt"><textarea class="field-imgprompt" rows="3" placeholder="Image prompt (opening frame)…" oninput="debouncedSave()">${esc(s.imagePrompt)}</textarea></td>
-    <td data-label="Video Prompt"><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea></td>
+    <td data-label="Video Prompt"><textarea class="field-vidprompt" rows="3" placeholder="Video prompt (action + camera movement)…" oninput="debouncedSave()">${esc(s.videoPrompt)}</textarea>
+      ${s.motionVideoUrl ? `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><label style="font-size:10px;color:#555;white-space:nowrap">Motion duration (s):</label><input type="number" class="field-motion-duration" min="0.5" step="0.5" value="${esc(String(s.motionDuration || ''))}" placeholder="full clip" style="width:70px;background:#111;border:1px solid #222;border-radius:4px;color:#888;font-size:11px;padding:2px 6px" oninput="debouncedSave()" title="Override how many seconds of motion play before holding on the last frame. Leave blank to use full clip length."></div>` : ''}
+    </td>
     <td data-label="Generated Images"><div class="images-grid" id="shot-imgs-${s.id}">${imgsHTML}</div></td>
     <td>
       <div class="final-image-cell" id="final-img-${s.id}">

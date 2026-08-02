@@ -74,7 +74,8 @@ A web-based storyboard generation tool for music videos and films. Users build a
 - Timestamps are assigned manually or auto-assigned from the Whisper transcript. In music piece mode, timestamps snap to detected beat positions.
 - Final image: the selected/approved image for this shot. Shown in the animatic.
 - Image editor (Compose): opens a canvas where a background (from location images) and character layers can be arranged, scaled, and lit. The compose state (bgUrl, bgColor, bgScale, bgOffsetX, bgOffsetY, globalLighting, globalContrast, globalSaturation, bgSeparation, layers with per-layer position/opacity/lighting) is versioned with the shot.
-- **UPDATED** Motion video: two kinds — (1) Generate Video (shots table) stores a fal.ai video URL as `videoUrl`; (2) Talking Video (compose editor) stores a video as `motionVideoUrl`. Both are versioned and used in the animatic. `motionVideoUrl` takes priority over `videoUrl` when both exist.
+- **UPDATED** Motion video: two kinds — (1) Generate Video (shots table) stores a fal.ai video URL as `videoUrl`; (2) Motion video (compose editor) stores a pan/zoom WebM as `motionVideoUrl`. Both are versioned and used in the animatic. `motionVideoUrl` takes priority over `videoUrl` when both exist.
+- **UPDATED** Motion duration override (`motionDuration`): optional per-shot field (seconds). If set, only that many seconds of the motion clip play in the animatic; the shot slot holds on the last frame for the remaining duration. Shown as an input in the Video Prompt column when a motion video exists for the shot.
 - Undo in the image editor: undoes changes to all compose fields including background size and position.
 
 ---
@@ -89,6 +90,8 @@ A web-based storyboard generation tool for music videos and films. Users build a
 ## Animatic
 
 - **UPDATED** Generates a video assembling all shots — motion video (`motionVideoUrl` preferred, then `videoUrl`) where generated, otherwise final image — timed to the imported audio. The server follows HTTP redirects and falls back per-shot from video to image if a video URL is unreachable.
+- **UPDATED** Video shot duration behavior: a motion video clip fills the full shot slot by default. If the clip is shorter than the shot's duration (next timestamp minus this timestamp), the last frame is held for the remainder. If a `motionDuration` override is set on the shot, only that many seconds of motion play; the rest of the slot shows the last frame. Changing a shot's timestamps (start or end) automatically changes the slot length — re-generating the animatic picks up the new durations.
+- **UPDATED** Live canvas overlay: during animatic playback, the overlay canvas is transparent for shots that have a motion video, allowing the animatic video to show through. For still-only shots the overlay canvas draws the shot image.
 - Shot boundaries are shown as a draggable timeline below the video player. Dragging a handle adjusts the shot's timestamp and saves it.
 - Clicking the timeline scrubs the video to that position.
 - Generated animatics are uploaded to Supabase and saved permanently. The animatic tab shows all previously generated animatics for the project, newest first.

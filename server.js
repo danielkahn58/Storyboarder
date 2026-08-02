@@ -1009,12 +1009,12 @@ app.post('/api/generate-animatic', async (req, res) => {
       if (secs === null) continue;
       if (shot.videoUrl) {
         try {
-          const vidPath = tmp('.mp4');
+          const vidPath = tmp('.webm');
           await download(shot.videoUrl, vidPath);
           // Verify ffprobe can read it as video before committing
           const dur = await ffprobe(vidPath);
           if (dur && dur > 0) {
-            frames.push({ type: 'video', path: vidPath, secs });
+            frames.push({ type: 'video', path: vidPath, secs, videoDur: dur, motionDuration: shot.motionDuration || null });
             continue;
           }
         } catch(e) {
@@ -1061,7 +1061,19 @@ app.post('/api/generate-animatic', async (req, res) => {
           args = ['-y', '-loop', '1', '-i', f.path, '-t', String(segDur), '-vf', vfScale,
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-an', segPath];
         } else {
-          args = ['-y', '-i', f.path, '-t', String(segDur), '-vf', vfScale,
+          // Determine how many seconds of motion to play before holding the last frame.
+          // If motionDuration is set, cap it there; otherwise play the full video clip.
+          // Either way, pad to segDur by cloning the last frame so the shot slot is filled.
+          const effectiveDur = f.motionDuration
+            ? Math.min(f.motionDuration, f.videoDur)
+            : f.videoDur;
+          const padDur = Math.max(segDur - effectiveDur, 0);
+          const vfPad = padDur > 0
+            ? `${vfScale},tpad=stop_mode=clone:stop_duration=${padDur}`
+            : vfScale;
+          // -t before -i limits input to effectiveDur; -t after limits output to segDur
+          args = ['-y', '-t', String(effectiveDur), '-i', f.path,
+            '-t', String(segDur), '-vf', vfPad,
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-an', segPath];
         }
         execFile('ffmpeg', args, { maxBuffer: 50 * 1024 * 1024 }, (err, _out, stderr) => {
