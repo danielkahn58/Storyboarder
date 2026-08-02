@@ -9009,14 +9009,19 @@ async function applyComposePrompt() {
     const uploaded = await apiFetch('/api/upload-reference', { base64: b64, mediaType: 'image/jpeg' });
     const data = await apiFetch('/api/generate-shot-images', { prompt, referenceImageUrls: [uploaded.url], stylePrompt: '' });
     const url = data.images?.[0];
-    if (url) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => { _compose.bgImg = img; _compose.bgUrl = url; _compose.bgColor = null; renderCompose(); saveComposeLayers(); };
-      img.src = proxyUrl(url);
-      addImagesToLocation(_compose.locationId, [url]);
-      addUrlToShotImages(url);
-    }
+    if (!url) throw new Error('No image returned from generation');
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (!_compose) return;
+      _compose.bgImg = img; _compose.bgUrl = url; _compose.bgColor = null;
+      renderCompose(); saveComposeLayers();
+      showToast('Image updated.');
+    };
+    img.onerror = () => showToast('Image generated but failed to load — try again.', true);
+    img.src = proxyUrl(url);
+    addImagesToLocation(_compose.locationId, [url]);
+    addUrlToShotImages(url);
   } catch(e) { showToast('Prompt failed: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '✦ Apply Prompt'; } }
 }
@@ -9064,17 +9069,20 @@ async function applyLayerPrompt() {
       }
     }
 
+    const layerIdx = _compose.selectedIdx;
     const imgEl = new Image();
     imgEl.crossOrigin = 'anonymous';
     imgEl.onload = () => {
+      if (!_compose || layerIdx >= _compose.layers.length) return;
       const h = COMPOSE_H * layer.scale;
       const w = h * (imgEl.naturalWidth / imgEl.naturalHeight);
-      _compose.layers[_compose.selectedIdx] = { ..._compose.layers[_compose.selectedIdx], imgEl, imgUrl: finalUrl, w, h };
+      _compose.layers[layerIdx] = { ..._compose.layers[layerIdx], imgEl, imgUrl: finalUrl, w, h };
       updateComposeLayerPanel(); renderCompose(); saveComposeLayers();
+      showToast('Layer updated.');
     };
+    imgEl.onerror = () => showToast('Layer updated but image failed to load — try again.', true);
     imgEl.src = proxyUrl(finalUrl);
     autoSave();
-    showToast('Layer updated.');
   } catch(e) { showToast('Layer prompt failed: ' + e.message, true); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Apply Prompt to Layer'; } }
 }

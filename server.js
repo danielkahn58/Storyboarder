@@ -1354,40 +1354,14 @@ app.post('/api/apply-prompt', async (req, res) => {
   const prefix = (projectId && entityType && entityId) ? `projects/${projectId}/${entityType}/${entityId}` : `projects/unassigned`;
   log('info', 'apply-prompt started', { prompt, imageUrl });
   try {
-    // Use GPT-Image-2 for structural/spatial edits — better instruction following than Kontext
-    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set');
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error(`Could not fetch image: ${imgRes.status}`);
-    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
-    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpeg';
-    const { toFile } = require('openai');
-    const imageFile = await toFile(imgBuf, `image.${ext}`, { type: contentType });
-    const response = await openai.images.edit({
-      model: 'gpt-image-2',
-      image: imageFile,
-      prompt,
-      n: 1,
-      size: '1536x1024',
+    const result = await fal.subscribe('fal-ai/flux-pro/kontext/max', {
+      input: { prompt, image_url: imageUrl, aspect_ratio: '16:9', num_images: 1, safety_tolerance: '6' }
     });
-    log('info', 'apply-prompt gpt response', { keys: Object.keys(response.data?.[0] || {}) });
-    const b64 = response.data?.[0]?.b64_json;
-    const responseUrl = response.data?.[0]?.url;
-    if (!b64 && !responseUrl) throw new Error(`No image returned from GPT-Image-2: ${JSON.stringify(response.data?.[0])}`);
-    let outBuf;
-    if (b64) {
-      outBuf = Buffer.from(b64, 'base64');
-    } else {
-      const r = await fetch(responseUrl);
-      if (!r.ok) throw new Error(`Failed to fetch GPT result: ${r.status}`);
-      outBuf = Buffer.from(await r.arrayBuffer());
-    }
-    const storagePath = `${prefix}/${Date.now()}-gpt-edit.jpg`;
-    const { error: uploadErr } = await sbAdmin.storage.from('images').upload(storagePath, outBuf, { contentType: 'image/jpeg', upsert: true });
-    if (uploadErr) throw uploadErr;
-    const { data: pub } = sbAdmin.storage.from('images').getPublicUrl(storagePath);
-    log('info', 'apply-prompt done', { url: pub.publicUrl });
-    res.json({ url: pub.publicUrl });
+    const falUrl = result?.data?.images?.[0]?.url ?? null;
+    if (!falUrl) throw new Error('No image returned from generation');
+    const url = await persistImage(falUrl, `${prefix}/${Date.now()}-edit.jpg`);
+    log('info', 'apply-prompt done', { url });
+    res.json({ url });
   } catch(e) {
     log('error', 'apply-prompt failed', { error: e.message });
     res.status(500).json({ error: e.message });
