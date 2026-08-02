@@ -5563,9 +5563,25 @@ function _renderImageLibraryGrid(entries) {
   }
   grid.innerHTML = entries.map((e, i) => {
     const name = e.name ? e.name.split('/').pop() : '';
-    return `<div onclick="_pickImageLibrary(${i})" style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#0a0a0a" onmouseover="this.style.borderColor='#818cf8'" onmouseout="this.style.borderColor='transparent'">
-      <img src="${esc(e.url)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;display:block">
-      <div style="font-size:9px;color:#555;padding:4px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="${esc(name)}">${esc(name)}</div>
+    // Use proxy for non-Supabase URLs; Supabase URLs are direct
+    const src = esc(e.url.includes('supabase.co') ? e.url : `/api/proxy-image?url=${encodeURIComponent(e.url)}`);
+    return `<div
+      onclick="_pickImageLibrary(${i})"
+      onmouseover="this.querySelector('.lib-thumb-overlay').style.opacity='1'"
+      onmouseout="this.querySelector('.lib-thumb-overlay').style.opacity='0'"
+      style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#111;position:relative"
+      class="lib-thumb-cell"
+      data-idx="${i}">
+      <div style="width:100%;height:130px;background:#0e0e0e;display:flex;align-items:center;justify-content:center;overflow:hidden">
+        <img src="${src}" loading="lazy"
+          style="width:100%;height:130px;object-fit:cover;display:block"
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div style="display:none;width:100%;height:130px;align-items:center;justify-content:center;color:#333;font-size:22px">🖼</div>
+      </div>
+      <div class="lib-thumb-overlay" style="position:absolute;inset:0;background:rgba(129,140,248,0.18);opacity:0;transition:opacity 0.15s;pointer-events:none;display:flex;align-items:center;justify-content:center">
+        <span style="background:#818cf8;color:#fff;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px">Select</span>
+      </div>
+      <div style="font-size:9px;color:#555;padding:4px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-top:1px solid #1a1a1a" title="${esc(name)}">${esc(name)}</div>
     </div>`;
   }).join('');
   // Store filtered entries for index lookup
