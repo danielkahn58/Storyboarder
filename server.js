@@ -1429,23 +1429,35 @@ app.post('/api/relight-image', async (req, res) => {
 
 app.get('/api/storage-images', async (req, res) => {
   try {
-    const { data: files, error } = await sbAdmin.storage.from('images').list('projects', {
-      limit: 5000,
-      sortBy: { column: 'created_at', order: 'desc' },
-      recursive: true,
-    });
-    if (error) throw error;
-    // Build public CDN URLs; filter to image files only
-    const ext = /\.(jpe?g|png|webp|gif|avif|svg)$/i;
+    const ext = /\.(jpe?g|png|webp|gif|avif)$/i;
     const baseUrl = process.env.SUPABASE_URL;
     const bucket = 'images';
-    const results = (files || [])
-      .filter(f => f.name && ext.test(f.name))
-      .map(f => ({
-        url: `${baseUrl}/storage/v1/object/public/${bucket}/projects/${f.name}`,
-        name: f.name,
-        createdAt: f.created_at || f.updated_at || null,
-      }));
+    const results = [];
+
+    // Manually walk the folder tree (recursive:true is unreliable across SDK versions).
+    // Structure: projects/{projId}/{type}/{entityId}/{file}  (4 levels)
+    const listDir = async (path) => {
+      const { data, error } = await sbAdmin.storage.from(bucket).list(path, { limit: 1000 });
+      if (error || !data) return;
+      const files = data.filter(f => f.id && ext.test(f.name));   // id present = real file
+      const folders = data.filter(f => !f.id || f.metadata === null); // no id = folder stub
+      for (const f of files) {
+        results.push({
+          url: `${baseUrl}/storage/v1/object/public/${bucket}/${path}/${f.name}`,
+          name: `${path}/${f.name}`,
+          createdAt: f.created_at || f.updated_at || null,
+        });
+      }
+      // Recurse into subfolders (capped at reasonable depth)
+      await Promise.all(folders.map(f => listDir(`${path}/${f.name}`)));
+    };
+
+    // Start from each project folder (one level below projects/)
+    const { data: projFolders } = await sbAdmin.storage.from(bucket).list('projects', { limit: 500 });
+    await Promise.all((projFolders || []).filter(f => !f.id).map(p => listDir(`projects/${p.name}`)));
+
+    // Sort newest first by createdAt
+    results.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     res.json({ images: results });
   } catch (e) {
     log('error', 'storage-images error', { message: e.message });
