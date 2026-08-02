@@ -2169,8 +2169,11 @@ function _renderUiTestCases() {
       ['Timeline handles render at correct positions for shot timestamps', 'Handle X-position: (secs - offset) / duration', 'Handle position accuracy'],
       ['Dragging a handle updates segment widths and handle position', 'startTlDrag() onMove CSS update', 'Drag handle UX'],
       ['Releasing a handle updates the shot timestamp in Shot Sequence', 'onUp: shot.timestamp + autoSave()', 'Drag → timestamp save'],
-      ['Playhead moves as video plays', 'updateAnimaticPlayhead() timeupdate', 'Playhead regression'],
-      ['Canvas shows correct shot image at current playback position', 'drawShot() from _animaticTimeline', 'Live canvas preview'],
+      ['Playhead moves as animatic plays', 'updateAnimaticPlayhead() → _drawCanvasFrame()', 'Playhead regression'],
+      ['Canvas shows correct shot image at current playback position', '_drawCanvasFrame() rAF loop from _animaticTimeline', 'Live canvas preview'],
+      ['Video shots render their clip frame on canvas (not a still)', '_getOrCreatePoolVideo() + ctx.drawImage(videoEl)', 'Video shot canvas render'],
+      ['Canvas freezes on last frame when video clip ends before slot', 'offsetInShot >= maxPlay → pause pool video', 'Last-frame freeze behavior'],
+      ['Play/Pause button toggles rAF loop and pool video playback', '_toggleAnimaticPlayback()', 'Canvas playback controls'],
       ['↺ Sync button refreshes timeline from current shot timestamps', '_syncAnimaticFromLiveShots()', 'Manual sync escape hatch'],
     ]},
     { label: 'Configuration & Cloud', file: 'e2e/config.spec.ts', cases: [
@@ -3154,8 +3157,12 @@ function renderAnimaticHistory() {
         <button onclick="deleteAnimatic(${i})" style="font-size:11px;color:#555;background:none;border:1px solid #222;border-radius:3px;padding:2px 7px;cursor:pointer">✕ Remove</button>
       </div>
       <div style="position:relative;width:100%;max-width:900px">
-        <video src="${esc(a.url)}" controls style="width:100%;border-radius:8px;background:#000;display:block" data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
-        ${i === 0 ? `<canvas class="animatic-live-canvas" style="position:absolute;top:0;left:0;width:100%;height:calc(100% - 44px);pointer-events:none;border-radius:8px 8px 0 0"></canvas>` : ''}
+        <video src="${esc(a.url)}" ${i === 0 ? 'style="width:100%;border-radius:8px;background:#000;display:block;opacity:0;pointer-events:none;position:absolute;top:0;left:0"' : 'controls style="width:100%;border-radius:8px;background:#000;display:block"'} data-animatic-idx="${i}" onloadedmetadata="if(${i}===0)_initPrimaryAnimaticTimeline(this,${i})"></video>
+        ${i === 0 ? `<canvas id="animatic-preview-canvas" style="width:100%;border-radius:8px;background:#000;display:block;cursor:pointer" onclick="_toggleAnimaticPlayback()"></canvas>
+        <div id="animatic-preview-controls" style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <button onclick="_toggleAnimaticPlayback()" style="background:none;border:1px solid #333;border-radius:4px;color:#aaa;font-size:11px;padding:3px 10px;cursor:pointer" id="animatic-play-btn">▶ Play</button>
+          <span id="animatic-time-display" style="font-size:10px;color:#555;font-family:monospace">0:00 / 0:00</span>
+        </div>` : ''}
       </div>
       ${i === 0 ? `<div id="animatic-timeline-wrap" style="display:none;max-width:900px;margin-top:10px;user-select:none">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -3179,70 +3186,211 @@ function _initPrimaryAnimaticTimeline(videoEl, animaticIdx) {
   _startLiveCanvasPreview(videoEl);
 }
 
+// ── Live canvas preview state ────────────────────────────────────────────────
 let _redrawLiveCanvas = null;
+let _livePreviewVideoEl = null; // hidden <video> carrying the audio track
+let _livePreviewPlaying = false;
+let _livePreviewRafId = null;
+const _videoPool = {};   // { shotId: HTMLVideoElement } — one per shot with video
+const _imgCache = {};    // { url: HTMLImageElement }
+let _lastDrawnShotId = null;
+let _lastCanvasW = 0, _lastCanvasH = 0;
+
+function _getOrCreatePoolVideo(shot) {
+  const url = shot.motionVideoUrl || shot.videoUrl;
+  if (!url) return null;
+  const existing = _videoPool[shot.id];
+  // Recreate if URL changed
+  if (existing && existing.dataset.src === url) return existing;
+  if (existing) { existing.remove(); }
+  const v = document.createElement('video');
+  v.src = url;
+  v.dataset.src = url;
+  v.crossOrigin = 'anonymous';
+  v.preload = 'auto';
+  v.muted = true;
+  v.playsInline = true;
+  v.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;pointer-events:none';
+  document.body.appendChild(v);
+  _videoPool[shot.id] = v;
+  return v;
+}
+
+function _loadImg(url) {
+  if (!_imgCache[url]) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    _imgCache[url] = img;
+  }
+  return _imgCache[url];
+}
+
+function _drawCanvasFrame() {
+  const canvas = document.getElementById('animatic-preview-canvas');
+  const audioEl = _livePreviewVideoEl;
+  if (!canvas || !audioEl || !_animaticTimeline) return;
+
+  const { shots: ts, duration } = _animaticTimeline;
+  if (!ts.length) return;
+
+  // Sync canvas resolution to display size
+  const dw = canvas.offsetWidth, dh = canvas.offsetHeight;
+  if (dw !== _lastCanvasW || dh !== _lastCanvasH) {
+    canvas.width = dw; canvas.height = dh;
+    _lastCanvasW = dw; _lastCanvasH = dh;
+  }
+  if (!dw || !dh) return;
+
+  const ctx = canvas.getContext('2d');
+  const offset = ts[0].secs;
+  const t = (audioEl.currentTime || 0) + offset;
+
+  // Find current shot
+  let curIdx = 0;
+  for (let i = 0; i < ts.length; i++) { if (ts[i].secs <= t) curIdx = i; else break; }
+  const cur = ts[curIdx];
+  const nextSecs = ts[curIdx + 1]?.secs ?? (offset + duration);
+  const shotStart = cur.secs;
+  const offsetInShot = Math.max(0, t - shotStart);
+
+  const live = shots.find(sh => sh.id === cur.id);
+
+  // Update time display
+  const timeEl = document.getElementById('animatic-time-display');
+  if (timeEl) timeEl.textContent = `${formatTimestamp(t)} / ${formatTimestamp(offset + duration)}`;
+
+  // Update playhead
+  const ph = document.getElementById('animatic-playhead');
+  if (ph) ph.style.left = (audioEl.currentTime / duration * 100) + '%';
+
+  // Determine what to draw
+  const hasMotionVideo = !!(live?.motionVideoUrl);
+  const hasGenVideo = !!(live?.videoUrl);
+  const hasVideo = hasMotionVideo || hasGenVideo;
+  const stillUrl = live?.finalImage || live?.images?.[0];
+
+  if (hasVideo) {
+    const pv = _getOrCreatePoolVideo(live);
+    if (pv) {
+      const slotDur = nextSecs - shotStart;
+      const clipDur = pv.duration || 0;
+      const maxPlay = live.motionDuration ? Math.min(live.motionDuration, clipDur) : clipDur;
+
+      if (_livePreviewPlaying && pv.paused && offsetInShot < maxPlay) {
+        pv.currentTime = offsetInShot;
+        pv.play().catch(() => {});
+      }
+      // Freeze on last frame when beyond clip duration
+      if (offsetInShot >= maxPlay && !pv.paused) pv.pause();
+
+      // Sync if drifted > 150ms
+      if (!pv.paused) {
+        const drift = Math.abs(pv.currentTime - offsetInShot);
+        if (drift > 0.15) pv.currentTime = offsetInShot;
+      }
+
+      if (pv.readyState >= 2) {
+        _drawImageCover(ctx, pv, dw, dh);
+        _lastDrawnShotId = cur.id;
+        return;
+      }
+    }
+    // Video not ready yet — fall through to still
+  }
+
+  if (stillUrl) {
+    const img = _loadImg(stillUrl);
+    if (img.complete && img.naturalWidth) {
+      _drawImageCover(ctx, img, dw, dh);
+    }
+    // else: image still loading — keep previous frame
+  } else {
+    ctx.clearRect(0, 0, dw, dh);
+  }
+  _lastDrawnShotId = cur.id;
+
+  // Pause pool videos for shots that are no longer current
+  if (_lastDrawnShotId !== cur.id) {
+    Object.entries(_videoPool).forEach(([id, v]) => {
+      if (id !== cur.id && !v.paused) v.pause();
+    });
+  }
+}
+
+function _drawImageCover(ctx, source, dw, dh) {
+  const sw = source.naturalWidth || source.videoWidth || dw;
+  const sh = source.naturalHeight || source.videoHeight || dh;
+  const scale = Math.max(dw / sw, dh / sh);
+  const w = sw * scale, h = sh * scale;
+  ctx.drawImage(source, (dw - w) / 2, (dh - h) / 2, w, h);
+}
+
+function _livePreviewRafLoop() {
+  _drawCanvasFrame();
+  if (_livePreviewPlaying) {
+    _livePreviewRafId = requestAnimationFrame(_livePreviewRafLoop);
+  }
+}
+
+function _toggleAnimaticPlayback() {
+  const audioEl = _livePreviewVideoEl;
+  if (!audioEl) return;
+  const btn = document.getElementById('animatic-play-btn');
+  if (_livePreviewPlaying) {
+    audioEl.pause();
+    Object.values(_videoPool).forEach(v => v.pause());
+    _livePreviewPlaying = false;
+    if (_livePreviewRafId) { cancelAnimationFrame(_livePreviewRafId); _livePreviewRafId = null; }
+    if (btn) btn.textContent = '▶ Play';
+  } else {
+    audioEl.play().catch(() => {});
+    _livePreviewPlaying = true;
+    _livePreviewRafId = requestAnimationFrame(_livePreviewRafLoop);
+    if (btn) btn.textContent = '⏸ Pause';
+  }
+}
 
 function _startLiveCanvasPreview(videoEl) {
-  const canvas = document.querySelector('.animatic-live-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const imgCache = {};
+  _livePreviewVideoEl = videoEl;
+  _livePreviewPlaying = false;
+  if (_livePreviewRafId) { cancelAnimationFrame(_livePreviewRafId); _livePreviewRafId = null; }
 
-  function loadImg(url) {
-    if (!imgCache[url]) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = url;
-      imgCache[url] = img;
-    }
-    return imgCache[url];
-  }
+  // When the hidden audio/video ends, stop playback and reset
+  videoEl.onended = () => {
+    _livePreviewPlaying = false;
+    Object.values(_videoPool).forEach(v => { v.pause(); v.currentTime = 0; });
+    const btn = document.getElementById('animatic-play-btn');
+    if (btn) btn.textContent = '▶ Play';
+  };
 
-  function drawShot() {
-    if (!_animaticTimeline) return;
-    const { shots: ts } = _animaticTimeline;
-    if (!ts.length) return;
-    const offset = ts[0].secs;
-    const t = (videoEl.currentTime || 0) + offset;
-    let cur = ts[0];
-    for (const s of ts) { if (s.secs <= t) cur = s; else break; }
-    const live = shots.find(sh => sh.id === cur.id);
-    if (!canvas.offsetWidth || !canvas.offsetHeight) return;
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    // For shots with a motion video the animatic already contains the video — clear the
-    // overlay canvas so it shows through rather than covering it with a still frame.
-    if (live?.motionVideoUrl) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
-    const url = live?.finalImage || live?.images?.[0];
-    if (!url) {
-      // No still image — clear canvas so the animatic video shows through
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
-    const img = loadImg(url);
-    const render = () => {
-      if (!canvas.offsetWidth || !canvas.offsetHeight) return;
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-      const scale = Math.max(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
-      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-      ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
-    };
-    if (img.complete && img.naturalWidth) render();
-    else img.onload = render;
-  }
-
-  // Pre-load all shot images
+  // Pre-load all shot images and create pool videos
   if (_animaticTimeline) {
     _animaticTimeline.shots.forEach(s => {
       const live = shots.find(sh => sh.id === s.id);
-      if (live?.finalImage) loadImg(live.finalImage);
+      if (!live) return;
+      if (live.finalImage) _loadImg(live.finalImage);
+      if (live.motionVideoUrl || live.videoUrl) _getOrCreatePoolVideo(live);
     });
   }
 
-  _redrawLiveCanvas = drawShot;
-  videoEl.addEventListener('timeupdate', drawShot, { passive: true });
-  videoEl.addEventListener('seeked', drawShot, { passive: true });
-  drawShot();
+  // Draw initial frame
+  _redrawLiveCanvas = () => { _drawCanvasFrame(); };
+  _drawCanvasFrame();
+
+  // Wire timeline click to seek
+  const tl = document.getElementById('animatic-timeline');
+  if (tl) {
+    tl._previewSeekHandler = (e) => {
+      if (e.target.closest('.tl-handle')) return;
+      const rect = tl.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const { duration } = _animaticTimeline;
+      videoEl.currentTime = pct * duration;
+      Object.values(_videoPool).forEach(v => { v.pause(); });
+      _drawCanvasFrame();
+    };
+  }
 }
 
 function deleteAnimatic(index) {
@@ -3291,8 +3439,11 @@ function renderAnimaticTimeline(videoEl, animatic) {
   tl.onclick = (e) => {
     if (e.target.closest('.tl-handle')) return;
     const rect = tl.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    video.currentTime = Math.max(0, Math.min(duration, pct * duration));
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const newTime = pct * duration;
+    video.currentTime = newTime; // hidden audio track
+    Object.values(_videoPool).forEach(v => { v.pause(); v.currentTime = 0; });
+    _drawCanvasFrame();
   };
 }
 
@@ -3323,10 +3474,11 @@ function _redrawAnimaticTimeline() {
 }
 
 function updateAnimaticPlayhead() {
-  const video = document.querySelector('#animatic-history video');
+  const video = _livePreviewVideoEl;
   const ph = document.getElementById('animatic-playhead');
   if (!ph || !video || !_animaticTimeline) return;
   ph.style.left = (video.currentTime / _animaticTimeline.duration * 100) + '%';
+  _drawCanvasFrame(); // keep canvas in sync when scrubbing while paused
 }
 
 function startTlDrag(e, shotId) {
@@ -4716,6 +4868,12 @@ function _syncAnimaticFromLiveShots() {
   if (!timedShots.length) return;
   _animaticTimeline.shots = timedShots;
   _redrawAnimaticTimeline();
+  // Refresh pool videos for any shots whose video URLs changed
+  timedShots.forEach(s => {
+    const live = shots.find(sh => sh.id === s.id);
+    if (live && (live.motionVideoUrl || live.videoUrl)) _getOrCreatePoolVideo(live);
+    if (live?.finalImage) _loadImg(live.finalImage);
+  });
   _redrawLiveCanvas?.();
 }
 
