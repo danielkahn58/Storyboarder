@@ -5542,7 +5542,7 @@ async function openImageLibrary(type, entityId) {
   modal.style.display = 'flex';
 
   try {
-    const { images } = await apiFetch('/api/storage-images');
+    const { images } = await apiFetch('/api/storage-images', null, 'GET');
     _libState.allEntries = images || [];
     loading.style.display = 'none';
     _renderImageLibraryGrid(_libState.allEntries);
