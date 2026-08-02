@@ -3683,6 +3683,7 @@ function charRefGalleryHTML(c) {
         <input type="file" accept="image/*" multiple style="display:none" onchange="handleCharRefImagesUpload('${c.id}',this)">
       </label>
     </div>
+    <button onclick="openImageLibrary('char','${c.id}')" style="background:none;border:1px solid #2a2a2a;border-radius:4px;color:#666;font-size:10px;padding:3px 6px;cursor:pointer;text-align:left">🖼 Library</button>
     ${loraBtn}
   </div>`;
 }
@@ -5519,6 +5520,103 @@ async function pickLocLibraryImage(locId, idx) {
     autoSave();
     renderLocations();
   }
+}
+
+// ── global image library modal ────────────────────────────────────────────
+let _libState = { type: null, id: null, allEntries: [] }; // type: 'char' | 'loc'
+
+async function openImageLibrary(type, entityId) {
+  _libState = { type, id: entityId, allEntries: [] };
+  const modal = document.getElementById('image-library-modal');
+  const grid  = document.getElementById('image-library-grid');
+  const title = document.getElementById('image-library-title');
+  const count = document.getElementById('image-library-count');
+  const loading = document.getElementById('image-library-loading');
+  const search = document.getElementById('image-library-search');
+  if (!modal) return;
+  title.textContent = type === 'char' ? 'Character Image Library' : 'Location Image Library';
+  count.textContent = '';
+  search.value = '';
+  grid.innerHTML = '';
+  loading.style.display = 'block';
+  modal.style.display = 'flex';
+
+  try {
+    const { images } = await apiFetch('/api/storage-images');
+    _libState.allEntries = images || [];
+    loading.style.display = 'none';
+    _renderImageLibraryGrid(_libState.allEntries);
+  } catch (e) {
+    loading.style.display = 'none';
+    grid.innerHTML = `<div style="color:#e05050;font-size:12px;grid-column:1/-1;padding:20px">Failed to load library: ${esc(e.message)}</div>`;
+  }
+}
+
+function _renderImageLibraryGrid(entries) {
+  const grid  = document.getElementById('image-library-grid');
+  const count = document.getElementById('image-library-count');
+  if (!grid) return;
+  count.textContent = entries.length ? `${entries.length} image${entries.length !== 1 ? 's' : ''}` : '';
+  if (!entries.length) {
+    grid.innerHTML = '<div style="color:#555;font-size:12px;grid-column:1/-1;text-align:center;padding:40px 0">No images found in storage.</div>';
+    return;
+  }
+  grid.innerHTML = entries.map((e, i) => {
+    const name = e.name ? e.name.split('/').pop() : '';
+    return `<div onclick="_pickImageLibrary(${i})" style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#0a0a0a" onmouseover="this.style.borderColor='#818cf8'" onmouseout="this.style.borderColor='transparent'">
+      <img src="${esc(e.url)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;display:block">
+      <div style="font-size:9px;color:#555;padding:4px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="${esc(name)}">${esc(name)}</div>
+    </div>`;
+  }).join('');
+  // Store filtered entries for index lookup
+  grid._filteredEntries = entries;
+}
+
+function _filterImageLibrary(query) {
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? _libState.allEntries.filter(e => (e.name || '').toLowerCase().includes(q) || (e.url || '').toLowerCase().includes(q))
+    : _libState.allEntries;
+  _renderImageLibraryGrid(filtered);
+}
+
+function _closeImageLibrary() {
+  const modal = document.getElementById('image-library-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function _pickImageLibrary(idx) {
+  const grid = document.getElementById('image-library-grid');
+  const entries = grid?._filteredEntries;
+  if (!entries?.[idx]) return;
+  const { url } = entries[idx];
+  _closeImageLibrary();
+
+  if (_libState.type === 'char') {
+    const char = characters.find(c => c.id === _libState.id);
+    if (!char) return;
+    // Add as a ref image entry
+    const newRef = { id: genId(), url };
+    char.refImages = char.refImages || [];
+    char.refImages.push(newRef);
+    if (!char.selectedRefImageId) char.selectedRefImageId = newRef.id;
+    autoSave();
+    renderCharacters();
+    showToast('Image added to character reference images.');
+  } else if (_libState.type === 'loc') {
+    const loc = locations.find(l => l.id === _libState.id);
+    if (!loc) return;
+    loc.referenceImage = { dataUrl: url, base64: null, mediaType: 'image/jpeg', url };
+    if (!loc.images?.length && !loc.useRefAsDefault) loc.useRefAsDefault = true;
+    autoSave();
+    renderLocations();
+    showToast('Image set as location reference.');
+  }
+}
+
+// Override the old location-only library to use the shared modal
+function openLocImageLibrary(locId) {
+  openImageLibrary('loc', locId);
 }
 
 // ── location shot angles ───────────────────────────────────────────────────

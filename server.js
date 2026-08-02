@@ -1427,6 +1427,32 @@ app.post('/api/relight-image', async (req, res) => {
   }
 });
 
+app.get('/api/storage-images', requireAuth, async (req, res) => {
+  try {
+    const { data: files, error } = await sbAdmin.storage.from('images').list('projects', {
+      limit: 5000,
+      sortBy: { column: 'created_at', order: 'desc' },
+      recursive: true,
+    });
+    if (error) throw error;
+    // Build public CDN URLs; filter to image files only
+    const ext = /\.(jpe?g|png|webp|gif|avif|svg)$/i;
+    const baseUrl = process.env.SUPABASE_URL;
+    const bucket = 'images';
+    const results = (files || [])
+      .filter(f => f.name && ext.test(f.name))
+      .map(f => ({
+        url: `${baseUrl}/storage/v1/object/public/${bucket}/projects/${f.name}`,
+        name: f.name,
+        createdAt: f.created_at || f.updated_at || null,
+      }));
+    res.json({ images: results });
+  } catch (e) {
+    log('error', 'storage-images error', { message: e.message });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/proxy-image', (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send('url required');
