@@ -3214,13 +3214,8 @@ function _startLiveCanvasPreview(videoEl) {
     if (live?.motionVideoUrl) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
     const url = live?.finalImage || live?.images?.[0];
     if (!url) {
-      // Placeholder for shots with no image yet
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#333';
-      ctx.font = `${Math.round(canvas.height * 0.06)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(live?.lyric?.slice(0, 60) || '(no image)', canvas.width / 2, canvas.height / 2);
+      // No still image — clear canvas so the animatic video shows through
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
     const img = loadImg(url);
