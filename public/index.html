@@ -1313,6 +1313,7 @@
         <button class="btn-create-video" onclick="openVideoTab()">🎬 Create Video</button>
         <button id="btn-compose-undo" onclick="undo()" disabled title="Nothing to undo" style="padding:5px 12px;font-size:11px;background:#1a1a1a;color:#555;border:1px solid #2a2a2a;border-radius:5px;cursor:pointer">↩ Undo</button>
         <button class="btn btn-save-compose" onclick="saveCompose()">Save as Final Image</button>
+        <button onclick="if(_compose){ if(confirm('Delete this shot?')){ const id=_compose.shotId; closeCompose(); deleteShot(id); } }" style="padding:5px 12px;font-size:11px;background:#2a1010;color:#f87171;border:1px solid #4a2020;border-radius:5px;cursor:pointer">🗑 Delete Shot</button>
         <button class="compose-close" onclick="closeCompose()">✕</button>
       </div>
     </div>

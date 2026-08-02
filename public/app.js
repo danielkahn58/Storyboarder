@@ -4869,6 +4869,11 @@ function _syncAnimaticFromLiveShots() {
   if (!timedShots.length) return;
   _animaticTimeline.shots = timedShots;
   _redrawAnimaticTimeline();
+  // Clean up pool videos for shots that no longer exist
+  const liveIds = new Set(timedShots.map(s => s.id));
+  Object.keys(_videoPool).forEach(id => {
+    if (!liveIds.has(id)) { _videoPool[id].pause(); _videoPool[id].remove(); delete _videoPool[id]; }
+  });
   // Refresh pool videos for any shots whose video URLs changed
   timedShots.forEach(s => {
     const live = shots.find(sh => sh.id === s.id);
