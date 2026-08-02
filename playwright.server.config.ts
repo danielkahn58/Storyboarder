@@ -7,6 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   workers: 1,
+  timeout: 10000,
   reporter: [['json', { outputFile: '/tmp/pw-e2e-results.json' }]],
   use: {
     baseURL: process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`,

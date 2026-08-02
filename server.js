@@ -1745,13 +1745,30 @@ app.post('/api/run-e2e-tests', (req, res) => {
   _e2eState = { running: true, results: null, startedAt: Date.now() };
   log('info', 'e2e test run started', {});
   const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' };
-  execFile('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, timeout: 600000, maxBuffer: 10 * 1024 * 1024, env }, (err, stdout, stderr) => {
-    log('info', 'e2e test run finished', { ms: Date.now() - _e2eState.startedAt, exitCode: err?.code });
+  const logPath = '/tmp/pw-e2e-run.log';
+  const { spawn } = require('child_process');
+  const logStream = fs.createWriteStream(logPath, { flags: 'w' });
+  const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, env });
+  let stdout = '', stderr = '';
+  proc.stdout.on('data', d => { const s = d.toString(); stdout += s; logStream.write(s); });
+  proc.stderr.on('data', d => { const s = d.toString(); stderr += s; logStream.write('[STDERR] ' + s); });
+  const killTimer = setTimeout(() => { proc.kill('SIGTERM'); }, 540000); // kill at 9min so results still write
+  proc.on('close', () => {
+    clearTimeout(killTimer);
+    logStream.end();
+    log('info', 'e2e test run finished', { ms: Date.now() - _e2eState.startedAt });
     _e2eState.results = _parsePlaywrightResults(stdout, stderr);
     _e2eState.running = false;
   });
   // Return immediately — client polls /api/e2e-results
   res.json({ running: true, startedAt: _e2eState.startedAt });
+});
+
+app.get('/api/e2e-log', (req, res) => {
+  try {
+    const log = fs.existsSync('/tmp/pw-e2e-run.log') ? fs.readFileSync('/tmp/pw-e2e-run.log', 'utf8') : '(no log yet)';
+    res.json({ log: log.slice(-8000) });
+  } catch(e) { res.json({ log: e.message }); }
 });
 
 app.get('/api/e2e-results', (req, res) => {

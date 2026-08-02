@@ -1879,6 +1879,18 @@ async function runE2eTestsNow() {
   }, 3000);
 }
 
+async function showE2eLog() {
+  const out = document.getElementById('e2e-results');
+  if (!out) return;
+  out.innerHTML = '<p style="color:#555;font-size:12px">Fetching log…</p>';
+  try {
+    const data = await fetch('/api/e2e-log').then(r => r.json());
+    out.innerHTML = `<pre style="background:#0a0a0a;border:1px solid #222;border-radius:6px;padding:12px;color:#aaa;font-size:10px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(data.log || '(empty)')}</pre>`;
+  } catch(e) {
+    out.innerHTML = `<p style="color:#f87171;font-size:12px">Log fetch error: ${esc(e.message)}</p>`;
+  }
+}
+
 async function runTestsNow() {
   const btn = document.getElementById('btn-run-tests');
   const body = document.getElementById('kb-body');
@@ -2154,6 +2166,7 @@ function _renderUiTestCases() {
   let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:#0c0c0c;border-radius:6px;border:1px solid #1e1e1e;">
     <span style="font-size:11px;color:#555;flex:1">Playwright e2e tests. Click ○ to mark a case as manually verified.</span>
     <button id="btn-run-e2e" onclick="runE2eTestsNow()" style="background:#1a1a2e;border:1px solid #2e2e50;border-radius:6px;color:#818cf8;font-size:12px;font-weight:500;padding:5px 12px;cursor:pointer;white-space:nowrap">▶ Run E2E Tests</button>
+    <button onclick="showE2eLog()" style="background:none;border:1px solid #2a2a2a;border-radius:6px;color:#555;font-size:11px;padding:5px 10px;cursor:pointer;white-space:nowrap">📋 View Log</button>
   </div>
   <div id="e2e-results" style="margin-bottom:12px"></div>
   <table style="width:100%;border-collapse:collapse;">
