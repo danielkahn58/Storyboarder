@@ -1489,26 +1489,148 @@ function resetLocRules() {
 }
 
 // ── Knowledge Base (unified Docs + Tests modal) ──────────────────────────────
+// ── KB changelog — update dates + entries whenever tab content changes ────────
+// Entries are newest-first. Badge shows if newest entry is within 3 days AND
+// the user hasn't seen that version yet (tracked via localStorage date string).
+const _KB_CHANGELOG = {
+  spec: [
+    { date: '2026-08-01', type: 'updated',
+      summary: 'Motion video clarified (motionVideoUrl takes priority over videoUrl). Animatics explicitly marked as project-level. Music piece mode expanded with bar-detection algorithm detail.',
+      prev: 'Motion video had a single type. Animatics were not explicitly documented as project-level.' },
+  ],
+  arch: [
+    { date: '2026-08-01', type: 'updated',
+      summary: 'Added rule: update spec.md and TESTING.md with every code commit/push. Docs & Tests modal consolidated into a single KB modal with 4 tabs.',
+      prev: 'No explicit rule about keeping docs current with commits. Docs and Tests were separate modals.' },
+  ],
+  unit: [
+    { date: '2026-08-01', type: 'new',
+      summary: 'Added 40+ unit/API tests: parse-script, parse-characters, parse-locations, generate-shot-sequence, generate-shot-prompts, fuzzy-match-timestamp, transcribe-audio, snapshots, project-data, storage-upload-url.',
+      prev: null },
+  ],
+  ui: [
+    { date: '2026-08-01', type: 'new',
+      summary: 'Added 36 Playwright e2e tests across 8 spec files: Projects, Characters, Locations, Shot Sequence, Versions, Animatic, Configuration, and KB modal. Run via ▶ Run E2E Tests button.',
+      prev: null },
+  ],
+};
+
+// spec section slug → { ui: [section labels], unit: [file fragments] }
+const _SPEC_SECTION_TESTS = {
+  'projects':           { ui: ['Project Management', 'Authentication'], unit: [] },
+  'versioning':         { ui: ['Versions'], unit: ['versioning', 'snapshots'] },
+  'configuration-tab':  { ui: ['Configuration & Cloud', 'Audio & Transcript'], unit: ['transcribe-audio', 'parse-script'] },
+  'characters':         { ui: ['Characters'], unit: ['generate-prompt', 'parse-characters'] },
+  'locations':          { ui: ['Locations'], unit: ['parse-locations'] },
+  'shot-sequence':      { ui: ['Shot Sequence', 'Image Editor (Compose)'], unit: ['generate-shot-prompts', 'generate-shot-sequence', 'fuzzy-match-timestamp'] },
+  'animatic':           { ui: ['Animatic'], unit: [] },
+  'cloud-sync':         { ui: ['Configuration & Cloud'], unit: ['project-data', 'storage-upload-url', 'snapshots'] },
+};
+
+// test file fragment → spec section slug (for unit test rows)
+const _FILE_TO_SPEC = {
+  'versioning':           'versioning',
+  'generate-prompt':      'characters',
+  'parse-characters':     'characters',
+  'parse-locations':      'locations',
+  'generate-shot-sequence': 'shot-sequence',
+  'generate-shot-prompts':  'shot-sequence',
+  'fuzzy-match-timestamp':  'shot-sequence',
+  'transcribe-audio':     'configuration-tab',
+  'snapshots':            'versioning',
+  'project-data':         'cloud-sync',
+  'storage-upload-url':   'cloud-sync',
+  'parse-script':         'configuration-tab',
+};
+
+// UI test section label → spec section slug
+const _UI_SECTION_TO_SPEC = {
+  'Authentication':         'projects',
+  'Project Management':     'projects',
+  'Characters':             'characters',
+  'Locations':              'locations',
+  'Shot Sequence':          'shot-sequence',
+  'Audio & Transcript':     'configuration-tab',
+  'Image Editor (Compose)': 'shot-sequence',
+  'Versions':               'versioning',
+  'Animatic':               'animatic',
+  'Configuration & Cloud':  'configuration-tab',
+};
+
 let _kbCache = {};
 let _kbActiveTab = 'spec';
+let _kbSpecFilter = null; // slug of spec section currently highlighted
 
-function _kbHashKey(tab) { return 'sg-kb-hash-' + tab; }
+function _specSlug(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
 
-function _simpleHash(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = (h * 33 ^ str.charCodeAt(i)) >>> 0;
-  return h.toString(36);
+function _kbSeenKey(tab) { return 'sg-kb-seen2-' + tab; }
+
+function _kbTabHasNew(tab) {
+  const entries = _KB_CHANGELOG[tab];
+  if (!entries?.length) return null;
+  const latest = entries[0];
+  const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+  if (Date.now() - new Date(latest.date).getTime() > THREE_DAYS) return null;
+  const seen = localStorage.getItem(_kbSeenKey(tab));
+  if (seen && seen >= latest.date) return null;
+  return latest;
+}
+
+function _kbApplyBadges() {
+  let anyNew = false;
+  for (const tab of ['spec', 'arch', 'unit', 'ui']) {
+    const entry = _kbTabHasNew(tab);
+    const btn = document.getElementById('kb-tab-' + tab);
+    if (!btn) continue;
+    btn.querySelector('.kb-new-badge')?.remove();
+    if (entry) {
+      anyNew = true;
+      const label = entry.type === 'new' ? 'NEW' : 'UPDATED';
+      btn.insertAdjacentHTML('beforeend',
+        `<span class="kb-new-badge" onclick="event.stopPropagation();_showKbChangelog('${tab}',this)" style="cursor:pointer" title="Click to see what changed">${label}</span>`);
+    }
+  }
+  const dot = document.getElementById('kb-nav-dot');
+  if (dot) dot.style.display = anyNew ? '' : 'none';
+}
+
+function _showKbChangelog(tab, badgeEl) {
+  document.getElementById('kb-changelog-popover')?.remove();
+  const entry = _kbTabHasNew(tab);
+  if (!entry) return;
+  const pop = document.createElement('div');
+  pop.id = 'kb-changelog-popover';
+  pop.style.cssText = 'position:fixed;z-index:10000;background:#161616;border:1px solid #2a2a2a;border-radius:8px;padding:14px 16px;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.7);font-size:12px;color:#aaa;line-height:1.6';
+  pop.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:600;color:#818cf8;text-transform:uppercase;letter-spacing:.05em">${entry.type === 'new' ? 'New' : 'Updated'} · ${entry.date}</span>
+      <button onclick="document.getElementById('kb-changelog-popover')?.remove()" style="background:none;border:none;color:#555;font-size:16px;cursor:pointer;padding:0 0 0 12px;line-height:1">✕</button>
+    </div>
+    <p style="margin:0 0 8px;color:#ccc">${esc(entry.summary)}</p>
+    ${entry.prev ? `<div style="border-top:1px solid #222;margin-top:8px;padding-top:8px"><span style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.04em">Previously</span><p style="margin:4px 0 0;color:#666;font-size:11px">${esc(entry.prev)}</p></div>` : ''}
+  `;
+  document.body.appendChild(pop);
+  // Position near badge
+  const rect = badgeEl.getBoundingClientRect();
+  const left = Math.min(rect.left, window.innerWidth - 400);
+  pop.style.top = (rect.bottom + 8) + 'px';
+  pop.style.left = Math.max(8, left) + 'px';
+  // Close on outside click
+  setTimeout(() => document.addEventListener('click', function h(e) {
+    if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', h); }
+  }), 0);
 }
 
 function _stripTestingWhatsCorvered(md) {
-  // Remove the "## What's Covered" section (and any trailing separator) from TESTING.md
   return md.replace(/\n## What's Covered[\s\S]*?(?=\n## |\n---\s*\n## |\s*$)/, '');
 }
 
 async function _kbFetchContent(tab) {
   if (tab === 'spec') {
     const md = await fetch('/spec.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
-    return { html: _renderMd(md), hash: _simpleHash(md) };
+    return { html: _renderMd(md, true) };
   }
   if (tab === 'arch') {
     const [claudeMd, testingMd] = await Promise.all([
@@ -1516,16 +1638,14 @@ async function _kbFetchContent(tab) {
       fetch('/TESTING.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }),
     ]);
     const combined = claudeMd + '\n\n---\n\n## Testing Guide\n\n' + _stripTestingWhatsCorvered(testingMd);
-    return { html: _renderMd(combined), hash: _simpleHash(claudeMd + testingMd) };
+    return { html: _renderMd(combined, false) };
   }
-  // JS-rendered tabs: hash from rendered content
   if (tab === 'unit') {
     const html = await _kbBuildUnitHtml();
-    return { html, hash: _simpleHash(html) };
+    return { html };
   }
   if (tab === 'ui') {
-    const html = _renderUiTestCases();
-    return { html, hash: _simpleHash(Object.keys(_UNIT_TEST_META).join('|') + '_ui_v2') };
+    return { html: _renderUiTestCases() };
   }
   throw new Error('unknown tab: ' + tab);
 }
@@ -1539,16 +1659,31 @@ async function _kbBuildUnitHtml() {
   }
 }
 
+function _kbSpecFilterBar() {
+  if (!_kbSpecFilter) return '';
+  const sections = _SPEC_SECTION_TESTS[_kbSpecFilter];
+  const label = _kbSpecFilter.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const otherTab = _kbActiveTab === 'unit' ? 'ui' : 'unit';
+  const otherLabel = otherTab === 'unit' ? 'Unit/API' : 'UI';
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:#0a0a1a;border:1px solid #2e2e50;border-radius:6px">
+    <span style="font-size:11px;color:#818cf8;flex:1">Filtered by spec: <strong>${esc(label)}</strong></span>
+    <button onclick="_filterKbBySpec('${_kbSpecFilter}','${otherTab}')" style="background:none;border:1px solid #2a2a2a;border-radius:4px;color:#555;font-size:11px;padding:3px 8px;cursor:pointer">Show ${esc(otherLabel)} tests</button>
+    <button onclick="_clearKbSpecFilter()" style="background:none;border:none;color:#555;font-size:14px;cursor:pointer;padding:0">✕</button>
+  </div>`;
+}
+
 async function openKb(tab) {
   const modal = document.getElementById('kb-modal');
   if (!modal) return;
   modal.style.display = 'flex';
+  _kbApplyBadges();
   await switchKbTab(tab || _kbActiveTab);
 }
 
 function closeKb() {
   const modal = document.getElementById('kb-modal');
   if (modal) modal.style.display = 'none';
+  document.getElementById('kb-changelog-popover')?.remove();
 }
 
 async function switchKbTab(tab) {
@@ -1559,9 +1694,15 @@ async function switchKbTab(tab) {
   const body = document.getElementById('kb-body');
   if (!body) return;
 
-  if (_kbCache[tab]) {
-    body.innerHTML = _kbCache[tab].html;
-    _kbMarkSeen(tab, _kbCache[tab].hash);
+  // Mark as seen when switching to the tab
+  const entry = _kbTabHasNew(tab);
+  if (entry) {
+    localStorage.setItem(_kbSeenKey(tab), entry.date);
+    _kbApplyBadges();
+  }
+
+  if (_kbCache[tab] && !_kbSpecFilter) {
+    body.innerHTML = _kbSpecFilterBar() + _kbCache[tab].html;
     return;
   }
 
@@ -1569,62 +1710,38 @@ async function switchKbTab(tab) {
   try {
     const result = await _kbFetchContent(tab);
     _kbCache[tab] = result;
-    body.innerHTML = result.html;
-    _kbMarkSeen(tab, result.hash);
+    body.innerHTML = _kbSpecFilterBar() + result.html;
   } catch (e) {
     body.innerHTML = `<p style="color:#f87171;font-size:12px">Failed to load: ${esc(e.message)}</p>`;
   }
 }
 
-function _kbMarkSeen(tab, hash) {
-  localStorage.setItem(_kbHashKey(tab), hash);
-  // Remove NEW badge from this tab button
-  const btn = document.getElementById('kb-tab-' + tab);
-  if (btn) { const badge = btn.querySelector('.kb-new-badge'); if (badge) badge.remove(); }
-  // Update navbar dot
-  _kbRefreshNavDot();
+async function _filterKbBySpec(slug, tabPreference) {
+  _kbSpecFilter = slug;
+  // Pick the best tab: prefer tabPreference, else whichever has more relevant content
+  const sections = _SPEC_SECTION_TESTS[slug] || { ui: [], unit: [] };
+  const preferredTab = tabPreference || (sections.unit.length ? 'unit' : 'ui');
+  // Force re-render with filter
+  delete _kbCache[preferredTab];
+  await openKb(preferredTab);
 }
 
-function _kbRefreshNavDot() {
-  // Dot stays until all tabs with cached content are marked seen
-  const dot = document.getElementById('kb-nav-dot');
-  if (!dot) return;
-  const anyNew = ['spec','arch','unit','ui'].some(t => {
-    if (!_kbCache[t]) return false;
-    return localStorage.getItem(_kbHashKey(t)) !== _kbCache[t].hash;
-  });
-  dot.style.display = anyNew ? '' : 'none';
+function _clearKbSpecFilter() {
+  _kbSpecFilter = null;
+  delete _kbCache[_kbActiveTab];
+  switchKbTab(_kbActiveTab);
 }
 
-async function _kbCheckNewContentOnLoad() {
-  // Prefetch lightweight content to detect changes; runs in background on page load
-  try {
-    const tabs = ['spec', 'arch'];
-    await Promise.all(tabs.map(async tab => {
-      const result = await _kbFetchContent(tab);
-      _kbCache[tab] = result;
-      const stored = localStorage.getItem(_kbHashKey(tab));
-      if (stored && stored !== result.hash) {
-        _kbShowNewBadge(tab);
-      }
-    }));
-    _kbRefreshNavDot();
-  } catch (_) { /* ignore */ }
-}
-
-function _kbShowNewBadge(tab) {
-  const btn = document.getElementById('kb-tab-' + tab);
-  if (!btn || btn.querySelector('.kb-new-badge')) return;
-  btn.insertAdjacentHTML('beforeend', '<span class="kb-new-badge">NEW</span>');
-  const dot = document.getElementById('kb-nav-dot');
-  if (dot) dot.style.display = '';
+function _kbCheckNewContentOnLoad() {
+  // No fetching needed — badge logic is purely date-based
+  _kbApplyBadges();
 }
 
 // Legacy aliases so old callsites keep working
 function openDocs(tab) { return openKb(tab === 'testing' ? 'arch' : (tab || 'spec')); }
 function closeDocs() { closeKb(); }
 
-function _renderMd(md) {
+function _renderMd(md, withTestLinks = false) {
   const _e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const badge = tag => `<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;vertical-align:middle;margin-left:5px;letter-spacing:.04em;background:${tag==='NEW'?'#14532d':'#1e3a5f'};color:${tag==='NEW'?'#4ade80':'#60a5fa'}">${tag}</span>`;
   const inline = s => s
@@ -1657,7 +1774,15 @@ function _renderMd(md) {
     if (line.startsWith('|')) { closeUl(); closeBq(); inTable = true; tableRows.push(line); continue; }
     if (inTable) flushTable();
     if (line.startsWith('# '))   { closeUl(); closeBq(); html += `<h2>${_e(line.slice(2))}</h2>`; }
-    else if (line.startsWith('## '))  { closeUl(); closeBq(); html += `<h3>${inline(_e(line.slice(3)))}</h3>`; }
+    else if (line.startsWith('## '))  {
+      const rawText = line.slice(3).trim();
+      const slug = _specSlug(rawText);
+      const hasTests = withTestLinks && !!_SPEC_SECTION_TESTS[slug];
+      const testBtn = hasTests
+        ? ` <button onclick="_filterKbBySpec('${slug}')" style="font-size:10px;font-weight:500;background:none;border:1px solid #2a2a2a;border-radius:4px;color:#555;padding:2px 8px;cursor:pointer;vertical-align:middle;margin-left:8px;transition:color 0.15s,border-color 0.15s" onmouseover="this.style.color='#818cf8';this.style.borderColor='#818cf8'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">→ Tests</button>`
+        : '';
+      closeUl(); closeBq(); html += `<h3>${inline(_e(rawText))}${testBtn}</h3>`;
+    }
     else if (line.startsWith('### ')) { closeUl(); closeBq(); html += `<h4>${inline(_e(line.slice(4)))}</h4>`; }
     else if (line.startsWith('> '))   { closeUl(); if (!inBq) { html += '<blockquote>'; inBq = true; } html += `<p style="margin:2px 0">${inline(_e(line.slice(2)))}</p>`; }
     else if (line.startsWith('- '))   { closeBq(); if (!inUl) { html += '<ul>'; inUl = true; } html += `<li>${inline(_e(line.slice(2)))}</li>`; }
@@ -1814,8 +1939,18 @@ const _UNIT_TEST_META = {
   'returns only word/start/end fields from the words array (strips extra Whisper fields)': ['Response field filtering', 'Keeps payload lean'],
 };
 
+function _kbRowHighlight(fileFragment) {
+  if (!_kbSpecFilter) return { tr: '', group: '' };
+  const slug = Object.entries(_FILE_TO_SPEC).find(([k]) => fileFragment.includes(k))?.[1];
+  const match = slug === _kbSpecFilter;
+  return {
+    tr: match ? 'background:rgba(129,140,248,0.08);border-left:2px solid #818cf8;' : 'opacity:0.25;',
+    group: match ? 'color:#818cf8;' : 'opacity:0.25;',
+  };
+}
+
 function _renderTestResults(data) {
-  if (data.error) {
+  if (data?.error) {
     let html = `<p style="color:#f87171;font-size:12px;margin-bottom:12px">${esc(data.error)}</p>`;
     if (data.stderr) html += `<pre style="background:#1a0505;border:1px solid #3a1a1a;border-radius:6px;padding:12px;color:#f87171;font-size:11px;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${esc(data.stderr)}</pre>`;
     return html;
@@ -1863,15 +1998,31 @@ function _renderTestResults(data) {
   const files = data.available ? data.files : null;
   const seenFiles = new Set();
 
+  const staticFiles = {
+    'versioning.test.js': ['stripBase64ForSync — nulls out bare data: URL strings','stripBase64ForSync — prefers cdnUrl/url over existing base64','stripBase64ForSync — nulls dataUrl when no cdn/url available','stripBase64ForSync — recurses into nested arrays and objects','stripBase64ForSync — passes through null/undefined','extractImages — strips image fields out of data, keeps in imgs','mergeImages — reconstructs original from stripped + imgs','mergeImages — no-op passthrough when imgs is falsy','mergeLocalIntoSbImages — fills missing cloud fields from local','mergeLocalIntoSbImages — prefers cloud value when both sides have data','mergeLocalIntoSbImages — recurses into nested objects like angles','mergeLocalIntoSbImages — returns other side when one is missing','stripImagesForVersion — keeps permanent https URLs','stripImagesForVersion — strips blob: and base64','stripImagesForVersion — drops fields not in versioned schema','stripImagesForVersion — filters compose layers with no permanent URL','stripImagesForVersion — keeps project-level fields as-is'],
+    'fuzzy-match-timestamp.test.js': ['returns the timestamp extracted from the Claude response','returns null timestamp when Claude responds with "none"','returns null when lyric is missing (skips Claude call)','returns null when transcript is missing (skips Claude call)','returns null (not 500) when Claude fails','passes lyric and transcript bounds to Claude'],
+    'generate-prompt.test.js': ['returns the prompt text produced by Claude for a character','rejects requests with neither a reference description nor a reference image','returns 500 with the upstream error message when Claude fails'],
+    'generate-shot-prompts.test.js': ['returns imagePrompt and videoPrompt from Claude','returns 400 when both lyric and description are missing','accepts description alone (no lyric)','includes shot parameters in the Claude prompt','returns 500 when Claude fails','handles JSON wrapped in markdown fences'],
+    'generate-shot-sequence.test.js': ['returns a shots array from Claude','returns 400 when scriptText is missing','includes character and location IDs in the Claude prompt','works with empty characters and locations arrays','returns 500 when Claude fails'],
+    'parse-characters.test.js': ['returns parsed characters array from Claude','returns 400 when scriptText is missing','returns 400 when body is empty','includes scriptText in the prompt sent to Claude','returns 500 when Claude fails','handles a Claude response wrapped in markdown fences'],
+    'parse-locations.test.js': ['returns parsed locations array from Claude','returns 400 when scriptText is missing','includes scriptText in the Claude prompt','returns 500 when Claude fails','handles locations wrapped in markdown fences'],
+    'parse-script.test.js': ['returns parsed characters and locations for a plain-text upload','returns 400 when no file is attached','sends the extracted script text to Claude in the request body','returns 500 when Claude returns an error','handles a Claude response wrapped in markdown code fences'],
+    'project-data.test.js': ['returns 503 when Supabase is not configured','the route exists and is handled (not 404)'],
+    'snapshots.test.js': ['returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when projectId is missing and Supabase is not configured'],
+    'storage-upload-url.test.js': ['returns 404 when auth is disabled (route not registered)'],
+    'transcribe-audio.test.js': ['returns 400 when no file is attached','returns transcribed text and word timestamps from OpenAI Whisper','returns 500 when OPENAI_API_KEY is not set','returns 500 when the OpenAI API returns an error','returns only word/start/end fields from the words array (strips extra Whisper fields)'],
+  };
+
   if (files) {
     for (const f of files) {
-      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;color:#818cf8;font-family:monospace;border-bottom:1px solid #1e1e1e;">${esc(f.name)}</td></tr>`;
+      const hl = _kbRowHighlight(f.name);
+      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;font-family:monospace;border-bottom:1px solid #1e1e1e;${hl.group}color:#818cf8">${esc(f.name)}</td></tr>`;
       for (const t of f.tests) {
         const status = t.status;
         const [verifies, why] = _UNIT_TEST_META[t.title] || ['', ''];
         const mark = status === 'passed' ? '✓' : '✗';
         const markColor = status === 'passed' ? '#4ade80' : '#f87171';
-        html += `<tr>
+        html += `<tr style="${hl.tr}">
           <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(f.name.split('/').pop())}</td>
           <td style="${tdStyle};color:#999">${esc(t.title)}</td>
           <td style="${tdStyle};color:#666">${esc(verifies)}</td>
@@ -1885,24 +2036,12 @@ function _renderTestResults(data) {
     }
   } else {
     // No run yet — show static list with ○ placeholders
-    const staticFiles = {
-      'fuzzy-match-timestamp.test.js': ['returns the timestamp extracted from the Claude response','returns null timestamp when Claude responds with "none"','returns null when lyric is missing (skips Claude call)','returns null when transcript is missing (skips Claude call)','returns null (not 500) when Claude fails','passes lyric and transcript bounds to Claude'],
-      'generate-prompt.test.js': ['returns the prompt text produced by Claude for a character','rejects requests with neither a reference description nor a reference image','returns 500 with the upstream error message when Claude fails'],
-      'generate-shot-prompts.test.js': ['returns imagePrompt and videoPrompt from Claude','returns 400 when both lyric and description are missing','accepts description alone (no lyric)','includes shot parameters in the Claude prompt','returns 500 when Claude fails','handles JSON wrapped in markdown fences'],
-      'generate-shot-sequence.test.js': ['returns a shots array from Claude','returns 400 when scriptText is missing','includes character and location IDs in the Claude prompt','works with empty characters and locations arrays','returns 500 when Claude fails'],
-      'parse-characters.test.js': ['returns parsed characters array from Claude','returns 400 when scriptText is missing','returns 400 when body is empty','includes scriptText in the prompt sent to Claude','returns 500 when Claude fails','handles a Claude response wrapped in markdown fences'],
-      'parse-locations.test.js': ['returns parsed locations array from Claude','returns 400 when scriptText is missing','includes scriptText in the Claude prompt','returns 500 when Claude fails','handles locations wrapped in markdown fences'],
-      'parse-script.test.js': ['returns parsed characters and locations for a plain-text upload','returns 400 when no file is attached','sends the extracted script text to Claude in the request body','returns 500 when Claude returns an error','handles a Claude response wrapped in markdown code fences'],
-      'project-data.test.js': ['returns 503 when Supabase is not configured','the route exists and is handled (not 404)'],
-      'snapshots.test.js': ['returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when Supabase is not configured','returns 503 when projectId is missing and Supabase is not configured'],
-      'storage-upload-url.test.js': ['returns 404 when auth is disabled (route not registered)'],
-      'transcribe-audio.test.js': ['returns 400 when no file is attached','returns transcribed text and word timestamps from OpenAI Whisper','returns 500 when OPENAI_API_KEY is not set','returns 500 when the OpenAI API returns an error','returns only word/start/end fields from the words array (strips extra Whisper fields)'],
-    };
     for (const [file, tests] of Object.entries(staticFiles)) {
-      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;color:#818cf8;font-family:monospace;border-bottom:1px solid #1e1e1e;">tests/api/${file}</td></tr>`;
+      const hl = _kbRowHighlight(file);
+      html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:10px;font-weight:600;font-family:monospace;border-bottom:1px solid #1e1e1e;${hl.group}color:#818cf8">tests/${file.includes('versioning') ? 'unit' : 'api'}/${file}</td></tr>`;
       for (const title of tests) {
         const [verifies, why] = _UNIT_TEST_META[title] || ['', ''];
-        html += `<tr>
+        html += `<tr style="${hl.tr}">
           <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(file)}</td>
           <td style="${tdStyle};color:#999">${esc(title)}</td>
           <td style="${tdStyle};color:#666">${esc(verifies)}</td>
@@ -2024,11 +2163,18 @@ function _renderUiTestCases() {
   </tr></thead><tbody>`;
 
   for (const s of sections) {
-    html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:11px;font-weight:600;color:#818cf8;border-bottom:1px solid #1e1e1e;">▸ ${esc(s.label)}</td></tr>`;
+    const specSlug = _UI_SECTION_TO_SPEC[s.label];
+    let groupStyle = '', rowStyle = '';
+    if (_kbSpecFilter) {
+      const match = specSlug === _kbSpecFilter;
+      groupStyle = match ? 'color:#818cf8;' : 'opacity:0.25;color:#444;';
+      rowStyle = match ? 'background:rgba(129,140,248,0.08);border-left:2px solid #818cf8;' : 'opacity:0.25;';
+    }
+    html += `<tr><td colspan="5" style="padding:10px 8px 4px;font-size:11px;font-weight:600;border-bottom:1px solid #1e1e1e;${groupStyle}color:#818cf8">▸ ${esc(s.label)}</td></tr>`;
     for (const [desc, verifies, why] of s.cases) {
       const key = btoa(unescape(encodeURIComponent(s.label + ':' + desc))).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
       const checked = checks[key];
-      html += `<tr>
+      html += `<tr style="${rowStyle}">
         <td style="${tdStyle};color:#444;font-family:monospace;font-size:10px">${esc(s.file)}</td>
         <td style="${tdStyle};color:#999">${esc(desc)}</td>
         <td style="${tdStyle}">${esc(verifies)}</td>
