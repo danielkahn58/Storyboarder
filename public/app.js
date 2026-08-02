@@ -5523,10 +5523,20 @@ async function pickLocLibraryImage(locId, idx) {
 }
 
 // ── global image library modal ────────────────────────────────────────────
-let _libState = { type: null, id: null, allEntries: [] }; // type: 'char' | 'loc'
+const LIB_PAGE_SIZE = 20;
+let _libState = { type: null, id: null, allEntries: [], filtered: [], page: 0 };
+
+function _libThumbUrl(url) {
+  // Use Supabase image transform for low-res thumbnails (200×200, q=50)
+  if (url && url.includes('supabase.co/storage/v1/object/public/')) {
+    return url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/') +
+      '?width=200&height=200&resize=cover&quality=50';
+  }
+  return url.includes('supabase.co') ? url : `/api/proxy-image?url=${encodeURIComponent(url)}`;
+}
 
 async function openImageLibrary(type, entityId) {
-  _libState = { type, id: entityId, allEntries: [] };
+  _libState = { type, id: entityId, allEntries: [], filtered: [], page: 0 };
   const modal = document.getElementById('image-library-modal');
   const grid  = document.getElementById('image-library-grid');
   const title = document.getElementById('image-library-title');
@@ -5544,56 +5554,87 @@ async function openImageLibrary(type, entityId) {
   try {
     const { images } = await apiFetch('/api/storage-images', null, 'GET');
     _libState.allEntries = images || [];
+    _libState.filtered = _libState.allEntries;
     loading.style.display = 'none';
-    _renderImageLibraryGrid(_libState.allEntries);
+    _renderImageLibraryPage(true);
   } catch (e) {
     loading.style.display = 'none';
     grid.innerHTML = `<div style="color:#e05050;font-size:12px;grid-column:1/-1;padding:20px">Failed to load library: ${esc(e.message)}</div>`;
   }
 }
 
-function _renderImageLibraryGrid(entries) {
+function _libThumbHTML(e, idx) {
+  const name = e.name ? e.name.split('/').pop() : '';
+  const src = esc(_libThumbUrl(e.url));
+  return `<div
+    onclick="_pickImageLibrary(${idx})"
+    onmouseover="this.querySelector('.lib-thumb-overlay').style.opacity='1'"
+    onmouseout="this.querySelector('.lib-thumb-overlay').style.opacity='0'"
+    style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#111;position:relative">
+    <div style="width:100%;height:130px;background:#0e0e0e;overflow:hidden">
+      <img src="${src}" loading="lazy"
+        style="width:100%;height:130px;object-fit:cover;display:block"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <div style="display:none;width:100%;height:130px;align-items:center;justify-content:center;color:#333;font-size:22px">🖼</div>
+    </div>
+    <div class="lib-thumb-overlay" style="position:absolute;inset:0;background:rgba(129,140,248,0.18);opacity:0;transition:opacity 0.15s;pointer-events:none;display:flex;align-items:center;justify-content:center">
+      <span style="background:#818cf8;color:#fff;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px">Select</span>
+    </div>
+    <div style="font-size:9px;color:#555;padding:4px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-top:1px solid #1a1a1a" title="${esc(name)}">${esc(name)}</div>
+  </div>`;
+}
+
+function _renderImageLibraryPage(reset) {
   const grid  = document.getElementById('image-library-grid');
   const count = document.getElementById('image-library-count');
   if (!grid) return;
+  const entries = _libState.filtered;
   count.textContent = entries.length ? `${entries.length} image${entries.length !== 1 ? 's' : ''}` : '';
-  if (!entries.length) {
-    grid.innerHTML = '<div style="color:#555;font-size:12px;grid-column:1/-1;text-align:center;padding:40px 0">No images found in storage.</div>';
-    return;
+
+  if (reset) {
+    _libState.page = 0;
+    if (!entries.length) {
+      grid.innerHTML = '<div style="color:#555;font-size:12px;grid-column:1/-1;text-align:center;padding:40px 0">No images found in storage.</div>';
+      return;
+    }
+    grid.innerHTML = '';
   }
-  grid.innerHTML = entries.map((e, i) => {
-    const name = e.name ? e.name.split('/').pop() : '';
-    // Use proxy for non-Supabase URLs; Supabase URLs are direct
-    const src = esc(e.url.includes('supabase.co') ? e.url : `/api/proxy-image?url=${encodeURIComponent(e.url)}`);
-    return `<div
-      onclick="_pickImageLibrary(${i})"
-      onmouseover="this.querySelector('.lib-thumb-overlay').style.opacity='1'"
-      onmouseout="this.querySelector('.lib-thumb-overlay').style.opacity='0'"
-      style="cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;background:#111;position:relative"
-      class="lib-thumb-cell"
-      data-idx="${i}">
-      <div style="width:100%;height:130px;background:#0e0e0e;display:flex;align-items:center;justify-content:center;overflow:hidden">
-        <img src="${src}" loading="lazy"
-          style="width:100%;height:130px;object-fit:cover;display:block"
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-        <div style="display:none;width:100%;height:130px;align-items:center;justify-content:center;color:#333;font-size:22px">🖼</div>
-      </div>
-      <div class="lib-thumb-overlay" style="position:absolute;inset:0;background:rgba(129,140,248,0.18);opacity:0;transition:opacity 0.15s;pointer-events:none;display:flex;align-items:center;justify-content:center">
-        <span style="background:#818cf8;color:#fff;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px">Select</span>
-      </div>
-      <div style="font-size:9px;color:#555;padding:4px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-top:1px solid #1a1a1a" title="${esc(name)}">${esc(name)}</div>
-    </div>`;
-  }).join('');
-  // Store filtered entries for index lookup
-  grid._filteredEntries = entries;
+
+  const start = _libState.page * LIB_PAGE_SIZE;
+  const slice = entries.slice(start, start + LIB_PAGE_SIZE);
+  if (!slice.length) return;
+
+  // Remove existing load-more button before appending new cards
+  const oldBtn = grid.querySelector('.lib-load-more');
+  if (oldBtn) oldBtn.remove();
+
+  slice.forEach((e, i) => {
+    const div = document.createElement('div');
+    div.innerHTML = _libThumbHTML(e, start + i);
+    grid.appendChild(div.firstElementChild);
+  });
+
+  _libState.page++;
+  const hasMore = _libState.page * LIB_PAGE_SIZE < entries.length;
+  if (hasMore) {
+    const btn = document.createElement('div');
+    btn.className = 'lib-load-more';
+    btn.style.cssText = 'grid-column:1/-1;text-align:center;padding:12px 0';
+    btn.innerHTML = `<button onclick="_libLoadMore()" style="background:none;border:1px solid #2a2a2a;border-radius:5px;color:#666;font-size:11px;padding:6px 20px;cursor:pointer">Load more (${entries.length - _libState.page * LIB_PAGE_SIZE} remaining)</button>`;
+    grid.appendChild(btn);
+  }
+}
+
+function _libLoadMore() {
+  _renderImageLibraryPage(false);
 }
 
 function _filterImageLibrary(query) {
   const q = query.trim().toLowerCase();
-  const filtered = q
+  _libState.filtered = q
     ? _libState.allEntries.filter(e => (e.name || '').toLowerCase().includes(q) || (e.url || '').toLowerCase().includes(q))
     : _libState.allEntries;
-  _renderImageLibraryGrid(filtered);
+  _renderImageLibraryPage(true);
 }
 
 function _closeImageLibrary() {
@@ -5602,8 +5643,7 @@ function _closeImageLibrary() {
 }
 
 async function _pickImageLibrary(idx) {
-  const grid = document.getElementById('image-library-grid');
-  const entries = grid?._filteredEntries;
+  const entries = _libState.filtered;
   if (!entries?.[idx]) return;
   const { url } = entries[idx];
   _closeImageLibrary();
