@@ -92,14 +92,12 @@ if (AUTH_ENABLED) {
     else res.status(401).json({ error: 'not authenticated' });
   });
 
-  // E2E test bypass: loopback requests (tests run inside the same container) always
-  // bypass auth. Requests with the correct X-E2E-Auth header also bypass.
+  // E2E test bypass: when E2E_MODE is set (injected by the test runner), all requests
+  // bypass auth. Also accepts X-E2E-Auth header for external test runners.
   const E2E_SECRET = process.env.E2E_SECRET;
   app.use((req, res, next) => {
-    const ip = req.ip || req.socket?.remoteAddress || '';
-    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
     const hasValidHeader = E2E_SECRET && req.headers['x-e2e-auth'] === E2E_SECRET;
-    if (isLoopback || hasValidHeader) {
+    if (process.env.E2E_MODE === 'true' || hasValidHeader) {
       req.user = { email: 'e2e@test.local', name: 'E2E Test' };
       req.isAuthenticated = () => true;
     }
@@ -1756,11 +1754,11 @@ app.post('/api/run-e2e-tests', (req, res) => {
   if (_e2eState.running) return res.json({ running: true, startedAt: _e2eState.startedAt });
   _e2eState = { running: true, results: null, startedAt: Date.now() };
   log('info', 'e2e test run started', {});
-  const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' };
+  const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0', E2E_MODE: 'true' };
   const logPath = '/tmp/pw-e2e-run.log';
   const { spawn } = require('child_process');
   const logStream = fs.createWriteStream(logPath, { flags: 'w' });
-  const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, env });
+  const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts', '--reporter=line'], { cwd: __dirname, env });
   let stdout = '', stderr = '';
   proc.stdout.on('data', d => { const s = d.toString(); stdout += s; logStream.write(s); });
   proc.stderr.on('data', d => { const s = d.toString(); stderr += s; logStream.write('[STDERR] ' + s); });
