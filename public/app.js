@@ -1892,7 +1892,8 @@ async function showE2eLog() {
   out.innerHTML = '<p style="color:#555;font-size:12px">Fetching log…</p>';
   try {
     const data = await fetch('/api/e2e-log').then(r => r.json());
-    out.innerHTML = `<pre style="background:#0a0a0a;border:1px solid #222;border-radius:6px;padding:12px;color:#aaa;font-size:10px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(data.log || '(empty)')}</pre>`;
+    const logText = data.log || '(empty)';
+    out.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button onclick="navigator.clipboard.writeText(this.dataset.log).then(()=>{this.textContent='✓ Copied';setTimeout(()=>this.textContent='📋 Copy',1500)})" data-log="${esc(logText)}" style="background:none;border:1px solid #2a2a2a;border-radius:5px;color:#555;font-size:11px;padding:3px 9px;cursor:pointer">📋 Copy</button></div><pre style="background:#0a0a0a;border:1px solid #222;border-radius:6px;padding:12px;color:#aaa;font-size:10px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(logText)}</pre>`;
   } catch(e) {
     out.innerHTML = `<p style="color:#f87171;font-size:12px">Log fetch error: ${esc(e.message)}</p>`;
   }

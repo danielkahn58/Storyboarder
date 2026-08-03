@@ -17,7 +17,7 @@ export const test = base.extend<AppFixtures>({
   editorPage: async ({ page }, use) => {
     await page.goto('/');
     await page.waitForSelector('#projects-grid', { state: 'visible' });
-    page.once('dialog', async d => { await d.fill('Test Project'); await d.accept(); });
+    page.once('dialog', async d => { await d.accept('Test Project'); });
     await page.locator('.btn-new-project').first().click();
     await page.waitForSelector('#view-editor', { state: 'visible' });
     const projectName = await page.locator('.header-project-name').innerText();
