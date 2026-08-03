@@ -23,16 +23,20 @@ export const test = base.extend<AppFixtures>({
     const projectName = await page.locator('.header-project-name').innerText();
     await use({ page, projectName });
 
-    // Teardown: delete the project we created
+    // Teardown: close any open modal, go back to projects, delete the project we created
     try {
-      await page.locator('.btn-back-projects').click();
+      // Close any open modal (e.g. KB modal) so it doesn't block navigation
+      await page.evaluate(() => {
+        document.querySelectorAll('[id$="-modal"]').forEach((m: any) => { m.style.display = 'none'; });
+      });
+      await page.goto('/');
       await page.waitForSelector('#projects-grid', { state: 'visible' });
-      page.once('dialog', d => d.accept());
       const cards = page.locator('.project-card');
       const count = await cards.count();
       for (let i = 0; i < count; i++) {
         const name = await cards.nth(i).locator('.project-card-name').innerText().catch(() => '');
         if (name.trim() === projectName.trim()) {
+          page.once('dialog', d => d.accept());
           await cards.nth(i).locator('.btn-delete-project').last().click();
           break;
         }

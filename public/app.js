@@ -1819,14 +1819,15 @@ let _e2eLogShowing = false;
 
 function _buildE2eTitleMap(results) {
   const map = {};
-  if (!results?.suites) return map;
-  for (const suite of results.suites) {
+  function walk(suite) {
     for (const spec of (suite.specs || [])) {
       const status = spec.ok ? 'passed' : 'failed';
       map[spec.title] = status;
       map[spec.title.toLowerCase()] = status;
     }
+    for (const child of (suite.suites || [])) walk(child);
   }
+  for (const suite of (results?.suites || [])) walk(suite);
   return map;
 }
 

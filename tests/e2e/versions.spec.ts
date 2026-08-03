@@ -11,14 +11,13 @@ test.describe('Versions', () => {
     await goToShots(page);
     await addShot(page);
 
-    // Look for the "Create Version" or snapshot button
+    // Look for the "Create Version" or snapshot button (createVersion auto-labels, no dialog)
     const versionBtn = page.locator('[onclick*="createVersion"], [onclick*="saveVersion"], .btn-create-version').first();
     if (await versionBtn.isVisible()) {
-      page.once('dialog', d => d.accept('Test Version'));
       await versionBtn.click();
       await page.waitForTimeout(500);
       // Version label should appear in the version bar
-      await expect(page.locator('#version-ui')).toContainText(/Test Version|version/i);
+      await expect(page.locator('#version-ui')).toContainText(/\d/);
     }
   });
 
