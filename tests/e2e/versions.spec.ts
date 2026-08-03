@@ -14,10 +14,7 @@ test.describe('Versions', () => {
     // Look for the "Create Version" or snapshot button
     const versionBtn = page.locator('[onclick*="createVersion"], [onclick*="saveVersion"], .btn-create-version').first();
     if (await versionBtn.isVisible()) {
-      page.once('dialog', async d => {
-        await d.fill('Test Version');
-        await d.accept();
-      });
+      page.once('dialog', d => d.accept('Test Version'));
       await versionBtn.click();
       await page.waitForTimeout(500);
       // Version label should appear in the version bar

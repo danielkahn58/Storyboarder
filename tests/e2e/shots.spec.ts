@@ -30,7 +30,7 @@ test.describe('Shot Sequence', () => {
     const row = shotRow(page, 0);
     const locSelect = row.locator('.field-loc-select');
     // Select the location we just added
-    await locSelect.selectOption({ label: /Warehouse/ });
+    await locSelect.selectOption({ label: 'Warehouse' });
     await expect(locSelect).toContainText('Warehouse');
   });
 

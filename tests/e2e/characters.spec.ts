@@ -19,8 +19,8 @@ test.describe('Characters', () => {
     const nameInput = lastRow.locator('input.field-name').first();
     await expect(nameInput).toHaveValue('Hero');
 
-    // Edit description
-    const descInput = lastRow.locator('textarea.field-desc, input.field-desc').first();
+    // Edit the prompt/description field (characters use field-prompt, not field-desc)
+    const descInput = lastRow.locator('textarea.field-prompt').first();
     await descInput.fill('A brave protagonist');
     await descInput.press('Tab');
 
