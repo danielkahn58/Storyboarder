@@ -20,6 +20,8 @@ export const test = base.extend<AppFixtures>({
     page.once('dialog', async d => { await d.accept('Test Project'); });
     await page.locator('.btn-new-project').first().click();
     await page.waitForSelector('#view-editor', { state: 'visible' });
+    // Wait for the data-loading overlay to clear before handing page to test
+    await page.waitForSelector('#data-loading-overlay', { state: 'hidden' });
     const projectName = await page.locator('.header-project-name').innerText();
     await use({ page, projectName });
 
@@ -36,7 +38,7 @@ export const test = base.extend<AppFixtures>({
       for (let i = 0; i < count; i++) {
         const name = await cards.nth(i).locator('.project-card-name').innerText().catch(() => '');
         if (name.trim() === projectName.trim()) {
-          page.once('dialog', d => d.accept());
+          page.once('dialog', d => d.accept().catch(() => {}));
           await cards.nth(i).locator('.btn-delete-project').last().click();
           break;
         }
