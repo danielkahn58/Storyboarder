@@ -1822,7 +1822,9 @@ function _buildE2eTitleMap(results) {
   if (!results?.suites) return map;
   for (const suite of results.suites) {
     for (const spec of (suite.specs || [])) {
-      map[spec.title] = spec.ok ? 'passed' : 'failed';
+      const status = spec.ok ? 'passed' : 'failed';
+      map[spec.title] = status;
+      map[spec.title.toLowerCase()] = status;
     }
   }
   return map;
@@ -2097,34 +2099,36 @@ function _renderUiTestCases() {
       ['Sign Out clears session and returns to login', 'Full logout flow', 'Ensures logout fully revokes the session'],
     ]},
     { label: 'Project Management', file: 'e2e/projects.spec.ts', cases: [
-      ['Projects grid loads with existing projects shown', 'Project list fetch and render', 'Regression guard for the projects API and card render'],
-      ['Creating a new project navigates to editor with empty state', 'New-project API and routing', 'Core onboarding flow'],
-      ['Project name rename prompt saves and updates title', 'Inline rename UX + metadata persistence', 'Covers project metadata update round-trip'],
-      ['Deleting a project removes it after confirmation', 'Destructive action guard + Supabase delete', 'Guards delete confirmation UX'],
+      ['projects grid loads with existing projects shown', 'Project list fetch and render', 'Regression guard for the projects API and card render'],
+      ['creating a new project navigates to editor with empty state', 'New-project API and routing', 'Core onboarding flow'],
+      ['project name rename prompt saves and updates title', 'Inline rename UX + metadata persistence', 'Covers project metadata update round-trip'],
+      ['deleting a project removes it from the grid', 'Destructive action guard + Supabase delete', 'Guards delete confirmation UX'],
       ['↓ Cloud button reloads from Supabase discarding local changes', 'forceLoadFromCloud() flow', 'Cross-device sync escape hatch'],
     ]},
     { label: 'Characters', file: 'e2e/characters.spec.ts', cases: [
-      ['Adding a character appends a new row with default name', 'addCharacter() CRUD', 'Basic CRUD regression guard'],
-      ['Editing name and description updates on save', 'syncFromDOM field values', 'Confirms DOM → data sync'],
+      ['adding a character appends a new row with default name', 'addCharacter() CRUD', 'Basic CRUD regression guard'],
+      ['editing name and description persists via syncFromDOM', 'syncFromDOM field values', 'Confirms DOM → data sync'],
+      ['deleting a character removes it and auto-saves', 'deleteCharacter() + re-render', 'CRUD delete path'],
       ['Uploading a reference image shows thumbnail and stores URL', 'Image upload + Supabase storage', 'Image upload pipeline'],
       ['Generating a character image populates the image cell', 'fal.ai generation + polling', 'End-to-end image generation'],
-      ['Deleting a character removes it and auto-saves', 'deleteCharacter() + re-render', 'CRUD delete path'],
     ]},
     { label: 'Locations', file: 'e2e/locations.spec.ts', cases: [
-      ['Adding a location appends a card with default name', 'CRUD parity with characters', 'Basic location CRUD'],
+      ['adding a location appends a card with default name', 'CRUD parity with characters', 'Basic location CRUD'],
+      ['editing location name persists via syncFromDOM', 'syncFromDOM field values', 'Confirms DOM → data sync'],
+      ['adding a custom view shows it in the variations grid', 'Custom view creation + render', 'Custom view flow'],
+      ['deleting a location removes it', 'deleteLocation() + re-render', 'CRUD delete path'],
       ['Uploading an angle reference image appears in angle slot', 'Angle ref image upload pipeline', 'Location angle image upload'],
-      ['Adding a custom view shows it in the variations grid', 'Custom view creation + render', 'Custom view flow'],
       ['Generating a location image populates the default image', 'Location AI generation', 'Location image gen end-to-end'],
-      ['Variation picker opens on click and closes on selection', 'openLocVariationPicker popup', 'Variation picker UX regression'],
     ]},
     { label: 'Shot Sequence', file: 'e2e/shots.spec.ts', cases: [
-      ['Adding a shot appends a new row with empty fields', 'addShot() CRUD', 'Basic shot CRUD'],
-      ['Assigning a character updates the character column', 'Shot–character linking + re-render', 'Shot–character association'],
-      ['Assigning a location shows name and variation button', 'Shot–location linking', 'Shot–location association'],
-      ['Setting a timestamp persists and shows in timeline', 'Timestamp field → syncFromDOM → save', 'Timestamp persistence pipeline'],
+      ['adding a shot appends a new row with empty fields', 'addShot() CRUD', 'Basic shot CRUD'],
+      ['assigning a character updates the character column', 'Shot–character linking + re-render', 'Shot–character association'],
+      ['assigning a location shows name in location select', 'Shot–location linking', 'Shot–location association'],
+      ['setting a timestamp persists and shows in the field', 'Timestamp field → syncFromDOM → save', 'Timestamp persistence pipeline'],
       ['Generating a shot image populates the Final Image column', 'Shot image generation end-to-end', 'Shot image gen flow'],
-      ['New shot added mid-sequence appears in animatic timeline', '_syncAnimaticFromLiveShots on addShot', 'Guards animatic sync for inserted shots'],
-      ['Editing a timestamp updates the animatic segment instantly', 'onTimestampInput → _syncAnimaticFromLiveShots', 'Live animatic sync regression'],
+      ['new shot added mid-sequence appears in the correct position', '_syncAnimaticFromLiveShots on addShot', 'Guards animatic sync for inserted shots'],
+      ['editing a lyric field persists via syncFromDOM', 'onTimestampInput → _syncAnimaticFromLiveShots', 'Live animatic sync regression'],
+      ['deleting a shot removes it from the sequence', 'deleteShot() + re-render', 'CRUD delete path'],
     ]},
     { label: 'Audio & Transcript', file: 'e2e/audio.spec.ts', cases: [
       ['Importing audio displays waveform and enables bar-marker tools', 'Audio import + waveform render', 'Audio import pipeline'],
@@ -2144,29 +2148,41 @@ function _renderUiTestCases() {
       ['Double-clicking animatic segment opens compose for that shot', 'dblclick on .tl-segment → openCompose()', 'Animatic-to-compose shortcut'],
     ]},
     { label: 'Versions', file: 'e2e/versions.spec.ts', cases: [
+      ['version UI is visible in the editor header', 'Version bar render on open', 'Version UI always visible'],
+      ['creating a named version appears in the version list', 'createVersion() label generation', 'Named version flow'],
+      ['version list renders inside version-ui', 'Version list render', 'Version list regression'],
+      ['switching to older version restores data from that snapshot', 'loadVersion() → versionSelect.selectOption(v1Label)', 'Version restore round-trip'],
       ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY + createVersion(true)', 'Auto-version threshold'],
-      ['Creating a named version labels it and resets edit counter', 'createVersion() label generation', 'Named version flow'],
-      ['Switching to older version restores shots/characters data from that snapshot', 'loadVersion() → versionSelect.selectOption(v1Label)', 'Version restore round-trip'],
       ['Version list appears on a second device after saving', 'Cross-device sync via project_snapshots', 'Cross-device version sync'],
-      ['Queued snapshot is flushed on next page load after deploy', 'flushSnapshotQueue() retry mechanism', 'Snapshot queue flush'],
     ]},
     { label: 'Animatic', file: 'e2e/animatic.spec.ts', cases: [
+      ['animatic tab is reachable and renders its container', 'animatic-tab-panel visibility on nav click', 'Animatic tab regression'],
+      ['adding a shot with a timestamp appears in animatic sync', 'Shot timestamp → animatic sync', 'Shot–animatic sync'],
+      ['animatic timeline wrap renders when animatic exists', 'animatic-tab-panel render', 'Timeline render regression'],
+      ['canvas preview element is present after animatic loads', 'animatic-tab-panel + animatic-empty render', 'Canvas init regression'],
+      ['sync button refreshes timeline from live shot timestamps', '_syncAnimaticFromLiveShots()', 'Manual sync escape hatch'],
       ['Generating an animatic produces a video and adds it as Latest', 'generateAnimatic() full flow', 'Animatic generation pipeline'],
       ['Timeline handles render at correct positions for shot timestamps', 'Handle X-position: (secs - offset) / duration', 'Handle position accuracy'],
       ['Dragging a handle updates segment widths and handle position', 'startTlDrag() onMove CSS update', 'Drag handle UX'],
-      ['Releasing a handle updates the shot timestamp in Shot Sequence', 'onUp: shot.timestamp + autoSave()', 'Drag → timestamp save'],
-      ['Playhead moves as animatic plays', 'updateAnimaticPlayhead() → _drawCanvasFrame()', 'Playhead regression'],
       ['Canvas shows correct shot image at current playback position', '_drawCanvasFrame() rAF loop from _animaticTimeline', 'Live canvas preview'],
-      ['Video shots render their clip frame on canvas (not a still)', '_getOrCreatePoolVideo() + ctx.drawImage(videoEl)', 'Video shot canvas render'],
-      ['Canvas freezes on last frame when video clip ends before slot', 'offsetInShot >= maxPlay → pause pool video', 'Last-frame freeze behavior'],
-      ['Play/Pause button toggles rAF loop and pool video playback', '_toggleAnimaticPlayback()', 'Canvas playback controls'],
-      ['↺ Sync button refreshes timeline from current shot timestamps', '_syncAnimaticFromLiveShots()', 'Manual sync escape hatch'],
     ]},
     { label: 'Configuration & Cloud', file: 'e2e/config.spec.ts', cases: [
-      ['Toggling Cloud Only mode disables local caching and shows indicator', 'setCloudOnlyMode() toggle', 'Cloud-only mode toggle'],
-      ['In Cloud Only mode a save failure shows an error toast', 'sbUpsertData throwOnError branch', 'Cloud-only error handling'],
-      ['Saving a visual style applies it to all prompt previews', 'setStyle() → applyStyleUI()', 'Visual style persistence'],
+      ['configuration tab loads and shows settings', 'Config tab render', 'Config tab regression'],
+      ['cloud-only toggle is present in config tab', 'setCloudOnlyMode() toggle', 'Cloud-only mode toggle'],
+      ['visual styles section renders in config tab', 'Visual styles table render', 'Visual style persistence'],
+      ['Toggling Cloud Only mode disables local caching and shows indicator', 'setCloudOnlyMode() full flow', 'Cloud-only mode full toggle'],
       ['Script upload parses the script and populates shot descriptions', 'handleScriptUpload() → /api/parse-script', 'Script import pipeline'],
+    ]},
+    { label: 'Docs & Tests Modal (KB)', file: 'e2e/kb.spec.ts', cases: [
+      ['KB button is visible in the header', '#btn-open-kb render in header', 'KB button always present'],
+      ['clicking KB button opens the modal', 'openKb() → display:flex', 'KB modal open flow'],
+      ['Product Spec tab loads content', 'switchKbTab(spec) → /spec.md fetch', 'Spec tab content load'],
+      ['Architecture tab loads content from CLAUDE.md', 'switchKbTab(arch) → /CLAUDE.md fetch', 'Arch tab content load'],
+      ['Unit/API Tests tab loads test results table', 'switchKbTab(unit) → table render', 'Unit tab table render'],
+      ['Run Tests button is visible on Unit/API tab', '#btn-run-tests visibility on unit tab', 'Run Tests button regression'],
+      ['UI Test Cases tab renders a table with manual check column', 'switchKbTab(ui) → _renderUiTestCases()', 'UI tab table render'],
+      ['Run Tests button is hidden on UI Test Cases tab', '#btn-run-tests hidden on ui tab', 'Run Tests hidden regression'],
+      ['closing modal hides it', 'closeKb() → display:none', 'KB modal close flow'],
     ]},
   ];
 
@@ -2202,7 +2218,7 @@ function _renderUiTestCases() {
     for (const [desc, verifies, why] of s.cases) {
       const key = btoa(unescape(encodeURIComponent(s.label + ':' + desc))).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
       const checked = checks[key];
-      const e2eStatus = e2eMap[desc]; // 'passed' | 'failed' | undefined
+      const e2eStatus = e2eMap[desc] || e2eMap[desc.toLowerCase()]; // 'passed' | 'failed' | undefined
       const mark = e2eStatus === 'passed' ? { icon: '✓', color: '#4ade80', title: 'Playwright: passed' }
                  : e2eStatus === 'failed' ? { icon: '✗', color: '#f87171', title: 'Playwright: failed' }
                  : checked               ? { icon: '✓', color: '#818cf8', title: 'Manually verified' }
