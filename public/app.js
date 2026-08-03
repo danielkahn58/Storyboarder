@@ -1815,6 +1815,7 @@ function _renderE2eResults(data) {
 
 let _e2ePollInterval = null;
 let _lastE2eResults = null; // { titleMap: { [testTitle]: 'passed'|'failed' } }
+let _e2eLogShowing = false;
 
 function _buildE2eTitleMap(results) {
   const map = {};
@@ -1848,12 +1849,16 @@ async function runE2eTestsNow() {
   let elapsed = 0;
   _e2ePollInterval = setInterval(async () => {
     elapsed += 3;
-    if (out) out.innerHTML = `<p style="color:#555;font-size:12px;padding:4px 0">Running Playwright tests… ${elapsed}s</p>`;
+    if (!_e2eLogShowing && out) out.innerHTML = `<p style="color:#555;font-size:12px;padding:4px 0">Running Playwright tests… ${elapsed}s</p>`;
     try {
       const res = await fetch('/api/e2e-results');
       const data = await res.json();
-      if (data.running) return; // still going
+      if (data.running) {
+        if (_e2eLogShowing) showE2eLog(); // auto-refresh log content while user is viewing it
+        return;
+      }
       clearInterval(_e2ePollInterval);
+      _e2eLogShowing = false;
       btn.disabled = false;
       btn.textContent = '▶ Run E2E Tests';
       if (!data.results) {
@@ -1872,6 +1877,7 @@ async function runE2eTestsNow() {
       }
     } catch (e) {
       clearInterval(_e2ePollInterval);
+      _e2eLogShowing = false;
       btn.disabled = false;
       btn.textContent = '▶ Run E2E Tests';
       if (out) out.innerHTML = `<p style="color:#f87171;font-size:12px">Poll error: ${esc(e.message)}</p>`;
@@ -1882,6 +1888,7 @@ async function runE2eTestsNow() {
 async function showE2eLog() {
   const out = document.getElementById('e2e-results');
   if (!out) return;
+  _e2eLogShowing = true;
   out.innerHTML = '<p style="color:#555;font-size:12px">Fetching log…</p>';
   try {
     const data = await fetch('/api/e2e-log').then(r => r.json());
