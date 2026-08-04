@@ -50,7 +50,8 @@ export const test = base.extend<AppFixtures>({
 /** Click a tab in the main section nav */
 export async function switchTab(page: Page, tabId: string) {
   await page.locator(`#nav-btn-${tabId}`).click();
-  await page.waitForTimeout(200);
+  const panelId = ['shots', 'avscript', 'animatic'].includes(tabId) ? 'tab-shots' : `tab-${tabId}`;
+  await page.waitForSelector(`#${panelId}`, { state: 'visible' });
 }
 
 /** Navigate to the Shot Sequence sub-tab */

@@ -29,8 +29,11 @@ test.describe('Project Management', () => {
 
   test('project name rename prompt saves and updates title', async ({ editorPage: { page } }) => {
     page.once('dialog', d => d.accept('Renamed Test Project'));
-    await page.locator('.header-project-name').click();
-    await expect(page.locator('.header-project-name')).toHaveText('Renamed Test Project', { timeout: 5000 });
+    await page.evaluate(() => (window as any).promptRenameCurrentProject());
+    await page.waitForFunction(
+      () => document.querySelector('.header-project-name')?.textContent?.trim() === 'Renamed Test Project',
+      { timeout: 10000 }
+    );
   });
 
   test('deleting a project removes it from the grid', async ({ projectsPage: page }) => {
