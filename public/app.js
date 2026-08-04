@@ -1858,6 +1858,21 @@ async function runE2eTestsNow() {
       const data = await res.json();
       if (data.running) {
         if (_e2eLogShowing) showE2eLog(); // auto-refresh log content while user is viewing it
+        // Merge partial results for live badge updates
+        if (data.partialResults && Object.keys(data.partialResults).length > 0) {
+          if (!_lastE2eResults) _lastE2eResults = { titleMap: {} };
+          const prev = JSON.stringify(_lastE2eResults.titleMap);
+          Object.assign(_lastE2eResults.titleMap, data.partialResults);
+          if (JSON.stringify(_lastE2eResults.titleMap) !== prev) {
+            delete _kbCache['ui'];
+            const body = document.getElementById('kb-body');
+            if (body && _kbActiveTab === 'ui') {
+              const bar = _kbSpecFilterBar();
+              const { html } = await _kbFetchContent('ui');
+              body.innerHTML = bar + html;
+            }
+          }
+        }
         return;
       }
       clearInterval(_e2ePollInterval);

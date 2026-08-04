@@ -1772,7 +1772,7 @@ function _parsePlaywrightResults(stdout, stderr) {
 
 app.post('/api/run-e2e-tests', (req, res) => {
   if (_e2eState.running) return res.json({ running: true, startedAt: _e2eState.startedAt });
-  _e2eState = { running: true, results: null, startedAt: Date.now() };
+  _e2eState = { running: true, results: null, startedAt: Date.now(), partialResults: {} };
   log('info', 'e2e test run started', {});
   const env = { ...process.env, BASE_URL: `http://localhost:${process.env.PORT || 3000}`, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0', E2E_MODE: 'true' };
   const logPath = '/tmp/pw-e2e-run.log';
@@ -1780,7 +1780,25 @@ app.post('/api/run-e2e-tests', (req, res) => {
   const logStream = fs.createWriteStream(logPath, { flags: 'w' });
   const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, env });
   let stdout = '', stderr = '';
-  proc.stdout.on('data', d => { const s = d.toString(); stdout += s; logStream.write(s); });
+  proc.stdout.on('data', d => {
+    const s = d.toString();
+    stdout += s;
+    logStream.write(s);
+    // Parse line-reporter output for real-time badge updates
+    for (const line of s.split('\n')) {
+      const isPassed = /✓/.test(line);
+      const isFailed = /[×✗]/.test(line);
+      if ((isPassed || isFailed) && line.includes('›')) {
+        const parts = line.split('›');
+        const title = parts[parts.length - 1].replace(/\s+\(\d.*$/, '').trim();
+        if (title) {
+          const status = isPassed ? 'passed' : 'failed';
+          _e2eState.partialResults[title] = status;
+          _e2eState.partialResults[title.toLowerCase()] = status;
+        }
+      }
+    }
+  });
   proc.stderr.on('data', d => { const s = d.toString(); stderr += s; logStream.write('[STDERR] ' + s); });
   const killTimer = setTimeout(() => { proc.kill('SIGTERM'); }, 540000); // kill at 9min so results still write
   proc.on('close', () => {
@@ -1802,7 +1820,7 @@ app.get('/api/e2e-log', (req, res) => {
 });
 
 app.get('/api/e2e-results', (req, res) => {
-  if (_e2eState.running) return res.json({ running: true, startedAt: _e2eState.startedAt });
+  if (_e2eState.running) return res.json({ running: true, startedAt: _e2eState.startedAt, partialResults: _e2eState.partialResults || {} });
   if (!_e2eState.results) return res.json({ running: false, results: null });
   res.json({ running: false, results: _e2eState.results });
 });
