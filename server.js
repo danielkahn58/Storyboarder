@@ -1765,6 +1765,8 @@ app.post('/api/e2e/reset-sentinel', async (req, res) => {
   // Supabase client); subsequent runs pass the persisted ID here for the data reset.
   const projectId = req.body?.projectId || E2E_SENTINEL_ID;
   try {
+    // Restore name in case a test renamed it, so the card is findable next run
+    await sbAdmin.from('projects').update({ name: E2E_SENTINEL_NAME, updated_at: new Date().toISOString() }).eq('id', projectId);
     await sbAdmin.from('project_snapshots').delete().eq('project_id', projectId);
     const cleanData = Buffer.from(JSON.stringify({
       characters: [], locations: [], shots: [], animatics: [],

@@ -1,5 +1,5 @@
 import { test as base, expect, Page } from '@playwright/test';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export { expect };
@@ -31,50 +31,46 @@ export const test = base.extend<AppFixtures>({
   },
 
   editorPage: async ({ page }, use) => {
-    // Navigate first so page.request shares the session/auth with the page
-    await page.goto('/');
-    await page.waitForSelector('#projects-grid', { state: 'visible' });
-
-    // Open or create the sentinel project.
-    // The sentinel row in `projects` is created by the browser (anon key) so it
-    // is always visible to the anon Supabase client. On first run it won't exist
-    // yet, so we create it via the new-project dialog.
-    const card = page.locator('.project-card', { hasText: SENTINEL_NAME });
+    // Load persisted sentinel ID from previous runs (survives name changes)
+    const SENTINEL_FILE = '/tmp/e2e-sentinel-id.txt';
     let sentinelId: string | null = null;
+    try { sentinelId = readFileSync(SENTINEL_FILE, 'utf8').trim() || null; } catch {}
 
-    if (await card.count() === 0) {
-      // First run: create via dialog — this row persists for all future runs
-      page.once('dialog', d => d.accept(SENTINEL_NAME));
-      await page.locator('[onclick="createProject()"]').first().click();
-      await page.waitForSelector('#view-editor', { state: 'visible' });
-      // Extract the newly-created project ID from the URL or DOM
-      sentinelId = await page.evaluate(() => (window as any).currentProjectId ?? null);
-      // Go back to projects page so we can do the clean-reset flow
-      await page.locator('.btn-back-projects').click();
-      await page.waitForSelector('#projects-grid', { state: 'visible' });
-    } else {
-      // Extract the ID from the card's proj-name element: id="proj-name-{id}"
-      const nameEl = card.locator('[id^="proj-name-"]').first();
-      const nameId = await nameEl.getAttribute('id');
-      sentinelId = nameId ? nameId.replace('proj-name-', '') : null;
+    // Reset sentinel data + name on the server before touching the browser.
+    // If the ID is stale (project deleted), fall through to recreate.
+    if (sentinelId) {
+      const resp = await page.request.post('/api/e2e/reset-sentinel', {
+        headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
+        data: JSON.stringify({ projectId: sentinelId }),
+      });
+      if (!resp.ok()) sentinelId = null;
     }
 
-    // Reset sentinel data (storage + snapshots) to a clean empty state.
-    const resetBody = sentinelId ? JSON.stringify({ projectId: sentinelId }) : '{}';
-    const resp = await page.request.post('/api/e2e/reset-sentinel', {
-      headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
-      data: resetBody,
-    });
-    if (!resp.ok()) throw new Error(`Sentinel reset failed: ${await resp.text()}`);
-
-    // Clear localStorage so loadData() ignores any stale local cache and reads
-    // the fresh data.json we just wrote to Supabase Storage
+    // Clear localStorage and load the projects page
+    await page.goto('/');
     await page.evaluate(() => localStorage.clear());
     await page.goto('/');
     await page.waitForSelector('#projects-grid', { state: 'visible' });
 
-    // Click the sentinel card to open it
-    await page.locator('.project-card', { hasText: SENTINEL_NAME }).click();
+    if (!sentinelId) {
+      // First run (or sentinel was deleted): create via dialog
+      page.once('dialog', d => d.accept(SENTINEL_NAME));
+      await page.locator('[onclick="createProject()"]').first().click();
+      await page.waitForSelector('#view-editor', { state: 'visible' });
+      sentinelId = await page.evaluate(() => (window as any).currentProjectId as string);
+      writeFileSync(SENTINEL_FILE, sentinelId, 'utf8');
+      // Reset the freshly-created project to clean state
+      await page.request.post('/api/e2e/reset-sentinel', {
+        headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
+        data: JSON.stringify({ projectId: sentinelId }),
+      });
+      await page.evaluate(() => localStorage.clear());
+      await page.goto('/');
+      await page.waitForSelector('#projects-grid', { state: 'visible' });
+    }
+
+    // Open by ID — immune to name changes from previous test runs
+    await page.locator(`[onclick="openProject('${sentinelId}')"]`).click();
     await page.waitForSelector('#view-editor', { state: 'visible' });
     await page.waitForSelector('#data-loading-overlay', { state: 'hidden' });
 
