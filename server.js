@@ -1760,26 +1760,25 @@ app.post('/api/e2e/reset-sentinel', async (req, res) => {
   const secret = process.env.E2E_SECRET;
   if (!secret || req.headers['x-e2e-auth'] !== secret) return res.status(403).json({ error: 'forbidden' });
   if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  // Accept either a project ID in the body or fall back to the hardcoded sentinel ID.
+  // The browser creates the sentinel row on first run (so it's visible to the anon
+  // Supabase client); subsequent runs pass the persisted ID here for the data reset.
+  const projectId = req.body?.projectId || E2E_SENTINEL_ID;
   try {
-    await sbAdmin.from('projects').upsert({
-      id: E2E_SENTINEL_ID,
-      name: E2E_SENTINEL_NAME,
-      updated_at: new Date().toISOString(),
-    });
-    await sbAdmin.from('project_snapshots').delete().eq('project_id', E2E_SENTINEL_ID);
+    await sbAdmin.from('project_snapshots').delete().eq('project_id', projectId);
     const cleanData = Buffer.from(JSON.stringify({
       characters: [], locations: [], shots: [], animatics: [],
       versionIndex: [], currentVersionLabel: null, savedAt: Date.now(),
     }));
     await sbAdmin.storage.from('images').upload(
-      `projects/${E2E_SENTINEL_ID}/data.json`, cleanData,
+      `projects/${projectId}/data.json`, cleanData,
       { contentType: 'application/json', upsert: true }
     );
     await sbAdmin.storage.from('images').upload(
-      `projects/${E2E_SENTINEL_ID}/images.json`, Buffer.from('{}'),
+      `projects/${projectId}/images.json`, Buffer.from('{}'),
       { contentType: 'application/json', upsert: true }
     );
-    res.json({ id: E2E_SENTINEL_ID, name: E2E_SENTINEL_NAME });
+    res.json({ id: projectId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
