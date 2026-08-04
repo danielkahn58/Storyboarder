@@ -1784,20 +1784,18 @@ app.post('/api/run-e2e-tests', (req, res) => {
     const s = d.toString();
     stdout += s;
     logStream.write(s);
-    // Parse line-reporter output for real-time badge updates
-    for (const line of s.split('\n')) {
-      const isPassed = /✓/.test(line);
-      const isFailed = /[×✗]/.test(line);
-      if ((isPassed || isFailed) && line.includes('›')) {
-        const parts = line.split('›');
-        const title = parts[parts.length - 1].replace(/\s+\(\d.*$/, '').trim();
-        if (title) {
-          const status = isPassed ? 'passed' : 'failed';
+    // Read live results written by the custom reporter
+    try {
+      const jsonl = require('fs').readFileSync('/tmp/pw-e2e-live.jsonl', 'utf8');
+      for (const line of jsonl.split('\n')) {
+        if (!line.trim()) continue;
+        const { title, status } = JSON.parse(line);
+        if (title && status) {
           _e2eState.partialResults[title] = status;
           _e2eState.partialResults[title.toLowerCase()] = status;
         }
       }
-    }
+    } catch (_) { /* file not written yet */ }
   });
   proc.stderr.on('data', d => { const s = d.toString(); stderr += s; logStream.write('[STDERR] ' + s); });
   const killTimer = setTimeout(() => { proc.kill('SIGTERM'); }, 540000); // kill at 9min so results still write

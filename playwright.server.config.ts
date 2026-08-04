@@ -11,6 +11,7 @@ export default defineConfig({
   reporter: [
     ['json', { outputFile: '/tmp/pw-e2e-results.json' }],
     ['line'],
+    ['./tests/e2e/live-reporter.ts'],
   ],
   use: {
     baseURL: process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
