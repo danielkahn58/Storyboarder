@@ -7,6 +7,8 @@ export type AppFixtures = {
   editorPage: { page: Page; projectName: string };
 };
 
+const SENTINEL_NAME = 'E2E Sentinel Project';
+
 export const test = base.extend<AppFixtures>({
   projectsPage: async ({ page }, use) => {
     await page.goto('/');
@@ -14,36 +16,25 @@ export const test = base.extend<AppFixtures>({
     await use(page);
   },
 
-  editorPage: async ({ page }, use) => {
+  editorPage: async ({ page, request }, use) => {
+    // Reset sentinel project to a clean empty state on the server
+    const resp = await request.post('/api/e2e/reset-sentinel');
+    if (!resp.ok()) throw new Error(`Sentinel reset failed: ${await resp.text()}`);
+
+    // Clear localStorage so loadData() ignores any stale local cache and reads
+    // the fresh data.json we just wrote to Supabase Storage
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
     await page.goto('/');
     await page.waitForSelector('#projects-grid', { state: 'visible' });
-    page.once('dialog', async d => { await d.accept('Test Project'); });
-    await page.locator('.btn-new-project').first().click();
-    await page.waitForSelector('#view-editor', { state: 'visible' });
-    // Wait for the data-loading overlay to clear before handing page to test
-    await page.waitForSelector('#data-loading-overlay', { state: 'hidden' });
-    const projectName = await page.locator('.header-project-name').innerText();
-    await use({ page, projectName });
 
-    // Teardown: close any open modal, go back to projects, delete the project we created
-    try {
-      // Close any open modal (e.g. KB modal) so it doesn't block navigation
-      await page.evaluate(() => {
-        document.querySelectorAll('[id$="-modal"]').forEach((m: any) => { m.style.display = 'none'; });
-      });
-      await page.goto('/');
-      await page.waitForSelector('#projects-grid', { state: 'visible' });
-      const cards = page.locator('.project-card');
-      const count = await cards.count();
-      for (let i = 0; i < count; i++) {
-        const name = await cards.nth(i).locator('.project-card-name').innerText().catch(() => '');
-        if (name.trim() === projectName.trim()) {
-          page.once('dialog', d => d.accept().catch(() => {}));
-          await cards.nth(i).locator('.btn-delete-project').last().click();
-          break;
-        }
-      }
-    } catch (_) { /* best-effort teardown */ }
+    // Open the sentinel project — no dialog needed
+    await page.locator('.project-card', { hasText: SENTINEL_NAME }).click();
+    await page.waitForSelector('#view-editor', { state: 'visible' });
+    await page.waitForSelector('#data-loading-overlay', { state: 'hidden' });
+
+    await use({ page, projectName: SENTINEL_NAME });
+    // No teardown — next reset-sentinel call restores clean state
   },
 });
 

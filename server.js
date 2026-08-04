@@ -1752,6 +1752,37 @@ app.post('/api/run-tests', (req, res) => {
   });
 });
 
+// Sentinel project for e2e tests — one stable project, reset before each test run
+const E2E_SENTINEL_ID   = 'e2e0e2e0-e2e0-4e2e-8e2e-e2e0e2e0e2e0';
+const E2E_SENTINEL_NAME = 'E2E Sentinel Project';
+
+app.post('/api/e2e/reset-sentinel', async (req, res) => {
+  const secret = process.env.E2E_SECRET;
+  if (!secret || req.headers['x-e2e-auth'] !== secret) return res.status(403).json({ error: 'forbidden' });
+  if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
+  try {
+    await sbAdmin.from('projects').upsert({
+      id: E2E_SENTINEL_ID,
+      name: E2E_SENTINEL_NAME,
+      updated_at: new Date().toISOString(),
+    });
+    await sbAdmin.from('project_snapshots').delete().eq('project_id', E2E_SENTINEL_ID);
+    const cleanData = Buffer.from(JSON.stringify({
+      characters: [], locations: [], shots: [], animatics: [],
+      versionIndex: [], currentVersionLabel: null, savedAt: Date.now(),
+    }));
+    await sbAdmin.storage.from('images').upload(
+      `projects/${E2E_SENTINEL_ID}/data.json`, cleanData,
+      { contentType: 'application/json', upsert: true }
+    );
+    await sbAdmin.storage.from('images').upload(
+      `projects/${E2E_SENTINEL_ID}/images.json`, Buffer.from('{}'),
+      { contentType: 'application/json', upsert: true }
+    );
+    res.json({ id: E2E_SENTINEL_ID, name: E2E_SENTINEL_NAME });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // E2E test state — fire-and-forget with polling
 let _e2eState = { running: false, results: null, startedAt: null };
 
