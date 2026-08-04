@@ -1778,7 +1778,7 @@ app.post('/api/run-e2e-tests', (req, res) => {
   const logPath = '/tmp/pw-e2e-run.log';
   const { spawn } = require('child_process');
   const logStream = fs.createWriteStream(logPath, { flags: 'w' });
-  const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts', '--reporter=line'], { cwd: __dirname, env });
+  const proc = spawn('npx', ['playwright', 'test', '--config', 'playwright.server.config.ts'], { cwd: __dirname, env });
   let stdout = '', stderr = '';
   proc.stdout.on('data', d => { const s = d.toString(); stdout += s; logStream.write(s); });
   proc.stderr.on('data', d => { const s = d.toString(); stderr += s; logStream.write('[STDERR] ' + s); });
