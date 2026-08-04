@@ -18,7 +18,9 @@ export const test = base.extend<AppFixtures>({
 
   editorPage: async ({ page, request }, use) => {
     // Reset sentinel project to a clean empty state on the server
-    const resp = await request.post('/api/e2e/reset-sentinel');
+    const resp = await request.post('/api/e2e/reset-sentinel', {
+      headers: { 'x-e2e-auth': process.env.E2E_SECRET || '' },
+    });
     if (!resp.ok()) throw new Error(`Sentinel reset failed: ${await resp.text()}`);
 
     // Clear localStorage so loadData() ignores any stale local cache and reads
