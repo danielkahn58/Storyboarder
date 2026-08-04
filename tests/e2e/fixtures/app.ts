@@ -1,4 +1,6 @@
 import { test as base, expect, Page } from '@playwright/test';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 export { expect };
 
@@ -9,6 +11,18 @@ export type AppFixtures = {
 
 const SENTINEL_NAME = 'E2E Sentinel Project';
 
+// Read E2E_SECRET directly from .env file — source .env doesn't export vars to child processes
+function readE2ESecret(): string {
+  try {
+    const env = readFileSync(join(__dirname, '../../../.env'), 'utf8');
+    const match = env.match(/^E2E_SECRET=["']?([^"'\n]+)["']?/m);
+    return match?.[1] ?? process.env.E2E_SECRET ?? '';
+  } catch {
+    return process.env.E2E_SECRET ?? '';
+  }
+}
+const E2E_SECRET = readE2ESecret();
+
 export const test = base.extend<AppFixtures>({
   projectsPage: async ({ page }, use) => {
     await page.goto('/');
@@ -18,8 +32,9 @@ export const test = base.extend<AppFixtures>({
 
   editorPage: async ({ page }, use) => {
     // Reset sentinel project to a clean empty state on the server.
-    // Use page.request so it inherits extraHTTPHeaders (x-e2e-auth) from the browser context.
-    const resp = await page.request.post('/api/e2e/reset-sentinel');
+    const resp = await page.request.post('/api/e2e/reset-sentinel', {
+      headers: { 'x-e2e-auth': E2E_SECRET },
+    });
     if (!resp.ok()) throw new Error(`Sentinel reset failed: ${await resp.text()}`);
 
     // Clear localStorage so loadData() ignores any stale local cache and reads
