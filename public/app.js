@@ -6925,7 +6925,7 @@ document.getElementById('toast').addEventListener('click', function(){ this.clas
 try {
   initApp();
   // Check for new KB content in background after page loads
-  setTimeout(() => _kbCheckNewContentOnLoad().catch(() => {}), 2000);
+  setTimeout(() => { try { _kbCheckNewContentOnLoad(); } catch(e) {} }, 2000);
 } catch(e) {
   console.error('initApp failed:', e);
   const hdr = document.getElementById('main-header');
