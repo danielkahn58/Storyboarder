@@ -57,7 +57,8 @@ export const test = base.extend<AppFixtures>({
       page.once('dialog', d => d.accept(SENTINEL_NAME));
       await page.locator('[onclick="createProject()"]').first().click();
       await page.waitForSelector('#view-editor', { state: 'visible' });
-      sentinelId = await page.evaluate(() => (window as any).currentProjectId as string);
+      sentinelId = await page.evaluate(() => (window as any).currentProjectId as string | null);
+      if (!sentinelId) throw new Error('createProject() did not set currentProjectId');
       writeFileSync(SENTINEL_FILE, sentinelId, 'utf8');
       // Reset the freshly-created project to clean state
       await page.request.post('/api/e2e/reset-sentinel', {
