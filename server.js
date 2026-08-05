@@ -87,13 +87,9 @@ if (AUTH_ENABLED) {
     req.logout(() => res.redirect('/login.html'));
   });
 
-  app.get('/auth/me', (req, res) => {
-    if (req.isAuthenticated()) res.json({ email: req.user.email, name: req.user.name });
-    else res.status(401).json({ error: 'not authenticated' });
-  });
-
   // E2E test bypass: when E2E_MODE is set (injected by the test runner), all requests
   // bypass auth. Also accepts X-E2E-Auth header for external test runners.
+  // Must be registered BEFORE /auth/me and the auth protection middleware.
   const E2E_SECRET = process.env.E2E_SECRET;
   app.use((req, res, next) => {
     const hasValidHeader = E2E_SECRET && req.headers['x-e2e-auth'] === E2E_SECRET;
@@ -102,6 +98,11 @@ if (AUTH_ENABLED) {
       req.isAuthenticated = () => true;
     }
     next();
+  });
+
+  app.get('/auth/me', (req, res) => {
+    if (req.isAuthenticated()) res.json({ email: req.user.email, name: req.user.name });
+    else res.status(401).json({ error: 'not authenticated' });
   });
 
   // Protect everything except auth routes and login page
