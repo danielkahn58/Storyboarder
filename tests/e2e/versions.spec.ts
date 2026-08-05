@@ -1,4 +1,4 @@
-import { test, expect, goToShots, addShot } from './fixtures/app';
+import { test, expect, goToShots, addShot, addCharacter, addLocation, switchTab } from './fixtures/app';
 
 test.describe('Versions', () => {
   test('version UI is visible in the editor header', async ({ editorPage: { page } }) => {
@@ -76,43 +76,89 @@ test.describe('Versions', () => {
   });
 
   // BUG: after saving a named version, making further edits, reverting to the
-  // saved version, then returning to the current state, those further edits are
-  // lost — the "current" slot doesn't preserve unsaved changes made after the
-  // last named version was created.
-  test('returning to current after reverting preserves edits made after last version', async ({ editorPage: { page } }) => {
-    await goToShots(page);
-    await addShot(page);
+  // saved version, then returning to "current", those post-version edits are
+  // lost. The tests below cover each element type independently.
+  test.describe('revert-then-return-to-current preserves post-version edits', () => {
+    async function revertThenReturnFlow(
+      page: import('@playwright/test').Page,
+      setup: () => Promise<{ readValue: () => Promise<string> }>,
+      editValue: (val: string) => Promise<void>,
+    ) {
+      const newVersionBtn = page.locator('#btn-new-version, [onclick*="createVersion"]').first();
+      const versionSelect = page.locator('.version-select').first();
 
-    // Set a lyric and save a named version (v1)
-    const lyricV1 = 'lyric at version one';
-    await page.locator('.field-lyric').first().fill(lyricV1);
-    await page.waitForTimeout(300);
-    const newVersionBtn = page.locator('#btn-new-version, [onclick*="createVersion"]').first();
-    await newVersionBtn.click();
-    await page.waitForTimeout(500);
+      // establish v1 state
+      const { readValue } = await setup();
+      await editValue('value-at-v1');
+      await page.waitForTimeout(300);
+      await newVersionBtn.click();
+      await page.waitForTimeout(500);
+      const v1Label = await versionSelect.inputValue();
 
-    const versionSelect = page.locator('.version-select').first();
-    const v1Label = await versionSelect.inputValue();
+      // make further edits after v1 (these become the "current" state)
+      await editValue('value-after-v1-should-survive');
+      await page.waitForTimeout(300);
 
-    // Make further edits AFTER saving v1 (these should be preserved as "current")
-    const lyricAfterV1 = 'lyric edited after v1 — should survive revert+return';
-    await page.locator('.field-lyric').first().fill(lyricAfterV1);
-    await page.waitForTimeout(300);
+      // revert to v1 and confirm v1 value is showing
+      await versionSelect.selectOption(v1Label);
+      await page.waitForTimeout(600);
+      expect(await readValue()).toBe('value-at-v1');
 
-    // Revert to v1
-    await versionSelect.selectOption(v1Label);
-    await page.waitForTimeout(600);
-    const lyricOnV1 = await page.locator('.field-lyric').first().inputValue();
-    expect(lyricOnV1).toBe(lyricV1);
+      // return to current
+      const firstOption = await versionSelect.locator('option').first().getAttribute('value');
+      await versionSelect.selectOption(firstOption!);
+      await page.waitForTimeout(600);
 
-    // Return to "current" (the top/most-recent entry in the select)
-    const options = await versionSelect.locator('option').all();
-    const firstOptionValue = await options[0].getAttribute('value');
-    await versionSelect.selectOption(firstOptionValue!);
-    await page.waitForTimeout(600);
+      // post-v1 edits should be intact — this currently FAILS (bug)
+      expect(await readValue()).toBe('value-after-v1-should-survive');
+    }
 
-    // The edits made after v1 should still be here — this currently FAILS (bug)
-    const lyricOnCurrent = await page.locator('.field-lyric').first().inputValue();
-    expect(lyricOnCurrent).toBe(lyricAfterV1);
+    test('shots — lyric field survives revert+return', async ({ editorPage: { page } }) => {
+      await revertThenReturnFlow(
+        page,
+        async () => {
+          await goToShots(page);
+          await addShot(page);
+          return { readValue: () => page.locator('#shots-body .field-lyric').first().inputValue() };
+        },
+        val => page.locator('#shots-body .field-lyric').first().fill(val),
+      );
+    });
+
+    test('shots — visual description field survives revert+return', async ({ editorPage: { page } }) => {
+      await revertThenReturnFlow(
+        page,
+        async () => {
+          await goToShots(page);
+          await addShot(page);
+          return { readValue: () => page.locator('#shots-body .field-desc').first().inputValue() };
+        },
+        val => page.locator('#shots-body .field-desc').first().fill(val),
+      );
+    });
+
+    test('characters — name field survives revert+return', async ({ editorPage: { page } }) => {
+      await revertThenReturnFlow(
+        page,
+        async () => {
+          await addCharacter(page);
+          await switchTab(page, 'characters');
+          return { readValue: () => page.locator('#characters-body .field-name').first().inputValue() };
+        },
+        val => page.locator('#characters-body .field-name').first().fill(val),
+      );
+    });
+
+    test('locations — name field survives revert+return', async ({ editorPage: { page } }) => {
+      await revertThenReturnFlow(
+        page,
+        async () => {
+          await addLocation(page);
+          await switchTab(page, 'locations');
+          return { readValue: () => page.locator('#locations-body .field-name').first().inputValue() };
+        },
+        val => page.locator('#locations-body .field-name').first().fill(val),
+      );
+    });
   });
 });

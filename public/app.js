@@ -2170,7 +2170,10 @@ function _renderUiTestCases() {
       ['switching to older version restores data from that snapshot', 'loadVersion() → versionSelect.selectOption(v1Label)', 'Version restore round-trip'],
       ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY + createVersion(true)', 'Auto-version threshold'],
       ['Version list appears on a second device after saving', 'Cross-device sync via project_snapshots', 'Cross-device version sync'],
-      ['returning to current after reverting preserves edits made after last version', 'loadVersion() current-state preservation', 'BUG: edits after last named version are lost on revert+return'],
+      ['shots — lyric field survives revert+return', 'loadVersion() current-state preservation (shots lyric)', 'BUG: shot lyric edits after last named version lost on revert+return'],
+      ['shots — visual description field survives revert+return', 'loadVersion() current-state preservation (shots desc)', 'BUG: shot description edits after last named version lost on revert+return'],
+      ['characters — name field survives revert+return', 'loadVersion() current-state preservation (characters)', 'BUG: character name edits after last named version lost on revert+return'],
+      ['locations — name field survives revert+return', 'loadVersion() current-state preservation (locations)', 'BUG: location name edits after last named version lost on revert+return'],
     ]},
     { label: 'Animatic', file: 'e2e/animatic.spec.ts', cases: [
       ['animatic tab is reachable and renders its container', 'animatic-tab-panel visibility on nav click', 'Animatic tab regression'],
