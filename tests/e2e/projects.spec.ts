@@ -16,14 +16,16 @@ test.describe('Project Management', () => {
     await page.locator('#nav-btn-shots').click();
     await expect(page.locator('#shots-body tr[data-id]')).toHaveCount(0);
 
-    // Teardown
+    // Teardown: capture the ID of the project we just created, navigate back, and delete it
+    const createdId = await page.evaluate(() => localStorage.getItem('sg-last-project'));
     page.once('dialog', d => d.accept());
     await page.locator('.btn-back-projects').click();
     await page.waitForSelector('#projects-grid', { state: 'visible' });
-    const cards = page.locator('.project-card');
-    const count = await cards.count();
-    if (count > 0) {
-      await cards.last().locator('.btn-delete-project').last().click();
+    if (createdId) {
+      const card = page.locator(`[onclick="openProject('${createdId}')"]`);
+      await card.waitFor({ state: 'visible', timeout: 10000 });
+      page.once('dialog', d => d.accept());
+      await card.locator('.btn-delete-project').click();
     }
   });
 
