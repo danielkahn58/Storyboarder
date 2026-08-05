@@ -36,19 +36,24 @@ export const test = base.extend<AppFixtures>({
     let sentinelId: string | null = null;
     try { sentinelId = readFileSync(SENTINEL_FILE, 'utf8').trim() || null; } catch {}
 
-    // Reset sentinel data + name on the server before touching the browser.
-    // If the ID is stale (project deleted), fall through to recreate.
+    // Navigate first — page.request resolves relative URLs against page.url(),
+    // which is about:blank on a fresh page and causes the reset call to fail.
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+
+    // Reset sentinel data + name on the server. If the ID is stale (project
+    // deleted), fall through to recreate.
     if (sentinelId) {
       const resp = await page.request.post('/api/e2e/reset-sentinel', {
         headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
         data: JSON.stringify({ projectId: sentinelId }),
       });
-      if (!resp.ok()) sentinelId = null;
+      if (!resp.ok()) {
+        console.error('[e2e] sentinel reset failed:', resp.status(), await resp.text());
+        sentinelId = null;
+      }
     }
 
-    // Clear localStorage and load the projects page
-    await page.goto('/');
-    await page.evaluate(() => localStorage.clear());
     await page.goto('/');
     await page.waitForSelector('#projects-grid', { state: 'visible' });
 
