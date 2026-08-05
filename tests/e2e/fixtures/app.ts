@@ -73,18 +73,21 @@ export const test = base.extend<AppFixtures>({
       // client so it is always visible to subsequent anon Supabase reads.
       page.once('dialog', d => d.accept(SENTINEL_NAME));
       await page.locator('[onclick="createProject()"]').first().click();
-      await page.waitForFunction(() => !!(window as any).currentProjectId, { timeout: 20000 });
+      // Wait for the editor DOM state — more reliable than polling a JS global,
+      // and avoids races between the test budget and waitForFunction polling.
+      await page.waitForSelector('#view-editor', { state: 'visible', timeout: 25000 });
+      await page.waitForSelector('#data-loading-overlay', { state: 'hidden', timeout: 25000 });
       sentinelId = await page.evaluate(() => (window as any).currentProjectId as string);
+      if (!sentinelId) throw new Error('[e2e] currentProjectId not set after editor opened');
       writeFileSync(SENTINEL_FILE, sentinelId, 'utf8');
-      // Reset the project data to clean state
+      // Reset data on server so subsequent runs start clean; new project is already empty.
       await request.post('/api/e2e/reset-sentinel', {
         headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
         data: JSON.stringify({ projectId: sentinelId }),
       });
-      // Reload so the app reads clean data from Supabase — addInitScript will
-      // clear localStorage first so the projects grid shows (not the editor).
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForSelector('#projects-grid', { state: 'visible', timeout: 30000 });
+      // Editor is already open with the sentinel project — hand it to the test directly.
+      await use({ page, projectName: SENTINEL_NAME });
+      return;
     }
 
     // Verify the sentinel card is still in the grid (guards against Supabase deletion)
