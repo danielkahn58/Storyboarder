@@ -20,9 +20,9 @@ const E2E_SECRET = readE2ESecret();
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
-  retries: 0,
+  retries: 1,
   workers: 1,
-  timeout: 30000,
+  timeout: 90000,
   reporter: [
     ['json', { outputFile: '/tmp/pw-e2e-results.json' }],
     ['line'],

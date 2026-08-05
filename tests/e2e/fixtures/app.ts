@@ -31,54 +31,80 @@ export const test = base.extend<AppFixtures>({
   },
 
   editorPage: async ({ page }, use) => {
-    // Load persisted sentinel ID from previous runs (survives name changes)
     const SENTINEL_FILE = '/tmp/e2e-sentinel-id.txt';
     let sentinelId: string | null = null;
     try { sentinelId = readFileSync(SENTINEL_FILE, 'utf8').trim() || null; } catch {}
 
-    // Navigate first — page.request resolves relative URLs against page.url(),
-    // which is about:blank on a fresh page and causes the reset call to fail.
-    await page.goto('/');
+    // Helper: navigate to / and verify we land on the app, not the login page.
+    // Railway can be slow on cold start so we allow extra time.
+    async function gotoApp() {
+      await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+      // Detect auth redirect — if we landed on login.html the E2E header didn't work
+      if (page.url().includes('login')) {
+        throw new Error(
+          `[e2e] Redirected to login page — E2E_SECRET may be wrong or missing.\n` +
+          `  Secret loaded: ${E2E_SECRET ? E2E_SECRET.slice(0, 6) + '…' : '(empty)'}\n` +
+          `  URL: ${page.url()}`
+        );
+      }
+      await page.waitForSelector('#projects-grid', { state: 'visible', timeout: 30000 });
+    }
+
+    // Navigate first so page.request can resolve relative URLs correctly.
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.evaluate(() => localStorage.clear());
 
-    // Reset sentinel data + name on the server. If the ID is stale (project
-    // deleted), fall through to recreate.
+    // Reset sentinel data + name. If the ID is stale, fall through to recreate.
     if (sentinelId) {
-      const resp = await page.request.post('/api/e2e/reset-sentinel', {
-        headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
-        data: JSON.stringify({ projectId: sentinelId }),
-      });
-      if (!resp.ok()) {
-        console.error('[e2e] sentinel reset failed:', resp.status(), await resp.text());
+      try {
+        const resp = await page.request.post('/api/e2e/reset-sentinel', {
+          headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
+          data: JSON.stringify({ projectId: sentinelId }),
+        });
+        if (!resp.ok()) {
+          console.error('[e2e] sentinel reset failed:', resp.status(), await resp.text());
+          sentinelId = null;
+        }
+      } catch (e) {
+        console.error('[e2e] sentinel reset threw:', e);
         sentinelId = null;
       }
     }
 
-    await page.goto('/');
-    await page.waitForSelector('#projects-grid', { state: 'visible' });
+    await gotoApp();
+
+    // If we have a sentinel ID, verify the card actually exists in the grid.
+    // If not (project was deleted from Supabase), recreate it.
+    if (sentinelId) {
+      const cardCount = await page.locator(`[onclick="openProject('${sentinelId}')"]`).count();
+      if (cardCount === 0) {
+        console.warn('[e2e] sentinel card not found in grid — recreating');
+        sentinelId = null;
+      }
+    }
 
     if (!sentinelId) {
-      // First run (or sentinel was deleted): create via dialog
+      // Create sentinel via dialog — this row is created by the anon client so
+      // it's always visible to subsequent anon Supabase reads.
       page.once('dialog', d => d.accept(SENTINEL_NAME));
       await page.locator('[onclick="createProject()"]').first().click();
-      // Wait until the global is set — more reliable than waiting on DOM state
-      await page.waitForFunction(() => !!(window as any).currentProjectId, { timeout: 15000 });
+      await page.waitForFunction(() => !!(window as any).currentProjectId, { timeout: 20000 });
       sentinelId = await page.evaluate(() => (window as any).currentProjectId as string);
       writeFileSync(SENTINEL_FILE, sentinelId, 'utf8');
-      // Reset the freshly-created project to clean state
+      // Reset data to clean state and go back to the projects grid
       await page.request.post('/api/e2e/reset-sentinel', {
         headers: { 'x-e2e-auth': E2E_SECRET, 'content-type': 'application/json' },
         data: JSON.stringify({ projectId: sentinelId }),
       });
       await page.evaluate(() => localStorage.clear());
-      await page.goto('/');
-      await page.waitForSelector('#projects-grid', { state: 'visible' });
+      await gotoApp();
     }
 
-    // Open by ID — immune to name changes from previous test runs
+    // Open the sentinel project by its ID attribute — immune to name changes
     await page.locator(`[onclick="openProject('${sentinelId}')"]`).click();
-    await page.waitForSelector('#view-editor', { state: 'visible' });
-    await page.waitForSelector('#data-loading-overlay', { state: 'hidden' });
+    await page.waitForSelector('#view-editor', { state: 'visible', timeout: 20000 });
+    // Overlay hides in loadData()'s finally block — wait up to 30s for slow Supabase reads
+    await page.waitForSelector('#data-loading-overlay', { state: 'hidden', timeout: 30000 });
 
     await use({ page, projectName: SENTINEL_NAME });
     // No teardown — next reset-sentinel call restores clean state
