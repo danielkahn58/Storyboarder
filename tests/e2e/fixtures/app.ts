@@ -92,18 +92,21 @@ export const test = base.extend<AppFixtures>({
       return;
     }
 
-    // Verify the sentinel card is still in the grid (guards against Supabase deletion)
-    const cardCount = await page.locator(`[onclick="openProject('${sentinelId}')"]`).count();
-    if (cardCount === 0) {
+    // Wait for the sentinel card — #projects-grid is visible immediately (empty state),
+    // but loadProjects() populates it asynchronously after a Supabase query.
+    const card = page.locator(`[onclick="openProject('${sentinelId}')"]`);
+    try {
+      await card.waitFor({ state: 'visible', timeout: 15000 });
+    } catch {
       writeFileSync(SENTINEL_FILE, '', 'utf8');
       throw new Error(
-        `[e2e] Sentinel card not found — project may have been deleted from Supabase. ` +
+        `[e2e] Sentinel card not found after 15s — project may have been deleted from Supabase. ` +
         `Run again to recreate it.`
       );
     }
 
     // Open by ID — immune to name changes from prior test runs
-    await page.locator(`[onclick="openProject('${sentinelId}')"]`).click();
+    await card.click();
     await page.waitForSelector('#view-editor', { state: 'visible', timeout: 20000 });
     // Overlay hides in loadData()'s finally block — allow 30s for slow Supabase reads
     await page.waitForSelector('#data-loading-overlay', { state: 'hidden', timeout: 30000 });
