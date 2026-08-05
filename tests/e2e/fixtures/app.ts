@@ -77,8 +77,10 @@ export const test = base.extend<AppFixtures>({
       // and avoids races between the test budget and waitForFunction polling.
       await page.waitForSelector('#view-editor', { state: 'visible', timeout: 25000 });
       await page.waitForSelector('#data-loading-overlay', { state: 'hidden', timeout: 25000 });
-      sentinelId = await page.evaluate(() => (window as any).currentProjectId as string);
-      if (!sentinelId) throw new Error('[e2e] currentProjectId not set after editor opened');
+      // currentProjectId is a `let` global — not on window. Read from localStorage
+      // instead: openProject() writes 'sg-last-project' synchronously before showing the editor.
+      sentinelId = await page.evaluate(() => localStorage.getItem('sg-last-project'));
+      if (!sentinelId) throw new Error('[e2e] sg-last-project not set after editor opened');
       writeFileSync(SENTINEL_FILE, sentinelId, 'utf8');
       // Reset data on server so subsequent runs start clean; new project is already empty.
       await request.post('/api/e2e/reset-sentinel', {
