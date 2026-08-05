@@ -74,4 +74,45 @@ test.describe('Versions', () => {
     const bodyText = await page.locator('#shots-body').innerText().catch(() => '');
     expect(bodyText).not.toContain('Version two lyric');
   });
+
+  // BUG: after saving a named version, making further edits, reverting to the
+  // saved version, then returning to the current state, those further edits are
+  // lost — the "current" slot doesn't preserve unsaved changes made after the
+  // last named version was created.
+  test('returning to current after reverting preserves edits made after last version', async ({ editorPage: { page } }) => {
+    await goToShots(page);
+    await addShot(page);
+
+    // Set a lyric and save a named version (v1)
+    const lyricV1 = 'lyric at version one';
+    await page.locator('.field-lyric').first().fill(lyricV1);
+    await page.waitForTimeout(300);
+    const newVersionBtn = page.locator('#btn-new-version, [onclick*="createVersion"]').first();
+    await newVersionBtn.click();
+    await page.waitForTimeout(500);
+
+    const versionSelect = page.locator('.version-select').first();
+    const v1Label = await versionSelect.inputValue();
+
+    // Make further edits AFTER saving v1 (these should be preserved as "current")
+    const lyricAfterV1 = 'lyric edited after v1 — should survive revert+return';
+    await page.locator('.field-lyric').first().fill(lyricAfterV1);
+    await page.waitForTimeout(300);
+
+    // Revert to v1
+    await versionSelect.selectOption(v1Label);
+    await page.waitForTimeout(600);
+    const lyricOnV1 = await page.locator('.field-lyric').first().inputValue();
+    expect(lyricOnV1).toBe(lyricV1);
+
+    // Return to "current" (the top/most-recent entry in the select)
+    const options = await versionSelect.locator('option').all();
+    const firstOptionValue = await options[0].getAttribute('value');
+    await versionSelect.selectOption(firstOptionValue!);
+    await page.waitForTimeout(600);
+
+    // The edits made after v1 should still be here — this currently FAILS (bug)
+    const lyricOnCurrent = await page.locator('.field-lyric').first().inputValue();
+    expect(lyricOnCurrent).toBe(lyricAfterV1);
+  });
 });
