@@ -77,10 +77,21 @@ test.describe('Versions', () => {
   });
 
   test('reverting to previous version restores character name', async ({ editorPage: { page } }) => {
-    // 1. Add a character with a specific name and save version 1
+    // 1. Add a character with a specific name
     await addCharacter(page, 'OriginalName');
     await switchTab(page, 'characters');
 
+    // Confirm the name is in the DOM before creating the version
+    await expect(page.locator('#characters-body .field-name').first()).toHaveValue('OriginalName');
+
+    // Also confirm it's in memory (syncFromDOM reads DOM → characters array)
+    const nameInMemory = await page.evaluate(() => {
+      if (typeof syncFromDOM === 'function') syncFromDOM();
+      return typeof characters !== 'undefined' && characters.length > 0 ? characters[0].name : '__missing__';
+    });
+    expect(nameInMemory).toBe('OriginalName');
+
+    // Save version 1 — wait for snapshot to land in Supabase
     const newVersionBtn = page.locator('#btn-new-version, [onclick*="createVersion"]').first();
     await Promise.all([
       page.waitForResponse(r => r.url().includes('/api/snapshots') && r.request().method() === 'POST', { timeout: 30000 }),
@@ -88,6 +99,8 @@ test.describe('Versions', () => {
     ]);
     const versionSelect = page.locator('.version-select').first();
     const v1Label = await versionSelect.inputValue();
+    // Sanity: should be a real label, not empty-string (which would mean no version was selected)
+    expect(v1Label).not.toBe('');
 
     // 2. Change the character name (post-v1 edit)
     await page.locator('#characters-body .field-name').first().fill('ChangedName');
