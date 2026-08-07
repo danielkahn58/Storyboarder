@@ -219,9 +219,6 @@ let currentProjectId = null;
 let versions = []; // { id, label, timestamp, auto, snapshotId }
 let editsSinceVersion = 0;
 let _lastAutoSnapshotTime = 0;
-// When true: skip all local storage reads/writes; all data goes through Supabase; failures throw.
-// Stored in localStorage under a dedicated key that is always read/written regardless of this setting.
-let cloudOnlyMode = localStorage.getItem('sg-cloud-only') === '1';
 const AUTO_VERSION_EVERY = 25;
 const AUTO_VERSION_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes of activity
 let _lastAutoVersionTime = 0;
@@ -725,89 +722,52 @@ async function initApp() {
 async function loadData() {
   loadVersions();
   try {
-    const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-    let saved = null;
-    let imgs = null;
-
-    if (cloudOnlyMode && currentProjectId) {
-      // Cloud-only: fetch exclusively from Supabase, throw on failure
+    if (currentProjectId) {
+      // Supabase is the single source of truth for project data.
       const sbRow = await sbGetData(currentProjectId);
-      if (!sbRow?.data) throw new Error('Failed to load project data from cloud. Check your connection and try again.');
-      saved = JSON.stringify(sbRow.data);
-      imgs = sbRow.images || {};
+      if (sbRow?.data) {
+        // Merge cloud images with any local IDB images (base64 refs that weren't uploaded yet).
+        let localImgs = null;
+        try { localImgs = await idbGet(projectDataKey(currentProjectId)); } catch {}
+        const imgs = mergeLocalIntoSbImages(sbRow.images || {}, localImgs || {});
+        const d = mergeImages(sbRow.data, imgs);
+        characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
+        if (d.visualStyles) {
+          const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
+          const filtered = d.visualStyles.filter(s => !LEGACY.has(s.id) && !LEGACY.has(s.name));
+          const defaults = [
+            { id: 'style-photo', name: 'Photorealistic', prompt: 'Photorealistic, hyperrealistic, cinematic photography, 8k, sharp detail.' },
+            { id: 'style-2d',    name: '2D Animation',   prompt: '2D animation style. Clean bold line art, smooth cel-shading, bright saturated colors. No shadows on background.' },
+            { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
+          ];
+          const merged = [...defaults];
+          for (const s of filtered) { if (!merged.find(m => m.id === s.id)) merged.push(s); }
+          visualStyles = merged;
+        }
+        selectedStyleId = d.selectedStyleId && visualStyles.find(s => s.id === d.selectedStyleId) ? d.selectedStyleId : (visualStyles[0]?.id || '');
+        if (d.charGenRules) charGenRules = d.charGenRules;
+        if (d.locationGenRules) locationGenRules = d.locationGenRules;
+        if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
+        if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
+        if (Array.isArray(d.animatics)) animatics = d.animatics;
+        if (!versions.length && Array.isArray(d.versionIndex) && d.versionIndex.length > 0) {
+          versions = d.versionIndex.map(v => ({ id: v.id || genId(), label: v.label, timestamp: v.timestamp, auto: v.auto || false, snapshotId: v.snapshotId || null }));
+          editsSinceVersion = 0;
+        }
+      }
     } else {
-      // Read local data as baseline before touching Supabase
-      const localSaved = localStorage.getItem(key);
-      let localImgs = null;
-      try { localImgs = await idbGet(key); } catch {}
-      const localCharCount = (() => { try { return JSON.parse(localSaved)?.characters?.length || 0; } catch { return 0; } })();
-
-      // Try Supabase — prefer whichever source is newer (by savedAt), but never replace local data with less data
-      if (currentProjectId) {
-        const sbRow = await sbGetData(currentProjectId);
-        const sbCharCount = sbRow?.data?.characters?.length || 0;
-        if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
-          const sbSavedAt = sbRow.data.savedAt || 0;
-          const localSavedAt = (() => { try { return JSON.parse(localSaved)?.savedAt || 0; } catch { return 0; } })();
-          console.log('[loadData] local savedAt:', localSavedAt, 'sb savedAt:', sbSavedAt, 'localCharCount:', localCharCount, 'sbCharCount:', sbCharCount);
-          // Use local if it's strictly newer than Supabase (pending cloud sync not yet uploaded)
-          if (localSavedAt > sbSavedAt && localCharCount > 0) {
-            console.log('[loadData] → using LOCAL data');
-            saved = localSaved;
-            imgs = localImgs;
-            // Re-push to Supabase now so other devices get the latest data
-            const { stripped: s2, imgs: i2 } = _buildPayloadFromSaved(JSON.parse(localSaved), localImgs);
-            sbUpsertData(currentProjectId, s2, i2);
-          } else {
-            console.log('[loadData] → using SUPABASE data');
-            saved = JSON.stringify(sbRow.data);
-            imgs = sbRow.images || {};
-            try { localStorage.setItem(key, saved); } catch {}
-            try { await idbSet(key, imgs); } catch {}
-          }
-        }
-      }
-
-      // Fall back to local if Supabase unavailable or had less data
-      if (!saved) {
-        saved = localSaved;
-        imgs = localImgs;
+      // Non-project mode: use localStorage fallback.
+      const localSaved = localStorage.getItem('character-generator-data');
+      if (localSaved) {
+        const d = JSON.parse(localSaved);
+        characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
       }
     }
-
-    if (saved) {
-      let d = JSON.parse(saved);
-      if (imgs) d = mergeImages(d, imgs);
-      characters = d.characters || []; locations = d.locations || []; shots = d.shots || [];
-      if (d.visualStyles) {
-        const LEGACY = new Set(['style-anime','style-comic','style-wc','style-oil','Anime','Comic Book','Watercolor','Oil Painting']);
-        const filtered = d.visualStyles.filter(s => !LEGACY.has(s.id) && !LEGACY.has(s.name));
-        // Always ensure the 3 default styles exist; merge saved custom styles on top
-        const defaults = [
-          { id: 'style-photo', name: 'Photorealistic', prompt: 'Photorealistic, hyperrealistic, cinematic photography, 8k, sharp detail.' },
-          { id: 'style-2d',    name: '2D Animation',   prompt: '2D animation style. Clean bold line art, smooth cel-shading, bright saturated colors. No shadows on background.' },
-          { id: 'style-3d',    name: '3D Animation',   prompt: '3D animation style, Pixar-inspired, smooth subsurface scattering, soft studio lighting, vibrant colors, clean render.' },
-        ];
-        const merged = [...defaults];
-        for (const s of filtered) {
-          if (!merged.find(m => m.id === s.id)) merged.push(s);
-        }
-        visualStyles = merged;
-      }
-      selectedStyleId = d.selectedStyleId && visualStyles.find(s => s.id === d.selectedStyleId) ? d.selectedStyleId : (visualStyles[0]?.id || '');
-      if (d.charGenRules) charGenRules = d.charGenRules;
-      if (d.locationGenRules) locationGenRules = d.locationGenRules;
-      if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
-      if (d.scriptText) { lastScriptText = d.scriptText; lastScriptName = d.scriptName || null; }
-      if (Array.isArray(d.animatics)) animatics = d.animatics;
-      // Restore version index from Supabase payload on devices that have no localStorage version history
-      if (!versions.length && Array.isArray(d.versionIndex) && d.versionIndex.length > 0) {
-        versions = d.versionIndex.map(v => ({ id: v.id || genId(), label: v.label, timestamp: v.timestamp, auto: v.auto || false, snapshotId: v.snapshotId || null }));
-        editsSinceVersion = 0;
-      }
-    }
-  } catch {}
-  // If still no version history after parsing local/Supabase data, fetch snapshot list directly
+  } catch(e) {
+    console.warn('loadData error:', e);
+    showToast('Failed to load project from cloud. Check your connection.', true);
+  }
+  // If still no version history, fetch snapshot list from Supabase.
   if (!versions.length && currentProjectId) {
     try {
       const snapshots = await sbGetSnapshots(currentProjectId);
@@ -818,12 +778,8 @@ async function loadData() {
       }
     } catch(e) {}
   }
-  // In project mode, empty arrays are valid (user hasn't added any yet).
-  // Only seed defaults in the standalone/non-project context.
   if (!characters.length && !currentProjectId) characters = [newCharacter()];
   if (!locations.length && !currentProjectId) locations = [newLocation()];
-  // Remove legacy global script key
-  localStorage.removeItem('character-generator-script');
   applyStyleUI();
   renderScriptPreview();
   renderCharacters();
@@ -982,66 +938,73 @@ function _buildPayload() {
   return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, animatics: animatics || [], versionIndex: versionIndex, savedAt: Date.now() };
 }
 
+// Writes current state to Supabase (awaited). Used by saveData and restoreVersion.
+// For non-project mode falls back to localStorage.
 async function _persistData(key) {
   const { stripped, imgs } = extractImages(_buildPayload());
   const hasContent = characters.length > 0 || locations.length > 0 || shots.length > 0;
-
-  if (cloudOnlyMode) {
-    // Cloud-only: write directly to Supabase, throw on failure
-    if (!currentProjectId || !hasContent) return;
-    await sbUpsertData(currentProjectId, stripped, imgs, true /* throwOnError */);
-    const now = Date.now();
-    if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
-      _lastAutoSnapshotTime = now;
-      await sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
-    }
+  if (!currentProjectId) {
+    try { localStorage.setItem(key, JSON.stringify(stripped)); } catch {}
     return;
   }
+  if (!hasContent) return;
+  try { await idbSet(key, imgs); } catch {}
+  await sbUpsertData(currentProjectId, stripped, imgs);
+}
 
-  // Local cache
-  try {
-    localStorage.setItem(key, JSON.stringify(stripped));
-  } catch(e) {
-    console.warn('localStorage quota hit, clearing old project data:', e.message);
-    try {
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('sg-data-') && k !== key) { localStorage.removeItem(k); break; }
-      }
-      localStorage.setItem(key, JSON.stringify(stripped));
-    } catch(e2) { console.error('localStorage save failed:', e2.message); }
-  }
-  try { await idbSet(key, imgs); } catch(e) { console.warn('IDB save failed:', e.message); }
-  // Sync to Supabase (fire and forget)
-  if (currentProjectId && hasContent) {
-    sbUpsertData(currentProjectId, stripped, imgs);
-    const now = Date.now();
-    if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
-      _lastAutoSnapshotTime = now;
-      sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
-    }
+// Throttled background cloud sync — fires 15s after the last edit.
+let _cloudSyncTimer = null;
+function _scheduleCloudSync() {
+  clearTimeout(_cloudSyncTimer);
+  _cloudSyncTimer = setTimeout(_doCloudSync, 15000);
+}
+async function _doCloudSync() {
+  if (!currentProjectId) return;
+  syncFromDOM();
+  const { stripped, imgs } = extractImages(_buildPayload());
+  const hasContent = characters.length > 0 || locations.length > 0 || shots.length > 0;
+  if (!hasContent) return;
+  idbSet(projectDataKey(currentProjectId), imgs).catch(() => {});
+  sbUpsertData(currentProjectId, stripped, imgs);
+  const now = Date.now();
+  if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
+    _lastAutoSnapshotTime = now;
+    sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
   }
 }
 
-function saveData() {
+async function saveData() {
+  if (!currentProjectId) return;
+  clearTimeout(_cloudSyncTimer); // cancel any pending background sync
   syncFromDOM();
-  const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  _persistData(key);
-  if (currentProjectId) {
+  const { stripped, imgs } = extractImages(_buildPayload());
+  const hasContent = characters.length > 0 || locations.length > 0 || shots.length > 0;
+  const btn = document.querySelector('.save-btn');
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; btn.classList.remove('saved'); }
+  try {
+    if (hasContent) {
+      idbSet(projectDataKey(currentProjectId), imgs).catch(() => {});
+      await sbUpsertData(currentProjectId, stripped, imgs, true /* throwOnError */);
+      const now = Date.now();
+      if (now - _lastAutoSnapshotTime > 10 * 60 * 1000) {
+        _lastAutoSnapshotTime = now;
+        sbSaveSnapshot(currentProjectId, null, true, stripped, imgs);
+      }
+    }
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Saved!'; btn.classList.add('saved'); setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800); }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
   }
-  const btn = document.querySelector('.save-btn');
-  if (btn) { btn.textContent = 'Saved!'; btn.classList.add('saved'); setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800); }
 }
 
 function autoSave() {
   syncFromDOM();
-  const key = currentProjectId ? projectDataKey(currentProjectId) : 'character-generator-data';
-  _persistData(key);
   if (currentProjectId) {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
+    _scheduleCloudSync();
   }
   editsSinceVersion++;
   const timeSinceVersion = Date.now() - _lastAutoVersionTime;
@@ -1269,28 +1232,10 @@ function renderVersionUI() {
   `;
 }
 
-function setCloudOnlyMode(enabled) {
-  cloudOnlyMode = enabled;
-  if (enabled) {
-    localStorage.setItem('sg-cloud-only', '1');
-  } else {
-    localStorage.removeItem('sg-cloud-only');
-  }
-  showToast(enabled ? 'Cloud-only mode on — local cache disabled.' : 'Cloud-only mode off — local caching enabled.');
-}
-
-function initCloudOnlyToggle() {
-  const el = document.getElementById('cloud-only-toggle');
-  if (el) el.checked = cloudOnlyMode;
-}
-
 async function forceLoadFromCloud() {
   if (!currentProjectId) return;
-  if (!confirm('Discard local data and load the latest version from cloud? This cannot be undone.')) return;
+  if (!confirm('Reload from cloud? Any unsaved local changes will be overwritten.')) return;
   const key = projectDataKey(currentProjectId);
-  const vKey = projectVersionsKey(currentProjectId);
-  localStorage.removeItem(key);
-  localStorage.removeItem(vKey);
   try { await idbDelete(key); } catch {}
   versions = [];
   editsSinceVersion = 0;
@@ -2779,7 +2724,6 @@ function switchMainTab(tab) {
   });
   // if it's one of the shots sub-tabs, switch that inner panel too
   if (['shots','avscript','animatic'].includes(tab)) switchShotsTab(tab);
-  if (tab === 'config') initCloudOnlyToggle();
   window.scrollTo(0, 0);
 }
 
@@ -10064,22 +10008,20 @@ async function saveCompose() {
 }
 
 // ── Persist on page unload ────────────────────────────────────────────────────
-// Flush any pending debounce and synchronously write text data to localStorage
-// so refreshing or closing the tab never loses unsaved changes.
-// (IDB image writes are async and can't be guaranteed during unload — text is safe.)
+// On tab hide / close: fire any pending background cloud sync immediately (best-effort).
+// Supabase is the only store now — if this doesn't complete, unsaved edits since last
+// _doCloudSync require the user to click Save explicitly on next open.
 window.addEventListener('pagehide', () => {
-  if (!currentProjectId || cloudOnlyMode) return;
+  if (!currentProjectId) return;
   clearTimeout(_saveTimer);
-  syncFromDOM();
-  const key = projectDataKey(currentProjectId);
-  const { stripped } = extractImages(_buildPayload());
-  try { localStorage.setItem(key, JSON.stringify(stripped)); } catch {}
+  clearTimeout(_cloudSyncTimer);
+  _doCloudSync();
 });
 
-// Also catch visibility change (tab switch, mobile background) as a belt-and-suspenders save
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && currentProjectId) {
     clearTimeout(_saveTimer);
-    autoSave();
+    clearTimeout(_cloudSyncTimer);
+    _doCloudSync();
   }
 });
