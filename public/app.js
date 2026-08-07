@@ -820,8 +820,10 @@ async function loadData() {
       }
     } catch(e) {}
   }
-  if (!characters.length) characters = [newCharacter()];
-  if (!locations.length) locations = [newLocation()];
+  // In project mode, empty arrays are valid (user hasn't added any yet).
+  // Only seed defaults in the standalone/non-project context.
+  if (!characters.length && !currentProjectId) characters = [newCharacter()];
+  if (!locations.length && !currentProjectId) locations = [newLocation()];
   // Remove legacy global script key
   localStorage.removeItem('character-generator-script');
   applyStyleUI();
