@@ -1619,23 +1619,25 @@ app.post('/api/snapshots', async (req, res) => {
   const { projectId, label, auto, data, images } = req.body;
   if (!projectId) return res.status(400).json({ error: 'projectId required' });
   try {
-    const { error } = await sbAdmin.from('project_snapshots').insert({
+    const { data: rows, error } = await sbAdmin.from('project_snapshots').insert({
       project_id: projectId, label: label || null, auto: !!auto, data, images, created_at: Date.now()
-    });
+    }).select('id');
     if (error) return res.status(500).json({ error: error.message });
     if (auto) {
       const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
       sbAdmin.from('project_snapshots').delete().eq('project_id', projectId).eq('auto', true).lt('created_at', cutoff);
     }
-    res.json({ ok: true });
+    res.json({ ok: true, id: rows?.[0]?.id || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Metadata-only list — no data/images payload so the eager load on project open is lightweight.
+// The full snapshot is fetched on demand via GET /api/snapshots/:projectId/:snapshotId.
 app.get('/api/snapshots/:projectId', async (req, res) => {
   if (!sbAdmin) return res.status(503).json({ error: 'Supabase not configured' });
   try {
     const { data, error } = await sbAdmin.from('project_snapshots')
-      .select('id,label,auto,created_at,data,images')
+      .select('id,label,auto,created_at')
       .eq('project_id', req.params.projectId)
       .order('created_at', { ascending: false })
       .limit(100);

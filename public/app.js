@@ -223,7 +223,9 @@ let _lastAutoSnapshotTime = 0;
 // When true: skip all local storage reads/writes; all data goes through Supabase; failures throw.
 // Stored in localStorage under a dedicated key that is always read/written regardless of this setting.
 let cloudOnlyMode = localStorage.getItem('sg-cloud-only') === '1';
-const AUTO_VERSION_EVERY = 100;
+const AUTO_VERSION_EVERY = 25;
+const AUTO_VERSION_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes of activity
+let _lastAutoVersionTime = 0;
 
 let lastScriptText = null;
 let lastScriptName = null;
@@ -302,9 +304,10 @@ const _snapQueueKey = (id) => `sg-snap-queue-${id}`;
 async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
   const strippedImgs = stripBase64ForSync(imgs);
   try {
-    await apiFetch('/api/snapshots', {
+    const result = await apiFetch('/api/snapshots', {
       projectId, label: label || null, auto: isAuto, data: stripped, images: strippedImgs
     });
+    return result; // { ok: true, id: uuid }
   } catch(e) {
     console.warn('snapshot save failed:', e.message);
     showToast('Version checkpoint couldn\'t reach the server — queued for retry on next load.', true);
@@ -312,9 +315,10 @@ async function sbSaveSnapshot(projectId, label, isAuto, stripped, imgs) {
       const key = _snapQueueKey(projectId);
       const queue = JSON.parse(localStorage.getItem(key) || '[]');
       queue.push({ label, isAuto, data: stripped, images: strippedImgs, queuedAt: Date.now() });
-      while (queue.length > 5) queue.shift(); // cap to avoid quota issues
+      while (queue.length > 5) queue.shift();
       localStorage.setItem(key, JSON.stringify(queue));
     } catch(qe) { console.warn('snapshot queue store failed:', qe.message); }
+    return null;
   }
 }
 
@@ -798,7 +802,7 @@ async function loadData() {
       if (!versions.length) {
         if (d.currentVersionLabel) currentVersionLabel = d.currentVersionLabel;
         if (Array.isArray(d.versionIndex) && d.versionIndex.length > 0) {
-          versions = d.versionIndex.map(v => ({ label: v.label, timestamp: v.timestamp, auto: v.auto || false, data: null }));
+          versions = d.versionIndex.map(v => ({ id: v.id || genId(), label: v.label, timestamp: v.timestamp, auto: v.auto || false, snapshotId: v.snapshotId || null }));
           editsSinceVersion = 0;
         }
       }
@@ -810,7 +814,7 @@ async function loadData() {
       const snapshots = await sbGetSnapshots(currentProjectId);
       if (snapshots.length > 0) {
         const sorted = [...snapshots].sort((a, b) => (b.created_at ? new Date(b.created_at).getTime() : 0) - (a.created_at ? new Date(a.created_at).getTime() : 0));
-        versions = sorted.map(s => ({ label: s.label, timestamp: s.created_at ? new Date(s.created_at).getTime() : 0, auto: s.auto || false, data: null }));
+        versions = sorted.map(s => ({ id: s.id, label: s.label, timestamp: s.created_at ? new Date(s.created_at).getTime() : 0, auto: s.auto || false, snapshotId: s.id }));
         if (!currentVersionLabel && sorted.length > 0) currentVersionLabel = sorted[0].label;
         editsSinceVersion = 0;
       }
@@ -974,7 +978,7 @@ async function prefetchCharBgRemovals() {
 }
 
 function _buildPayload() {
-  const versionIndex = versions.map(v => ({ label: v.label, timestamp: v.timestamp, auto: v.auto || false }));
+  const versionIndex = versions.map(v => ({ id: v.id, label: v.label, timestamp: v.timestamp, auto: v.auto || false, snapshotId: v.snapshotId || null }));
   return { characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, scriptText: lastScriptText || null, scriptName: lastScriptName || null, animatics: animatics || [], currentVersionLabel: currentVersionLabel || null, versionIndex: versionIndex, savedAt: Date.now() };
 }
 
@@ -1040,7 +1044,8 @@ function autoSave() {
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
   }
   editsSinceVersion++;
-  if (editsSinceVersion >= AUTO_VERSION_EVERY) {
+  const timeSinceVersion = Date.now() - _lastAutoVersionTime;
+  if (editsSinceVersion >= AUTO_VERSION_EVERY || (_lastAutoVersionTime > 0 && timeSinceVersion >= AUTO_VERSION_INTERVAL_MS && editsSinceVersion > 0)) {
     createVersion(true);
   } else {
     saveVersionMeta();
@@ -1056,31 +1061,31 @@ function debouncedSave() {
 }
 
 function saveVersionMeta() {
-  if (cloudOnlyMode) return; // versions fetched from Supabase snapshots in cloud-only mode
   const key = currentProjectId ? projectVersionsKey(currentProjectId) : 'character-generator-versions';
-  // If the save fails due to quota, trim oldest auto-versions one at a time until it fits
-  for (let attempt = 0; attempt < versions.length; attempt++) {
-    try {
-      localStorage.setItem(key, JSON.stringify({ versions, currentVersionLabel, editsSinceVersion }));
-      return;
-    } catch (e) {
-      // Drop the oldest auto-version; if no auto-versions left, drop the oldest overall
-      const dropIdx = versions.findIndex(v => v.auto);
-      if (dropIdx !== -1) versions.splice(dropIdx, 1);
-      else if (versions.length > 1) versions.shift();
-      else return; // can't trim further
-    }
+  // Store only the slim index — no snapshot data — so quota is never an issue.
+  const versionIndex = versions.map(v => ({ id: v.id, label: v.label, timestamp: v.timestamp, auto: v.auto || false, snapshotId: v.snapshotId || null }));
+  try {
+    localStorage.setItem(key, JSON.stringify({ versionIndex, currentVersionLabel, editsSinceVersion }));
+  } catch (e) {
+    console.warn('saveVersionMeta failed:', e.message);
   }
 }
 
 function loadVersions() {
-  if (cloudOnlyMode) return; // versions fetched from Supabase snapshots in loadData
   try {
     const key = currentProjectId ? projectVersionsKey(currentProjectId) : 'character-generator-versions';
     const saved = localStorage.getItem(key);
     if (saved) {
       const d = JSON.parse(saved);
-      versions = Array.isArray(d.versions) ? d.versions : [];
+      // Support new format (versionIndex, no data) and old format (versions with data payloads).
+      const index = d.versionIndex || d.versions;
+      versions = Array.isArray(index) ? index.map(v => ({
+        id: v.id || genId(),
+        label: v.label,
+        timestamp: v.timestamp,
+        auto: v.auto || false,
+        snapshotId: v.snapshotId || null,
+      })) : [];
       currentVersionLabel = d.currentVersionLabel ?? null;
       editsSinceVersion = d.editsSinceVersion || 0;
     }
@@ -1118,22 +1123,20 @@ function createVersion(isAuto = false) {
   }
   // newParent: when iterating, new version has same parent as current; when branching, current becomes the parent
   const newParent = (!currentVersionLabel || isLatestSibling) ? currentParent : currentVersionLabel;
-  versions.push({
-    id: genId(),
-    label,
-    parentLabel: newParent,
-    data: stripImagesForVersion({ characters, locations, shots, visualStyles, selectedStyleId, charGenRules, locationGenRules, charBoilerplate: CHAR_BOILERPLATE, animatics }),
-    timestamp: Date.now(),
-    auto: isAuto
-  });
+  // No snapshot data stored locally — Supabase is the source of truth.
+  const versionEntry = { id: genId(), label, parentLabel: newParent, timestamp: Date.now(), auto: isAuto, snapshotId: null };
+  versions.push(versionEntry);
   currentVersionLabel = label;
   editsSinceVersion = 0;
+  _lastAutoVersionTime = Date.now();
   saveVersionMeta();
   renderVersionUI();
-  // Save ALL versions (auto and named) to Supabase snapshots for cross-device access
+  // Save to Supabase and store the returned snapshot ID for stable cross-device fetching.
   if (currentProjectId) {
     const { stripped, imgs } = extractImages(_buildPayload());
-    sbSaveSnapshot(currentProjectId, label, isAuto, stripped, imgs);
+    sbSaveSnapshot(currentProjectId, label, isAuto, stripped, imgs).then(result => {
+      if (result?.id) { versionEntry.snapshotId = result.id; saveVersionMeta(); }
+    });
     if (!isAuto) {
       const btn = document.getElementById('btn-new-version');
       if (btn) { btn.classList.add('saved-flash'); setTimeout(() => btn.classList.remove('saved-flash'), 1500); }
@@ -1141,44 +1144,76 @@ function createVersion(isAuto = false) {
   }
 }
 
+// Reload the live state (data.json) from Supabase — used when returning to "Working copy"
+// after having switched to a named version.
+async function loadCurrentLive() {
+  if (!currentProjectId) return;
+  showToast('Restoring working copy…');
+  const sbRow = await sbGetData(currentProjectId);
+  if (!sbRow?.data) { showToast('Could not load working copy from cloud.', true); return; }
+  const d = mergeImages(sbRow.data, sbRow.images || {});
+  _applyVersionData(d);
+  currentVersionLabel = null;
+  editsSinceVersion = 0;
+  saveVersionMeta();
+  renderVersionUI();
+  showToast('Working copy restored.');
+}
+
 async function loadVersion(label) {
-  if (!label) return;
+  // Empty label means "return to working copy"
+  if (!label) { await loadCurrentLive(); return; }
   const v = versions.find(v => v.label === label);
   if (!v) return;
-  // Snapshot audio for the version being left (so it can be restored if the user returns to it)
-  if (currentVersionLabel) {
-    await _snapshotCurrentAudio();
+
+  // Persist current live state BEFORE switching so "Working copy" can recover it.
+  if (currentProjectId) {
+    syncFromDOM();
+    const key = projectDataKey(currentProjectId);
+    await _persistData(key);
   }
-  let d = v.data;
-  // If data isn't in memory (cross-device stub with data: null), fetch from Supabase snapshots
-  if (!d && currentProjectId) {
+
+  await _snapshotCurrentAudio();
+
+  // Fetch snapshot from Supabase — prefer stable ID, fall back to label search for old entries.
+  let d = null;
+  if (currentProjectId) {
     showToast('Loading version from cloud…');
-    const snapshots = await sbGetSnapshots(currentProjectId);
-    const snap = snapshots.find(s => s.label === label);
-    if (!snap) {
-      showToast('Version not available — save on original device first to sync it.', true);
+    let snapshotId = v.snapshotId;
+    if (!snapshotId) {
+      // Old entry without snapshotId — search by label and cache the id for next time.
+      const snapshots = await sbGetSnapshots(currentProjectId);
+      const snap = snapshots.find(s => s.label === label);
+      if (snap) { snapshotId = snap.id; v.snapshotId = snap.id; saveVersionMeta(); }
+    }
+    if (!snapshotId) {
+      showToast('Version not found in cloud — save on the original device first.', true);
       return;
     }
-    const restored = await sbRestoreSnapshot(snap.id, currentProjectId);
-    if (!restored?.data) {
-      showToast('Failed to load version from cloud.', true);
-      return;
-    }
-    v.data = restored.data;
-    d = restored.data;
+    const restored = await sbRestoreSnapshot(snapshotId, currentProjectId);
+    if (!restored?.data) { showToast('Failed to load version from cloud.', true); return; }
+    d = mergeImages(restored.data, restored.images || {});
   }
   if (!d) { showToast('Version data unavailable.', true); return; }
-  // Restore versioned state. Versions now store all fields including Supabase URLs.
-  // Only fall back to current in-memory data for base64/blob content not stored in versions.
+  _applyVersionData(d);
+  _restoreVersionAudio(label);
+  currentVersionLabel = label;
+  editsSinceVersion = 0;
+  saveVersionMeta();
+  renderVersionUI();
+  showToast(`Loaded version ${label}`);
+}
+
+// Apply a data object (from a snapshot or live data.json) to in-memory state and re-render.
+// Merges image fields from current in-memory state so transient base64/blob refs survive.
+function _applyVersionData(d) {
   const prevChars = characters; const prevLocs = locations; const prevShots = shots;
   characters = (d.characters || []).map(vc => {
     const cur = prevChars.find(c => c.id === vc.id) || {};
-    // Merge refImages: version has {id, url}; current may have richer base64/mediaType data
     const refImages = (vc.refImages || []).map(vr => {
       const cr = (cur.refImages || []).find(r => r.id === vr.id);
       return cr ? { ...cr, ...vr } : vr;
     });
-    // Merge angles: seed from current (preserves any added after this version), override with version data
     const angles = { ...(cur.angles || {}) };
     for (const [k, va] of Object.entries(vc.angles || {})) {
       const ca = cur.angles?.[k] || {};
@@ -1188,13 +1223,11 @@ async function loadVersion(label) {
   });
   locations = (d.locations || []).map(vl => {
     const cur = prevLocs.find(l => l.id === vl.id) || {};
-    // Seed from current so angles added after this version aren't lost, then overlay version data
     const mergedAngles = { ...(cur.shotAngles || {}) };
     for (const [k, va] of Object.entries(vl.shotAngles || {})) {
       const ca = cur.shotAngles?.[k] || {};
       mergedAngles[k] = { ...ca, ...va, image: va.image || ca.image || null };
     }
-    // Merge customViews: keep views from current not in version, overlay version data for shared ones
     const customViewsMap = {};
     for (const ccv of (cur.customViews || [])) customViewsMap[ccv.id] = ccv;
     const mergedCustomViews = [...(vl.customViews || []).map(vcv => {
@@ -1234,16 +1267,8 @@ async function loadVersion(label) {
   if (d.charGenRules) charGenRules = d.charGenRules;
   if (d.locationGenRules) locationGenRules = d.locationGenRules;
   if (d.charBoilerplate) CHAR_BOILERPLATE = d.charBoilerplate;
-  // Animatics are project-level, not version-level — never overwrite from a version snapshot.
-  // (Version snapshots may have empty or stale animatics arrays from before this was tracked.)
-  // Restore script for this version (may be null for versions created before this was tracked)
   lastScriptText = d.scriptText || null;
   lastScriptName = d.scriptName || null;
-  // Restore audio for this version from IDB (keyed by version label)
-  _restoreVersionAudio(label);
-  currentVersionLabel = label;
-  editsSinceVersion = 0;
-  saveVersionMeta();
   applyStyleUI();
   renderVisualStyles();
   renderCharacters();
@@ -1251,8 +1276,6 @@ async function loadVersion(label) {
   renderShots();
   renderAnimaticHistory();
   renderScriptPreview();
-  renderVersionUI();
-  showToast(`Loaded version ${label}`);
 }
 
 function timeAgo(ts) {
@@ -1270,7 +1293,7 @@ function renderVersionUI() {
   const sorted = (Array.isArray(versions) ? [...versions] : []).sort((a, b) => b.timestamp - a.timestamp);
   const selectHTML = versions.length > 0 ? `
     <select class="version-select" onchange="loadVersion(this.value)">
-      <option value="">version history…</option>
+      <option value="" ${!currentVersionLabel ? 'selected' : ''}>↩ Working copy</option>
       ${sorted.map(v => `<option value="${v.label}" ${v.label === currentVersionLabel ? 'selected' : ''}>v${v.label}${v.auto ? ' ⟳' : ''} · ${timeAgo(v.timestamp)}</option>`).join('')}
     </select>
   ` : '';
@@ -1340,7 +1363,6 @@ async function openCloudRestore() {
       <div class="restore-item-info">
         <span class="restore-item-label">${s.auto ? '⟳ Auto-save' : `📌 v${s.label}`}</span>
         <span class="restore-item-time">${new Date(s.created_at).toLocaleString()}</span>
-        <span class="restore-item-counts">${s.data?.characters?.length || 0} chars · ${s.data?.locations?.length || 0} locs · ${s.data?.shots?.length || 0} shots</span>
       </div>
       <button class="restore-item-btn" onclick="restoreCloudSnapshot('${s.id}')">Restore</button>
     </div>
