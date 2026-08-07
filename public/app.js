@@ -2190,6 +2190,7 @@ function _renderUiTestCases() {
       ['creating a named version appears in the version list', 'createVersion() label generation', 'Named version flow'],
       ['version list renders inside version-ui', 'Version list render', 'Version list regression'],
       ['switching to older version restores data from that snapshot', 'loadVersion() → versionSelect.selectOption(v1Label)', 'Version restore round-trip'],
+      ['reverting to previous version restores character name', 'loadVersion() character name revert', 'BUG: character name change persists after reverting to older version'],
       ['After N edits an auto-version appears in the version list', 'AUTO_VERSION_EVERY + createVersion(true)', 'Auto-version threshold'],
       ['Version list appears on a second device after saving', 'Cross-device sync via project_snapshots', 'Cross-device version sync'],
       ['shots — lyric field survives revert+return', 'loadVersion() current-state preservation (shots lyric)', 'BUG: shot lyric edits after last named version lost on revert+return'],
