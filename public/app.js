@@ -502,6 +502,13 @@ async function openProject(id) {
   if (overlay) overlay.style.display = 'flex';
   try {
     await loadData();
+    // If the user was viewing a specific version, re-apply its snapshot now.
+    // loadData() always loads live data.json (working-copy state); the version
+    // badge is restored from localStorage but the displayed data would be wrong
+    // without this step.
+    if (currentVersionLabel) {
+      await _reloadVersionSnapshot(currentVersionLabel);
+    }
   } finally {
     if (overlay) overlay.style.display = 'none';
   }
@@ -1160,6 +1167,26 @@ async function loadCurrentLive() {
   saveVersionMeta();
   renderVersionUI();
   showToast('Working copy restored.');
+}
+
+// Re-apply a version's snapshot silently on page load (no persist, no toast, no audio).
+// Called when the user refreshes while viewing a named version.
+async function _reloadVersionSnapshot(label) {
+  if (!label || !currentProjectId) return;
+  const v = versions.find(v => v.label === label);
+  if (!v) return;
+  let snapshotId = v.snapshotId;
+  if (!snapshotId) {
+    const snapshots = await sbGetSnapshots(currentProjectId);
+    const snap = snapshots.find(s => s.label === label);
+    if (snap) { snapshotId = snap.id; v.snapshotId = snap.id; saveVersionMeta(); }
+  }
+  if (!snapshotId) return;
+  const restored = await sbRestoreSnapshot(snapshotId, currentProjectId);
+  if (!restored?.data) return;
+  const d = mergeImages(restored.data, restored.images || {});
+  _applyVersionData(d);
+  renderVersionUI();
 }
 
 async function loadVersion(label) {
