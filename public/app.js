@@ -1039,6 +1039,14 @@ function saveData() {
   if (currentProjectId) {
     const proj = projects.find(p => p.id === currentProjectId);
     if (proj) { proj.updatedAt = Date.now(); saveProjects(); }
+    // Explicit save while viewing a named version commits the current state as the
+    // new working copy. Clear the version label so a subsequent refresh does NOT
+    // re-apply the old snapshot and overwrite these saved changes.
+    if (currentVersionLabel) {
+      currentVersionLabel = null;
+      saveVersionMeta();
+      renderVersionUI();
+    }
   }
   const btn = document.querySelector('.save-btn');
   if (btn) { btn.textContent = 'Saved!'; btn.classList.add('saved'); setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 1800); }
