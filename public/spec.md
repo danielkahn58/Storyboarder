@@ -21,10 +21,13 @@ A web-based storyboard generation tool for music videos and films. Users build a
 
 ## Versioning
 
-- Each project maintains a version history. Versions can be created manually ("Save Version") or are created automatically every N edits.
-- Switching to an older version restores **all** versioned fields for that snapshot. Switching away from a version first saves the current state back into that version's snapshot.
-- **Versioned:** all character/location/shot fields (prompts, images, angles, composeMeta, composeLayers, finalImage, videoUrl, motionVideoUrl), visual styles, generation rules, boilerplate, script text/name, audio file and transcript.
-- **Not versioned (shared across all versions):** the image galleries (all historically generated images for each shot/character/location — these accumulate and are never deleted when switching versions); the animatics list (project-level, survives version switches).
+- Each project maintains a version history. Versions can be created manually ("+ Version" button) or are created automatically every N edits.
+- The working copy is always what the user is editing. Versions are read-only snapshots stored in Supabase.
+- **History panel:** clicking "History" opens a modal listing all saved versions (loaded live from Supabase). Each version shows its label, type (auto/manual), and age. "Restore" restores that version.
+- **Restore flow:** before applying a snapshot, the current working copy is auto-saved as a new version. The snapshot is then applied and saved as the new working copy, so there is no data loss.
+- **No "viewing a version" state:** versions are never loaded into the editor as a browseable mode. Restore is an explicit, irreversible-but-recoverable action.
+- **Versioned:** all character/location/shot fields (prompts, images, angles, composeMeta, composeLayers, finalImage, videoUrl, motionVideoUrl), visual styles, generation rules, boilerplate, script text/name.
+- **Not versioned (shared across all versions):** the image galleries (all historically generated images per shot/character/location — these accumulate); the animatics list (project-level).
 - Version snapshots strip base64 and blob: data; only permanent Supabase https: URLs are stored in snapshots.
 
 ---
@@ -36,7 +39,7 @@ A web-based storyboard generation tool for music videos and films. Users build a
 - Location generation rules: same for locations.
 - Character prompt boilerplate: appended to every character image prompt.
 - Script import: upload a text/PDF script. The script text is parsed to extract characters, locations, and shots. Versioned per version.
-- **UPDATED** Audio import: upload an MP3/WAV/M4A/MP4. Audio is always transcribed via Whisper (word-level timestamps). If "Music piece" is checked, beat detection also runs (see below). Audio is versioned per version — switching versions restores the audio that was imported for that version.
+- **UPDATED** Audio import: upload an MP3/WAV/M4A/MP4. Audio is always transcribed via Whisper (word-level timestamps). If "Music piece" is checked, beat detection also runs (see below). Audio is stored per project in IndexedDB and is not version-snapshotted.
 
 ### Audio — Music Piece Mode **NEW**
 
@@ -45,7 +48,7 @@ A web-based storyboard generation tool for music videos and films. Users build a
   - **Lyrics & Word Timestamps** — one line per transcribed word: `[M:SS.d] word`
   - **Downbeats with Lyrics** — one line per bar: `[M:SS.d] word1 word2 …` (all words that fall between that downbeat and the next)
 - Shot timestamps are assigned to detected downbeats (one shot per bar): shots are distributed evenly across downbeats; lyric shots snap to the downbeat nearest their Whisper transcript match.
-- Downbeat timestamps and music-piece mode are persisted per version in IndexedDB alongside the audio file and transcript.
+- Downbeat timestamps and music-piece mode are persisted per project in IndexedDB alongside the audio file and transcript.
 
 ---
 
@@ -103,8 +106,8 @@ A web-based storyboard generation tool for music videos and films. Users build a
 ## Cloud Sync
 
 - Project data (characters, locations, shots, styles, rules) is saved to Supabase Storage as JSON files (`data.json`, `images.json`) on every auto-save.
-- Script text is stored locally only (IndexedDB) — it is too large for efficient cloud storage and is versioned in localStorage version snapshots.
-- Audio files are stored in IndexedDB, keyed per-project and per-version.
+- Script text is stored locally only (IndexedDB) — it is too large for efficient cloud storage.
+- Audio files are stored in IndexedDB, keyed per-project.
 - Generated images and videos are stored as permanent Supabase Storage URLs and referenced in the project data.
 - If cloud sync fails, data is retained locally. The error toast shows the specific failure reason.
 

@@ -63,14 +63,31 @@
 
   /* ── versioning ── */
   .version-bar { display: flex; align-items: center; gap: 8px; }
-  .version-select { background: #111; border: 1px solid #222; border-radius: 5px; color: #888; font-size: 12px; padding: 5px 8px; cursor: pointer; max-width: 160px; }
-  .version-select:focus { outline: none; border-color: #333; }
   .btn-new-version { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 5px; color: #888; font-size: 12px; padding: 6px 12px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
   .btn-new-version:hover { background: #222; color: #ccc; border-color: #444; }
   .btn-new-version.saved-flash { background: #162d1c; color: #4ade80; border-color: #2d5a3a; }
+  .btn-history { background: none; border: 1px solid #2a2a2a; border-radius: 5px; color: #666; font-size: 12px; padding: 6px 10px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+  .btn-history:hover { border-color: #555; color: #aaa; }
   .btn-cloud-restore { background: none; border: 1px solid #2a2a2a; border-radius: 5px; color: #666; font-size: 12px; padding: 6px 10px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
   .btn-cloud-restore:hover { border-color: #555; color: #aaa; }
   #cloud-restore-modal { display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.7); backdrop-filter:blur(2px); align-items:center; justify-content:center; }
+  /* ── version history modal ── */
+  #version-history-modal { display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.7); backdrop-filter:blur(2px); align-items:center; justify-content:center; }
+  .version-history-panel { background:#111; border:1px solid #222; border-radius:10px; width:360px; max-width:90vw; max-height:70vh; display:flex; flex-direction:column; overflow:hidden; }
+  .version-history-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid #1e1e1e; }
+  .version-history-header h3 { margin:0; color:#ccc; font-size:14px; font-weight:600; }
+  .version-history-header button { background:none; border:none; color:#555; font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px; }
+  .version-history-header button:hover { color:#aaa; }
+  #version-history-list { overflow-y:auto; padding:8px; flex:1; }
+  .version-history-item { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:6px; }
+  .version-history-item:hover { background:#1a1a1a; }
+  .version-history-info { display:flex; flex-direction:column; gap:2px; }
+  .version-history-label { font-size:13px; color:#bbb; font-weight:500; }
+  .version-history-auto { font-size:10px; color:#555; font-weight:400; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:3px; padding:1px 5px; margin-left:4px; vertical-align:middle; }
+  .version-history-time { font-size:11px; color:#444; }
+  .version-history-empty { color:#444; font-size:13px; text-align:center; padding:32px 16px; line-height:1.6; }
+  .btn-restore-version { background:#1a1a1a; border:1px solid #2a2a2a; border-radius:5px; color:#888; font-size:11px; padding:5px 10px; cursor:pointer; white-space:nowrap; transition:all 0.15s; flex-shrink:0; }
+  .btn-restore-version:hover { background:#162d1c; color:#4ade80; border-color:#2d5a3a; }
   .kb-tab-btn { background:none; border:none; border-bottom:2px solid transparent; color:#555; font-size:12px; font-weight:500; padding:6px 14px; cursor:pointer; border-radius:6px 6px 0 0; transition:color 0.15s; position:relative; }
   .kb-tab-btn:hover { color:#aaa; }
   .kb-tab-btn.active { color:#818cf8; border-bottom-color:#818cf8; }
@@ -1055,6 +1072,15 @@
     <div style="flex:1;min-height:0;overflow-y:scroll;padding:16px">
       <div id="image-library-grid" style="display:grid;grid-template-columns:repeat(auto-fill,160px);gap:10px"></div>
     </div>
+  </div>
+</div>
+<div id="version-history-modal" onclick="if(event.target===this)closeVersionHistory()">
+  <div class="version-history-panel">
+    <div class="version-history-header">
+      <h3>Version History</h3>
+      <button onclick="closeVersionHistory()">✕</button>
+    </div>
+    <div id="version-history-list"></div>
   </div>
 </div>
 <div id="cloud-restore-modal">

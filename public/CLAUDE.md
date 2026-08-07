@@ -26,10 +26,13 @@ Three layers per project, per device:
 **Cloud-only mode**: toggle in Configuration tab (`sg-cloud-only` in localStorage). When on, skips all local reads/writes; failures throw errors instead of falling back silently.
 
 ## Version system
-- Auto-versions created every N edits; named versions on user request
+- Auto-versions created every N edits; named versions on user request via "+ Version" button
 - Both saved to `project_snapshots` Supabase table (auto and named)
-- Cross-device: on load with no local versions, `sbGetSnapshots()` is called and version list is rebuilt as stubs (`data: null`); switching versions lazy-fetches snapshot data from Supabase
-- `loadVersion()` handles null data by fetching from Supabase snapshots
+- Working copy is always what the user edits — there is no "viewing a version" state
+- History modal (`openVersionHistory()`) loads version list live from Supabase via `sbGetSnapshots()`
+- `restoreVersion(snapshotId, label)` auto-saves current state first, then applies snapshot as new working copy
+- Cross-device: on load with no local versions, `sbGetSnapshots()` is called and version list is rebuilt as stubs
+- `currentVersionLabel` was removed — no longer persisted, no more `_reloadVersionSnapshot` on page open
 
 ## Key conventions
 - `syncFromDOM()` must be called before reading `characters`, `locations`, `shots` — the DOM is the source of truth for text fields while editing

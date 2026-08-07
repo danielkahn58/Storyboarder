@@ -125,7 +125,7 @@ const text = typeof content === 'string' ? content : content[0]?.text;
 | Animatic generation (`/api/generate-animatic`) | Requires ffmpeg installed and real media files |
 | Auth flow (`/auth/google`, `/auth/google/callback`) | OAuth round-trips require live Google credentials |
 | Shot sequence rendering | DOM-based — no extractable pure function |
-| Version create/load logic | Tightly coupled to DOM and IndexedDB |
+| Version History panel open/restore flow | Requires Supabase sbGetSnapshots/sbRestoreSnapshot; covered by manual e2e against real Supabase |
 
 ---
 
