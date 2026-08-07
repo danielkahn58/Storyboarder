@@ -749,14 +749,17 @@ async function loadData() {
         if (sbRow?.data && (sbCharCount > 0 || localCharCount === 0)) {
           const sbSavedAt = sbRow.data.savedAt || 0;
           const localSavedAt = (() => { try { return JSON.parse(localSaved)?.savedAt || 0; } catch { return 0; } })();
+          console.log('[loadData] local savedAt:', localSavedAt, 'sb savedAt:', sbSavedAt, 'localCharCount:', localCharCount, 'sbCharCount:', sbCharCount);
           // Use local if it's strictly newer than Supabase (pending cloud sync not yet uploaded)
           if (localSavedAt > sbSavedAt && localCharCount > 0) {
+            console.log('[loadData] → using LOCAL data');
             saved = localSaved;
             imgs = localImgs;
             // Re-push to Supabase now so other devices get the latest data
             const { stripped: s2, imgs: i2 } = _buildPayloadFromSaved(JSON.parse(localSaved), localImgs);
             sbUpsertData(currentProjectId, s2, i2);
           } else {
+            console.log('[loadData] → using SUPABASE data');
             saved = JSON.stringify(sbRow.data);
             imgs = sbRow.images || {};
             try { localStorage.setItem(key, saved); } catch {}
