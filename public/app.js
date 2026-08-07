@@ -1178,7 +1178,7 @@ async function _reloadVersionSnapshot(label) {
   let snapshotId = v.snapshotId;
   if (!snapshotId) {
     const snapshots = await sbGetSnapshots(currentProjectId);
-    const snap = snapshots.find(s => s.label === label);
+    const snap = snapshots.find(s => s.label === label && !s.auto) || snapshots.find(s => s.label === label);
     if (snap) { snapshotId = snap.id; v.snapshotId = snap.id; saveVersionMeta(); }
   }
   if (!snapshotId) return;
@@ -1211,19 +1211,21 @@ async function loadVersion(label) {
     let snapshotId = v.snapshotId;
     if (!snapshotId) {
       // Old entry without snapshotId — search by label and cache the id for next time.
+      // Prefer non-auto snapshots; server returns newest-first so first match is most recent.
       const snapshots = await sbGetSnapshots(currentProjectId);
-      const snap = snapshots.find(s => s.label === label);
+      const snap = snapshots.find(s => s.label === label && !s.auto) || snapshots.find(s => s.label === label);
       if (snap) { snapshotId = snap.id; v.snapshotId = snap.id; saveVersionMeta(); }
     }
     if (!snapshotId) {
       showToast('Version not found in cloud — save on the original device first.', true);
+      renderVersionUI();
       return;
     }
     const restored = await sbRestoreSnapshot(snapshotId, currentProjectId);
-    if (!restored?.data) { showToast('Failed to load version from cloud.', true); return; }
+    if (!restored?.data) { showToast('Failed to load version from cloud.', true); renderVersionUI(); return; }
     d = mergeImages(restored.data, restored.images || {});
   }
-  if (!d) { showToast('Version data unavailable.', true); return; }
+  if (!d) { showToast('Version data unavailable.', true); renderVersionUI(); return; }
   _applyVersionData(d);
   _restoreVersionAudio(label);
   currentVersionLabel = label;
